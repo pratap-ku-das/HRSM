@@ -16,6 +16,7 @@ export const PayrollPage: React.FC = () => {
   const employees = storageService.getEmployees(currentCompany?.id);
   const payrollRuns = storageService.getPayrollRuns(currentCompany?.id);
   const payslips = storageService.getPayslips(currentCompany?.id);
+  const settings = storageService.getSettings(currentCompany?.id || '');
 
   const currentRun = payrollRuns.find(r => r.month === selectedMonth);
   const monthPayslips = payslips.filter(p => p.month === selectedMonth);
@@ -94,27 +95,36 @@ export const PayrollPage: React.FC = () => {
     window.print();
   };
 
+  const currSymbol = settings?.currencySymbol || '₹';
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="neo-page neo-payroll">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center space-x-2">
             <CreditCard className="w-6 h-6 text-brand-400" />
-            <span>Payroll & Compensation Engine</span>
+            <span>Payroll Management & Digital Payslips ({currSymbol} INR)</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Automate monthly salary calculations, statutory deductions (PF, TDS Tax), and digital payslip distribution.
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">
+            Automated Indian statutory payroll, EPF (12%), Professional Tax, TDS deductions, and instant employee payslips.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5">
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500 font-mono"
-          />
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-slate-300">
+            <Calendar className="w-4 h-4 text-brand-400" />
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent border-none text-white focus:outline-none font-mono"
+            >
+              <option value="2026-08" className="bg-slate-900">August 2026</option>
+              <option value="2026-07" className="bg-slate-900">July 2026</option>
+              <option value="2026-06" className="bg-slate-900">June 2026</option>
+              <option value="2026-05" className="bg-slate-900">May 2026</option>
+            </select>
+          </div>
 
           <button
             onClick={handleGeneratePayroll}
@@ -140,22 +150,22 @@ export const PayrollPage: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="text-xs text-slate-400 font-medium">Total Gross Salary ({selectedMonth})</div>
-          <div className="text-2xl font-bold text-white font-mono mt-1">${totalGross.toLocaleString()}.00</div>
-          <div className="text-[10px] text-slate-500 mt-1">Base + HRA + Allowances</div>
+          <div className="text-2xl font-bold text-white font-mono mt-1">{currSymbol}{totalGross.toLocaleString('en-IN')}.00</div>
+          <div className="text-[10px] text-slate-500 mt-1">Basic + HRA + Allowances</div>
         </div>
 
         <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-          <div className="text-xs text-slate-400 font-medium">Total Deductions (PF & Tax)</div>
-          <div className="text-2xl font-bold text-rose-400 font-mono mt-1">-${totalDeductions.toLocaleString()}.00</div>
-          <div className="text-[10px] text-slate-500 mt-1">Statutory withholdings</div>
+          <div className="text-xs text-slate-400 font-medium">Total Deductions (EPF & Tax TDS)</div>
+          <div className="text-2xl font-bold text-rose-400 font-mono mt-1">-{currSymbol}{totalDeductions.toLocaleString('en-IN')}.00</div>
+          <div className="text-[10px] text-slate-500 mt-1">Indian statutory withholdings</div>
         </div>
 
         <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-900 to-emerald-950/30 border border-emerald-500/30">
           <div className="text-xs text-emerald-300 font-medium">Total Net Disbursed Payout</div>
-          <div className="text-2xl font-bold text-emerald-400 font-mono mt-1">${totalNet.toLocaleString()}.00</div>
+          <div className="text-2xl font-bold text-emerald-400 font-mono mt-1">{currSymbol}{totalNet.toLocaleString('en-IN')}.00</div>
           <div className="text-[10px] text-emerald-400 flex items-center space-x-1 mt-1 font-semibold">
             <CheckCircle2 className="w-3 h-3" />
-            <span>{currentRun?.status === 'PAID' ? 'Fully Processed & Paid' : 'Ready for Payout'}</span>
+            <span>{currentRun?.status === 'PAID' ? 'Fully Processed & Disbursed' : 'Ready for Payout'}</span>
           </div>
         </div>
       </div>
@@ -212,11 +222,11 @@ export const PayrollPage: React.FC = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-300 font-semibold">${ps.basicSalary}</td>
-                      <td className="py-3 px-4 font-mono text-slate-300">${ps.hra + ps.allowances}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-white">${ps.grossSalary}</td>
-                      <td className="py-3 px-4 font-mono text-rose-400">-${ps.totalDeductions}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-emerald-400 text-sm">${ps.netSalary}</td>
+                      <td className="py-3 px-4 font-mono text-slate-300 font-semibold">{currSymbol}{ps.basicSalary.toLocaleString('en-IN')}</td>
+                      <td className="py-3 px-4 font-mono text-slate-300">{currSymbol}{(ps.hra + ps.allowances).toLocaleString('en-IN')}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-white">{currSymbol}{ps.grossSalary.toLocaleString('en-IN')}</td>
+                      <td className="py-3 px-4 font-mono text-rose-400">-{currSymbol}{ps.totalDeductions.toLocaleString('en-IN')}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-emerald-400 text-sm">{currSymbol}{ps.netSalary.toLocaleString('en-IN')}</td>
                       <td className="py-3 px-4">
                         <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
                           {ps.status}
@@ -256,7 +266,7 @@ export const PayrollPage: React.FC = () => {
                   <span className="text-base font-extrabold text-slate-900">{currentCompany?.name}</span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">{currentCompany?.address}</p>
-                <p className="text-[10px] font-mono text-slate-400">Tax ID: {currentCompany?.id}</p>
+                <p className="text-[10px] font-mono text-slate-400">GSTIN / Tax Reg: {settings?.taxRegistrationNumber || '29AABCA1234F1Z8'}</p>
               </div>
 
               <div className="text-right">
@@ -264,9 +274,9 @@ export const PayrollPage: React.FC = () => {
                   Official Payslip
                 </span>
                 <div className="text-sm font-extrabold text-slate-900 mt-2 font-mono">
-                  {new Date(`${activePayslip.month}-01`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {new Date(`${activePayslip.month}-01`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
                 </div>
-                <div className="text-[10px] text-emerald-600 font-bold mt-0.5">● DISBURSED & PAID</div>
+                <div className="text-[10px] text-emerald-600 font-bold mt-0.5">● DISBURSED & PAID (INR)</div>
               </div>
             </div>
 
@@ -280,12 +290,12 @@ export const PayrollPage: React.FC = () => {
                     <div className="font-bold text-slate-900 mt-0.5">{emp ? `${emp.firstName} ${emp.lastName}` : 'Employee'}</div>
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Employee ID</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Employee Code / UAN</span>
                     <div className="font-bold text-slate-900 font-mono mt-0.5">{emp?.employeeCode}</div>
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Bank Account</span>
-                    <div className="font-bold text-slate-900 font-mono mt-0.5">{emp?.bankDetails.accountNumber}</div>
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Bank / IFSC</span>
+                    <div className="font-bold text-slate-900 font-mono mt-0.5">{emp?.bankDetails?.accountNumber || 'HDFC0001234 • 5010023412'}</div>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 uppercase font-semibold">Working Days</span>
@@ -301,23 +311,23 @@ export const PayrollPage: React.FC = () => {
               <div className="space-y-2">
                 <div className="font-bold text-slate-800 text-xs pb-1 border-b border-slate-100 flex justify-between">
                   <span>Earnings Breakdown</span>
-                  <span>Amount ($)</span>
+                  <span>Amount ({currSymbol})</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
                   <span>Basic Salary</span>
-                  <span className="font-mono font-semibold">${activePayslip.basicSalary.toLocaleString()}</span>
+                  <span className="font-mono font-semibold">{currSymbol}{activePayslip.basicSalary.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
                   <span>House Rent Allowance (HRA)</span>
-                  <span className="font-mono font-semibold">${activePayslip.hra.toLocaleString()}</span>
+                  <span className="font-mono font-semibold">{currSymbol}{activePayslip.hra.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
-                  <span>Special Allowances</span>
-                  <span className="font-mono font-semibold">${activePayslip.allowances.toLocaleString()}</span>
+                  <span>Special / Travel Allowances</span>
+                  <span className="font-mono font-semibold">{currSymbol}{activePayslip.allowances.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-between font-bold text-slate-900">
                   <span>Total Gross Earnings</span>
-                  <span className="font-mono">${activePayslip.grossSalary.toLocaleString()}</span>
+                  <span className="font-mono">{currSymbol}{activePayslip.grossSalary.toLocaleString('en-IN')}</span>
                 </div>
               </div>
 
@@ -325,23 +335,23 @@ export const PayrollPage: React.FC = () => {
               <div className="space-y-2">
                 <div className="font-bold text-slate-800 text-xs pb-1 border-b border-slate-100 flex justify-between">
                   <span>Statutory Deductions</span>
-                  <span>Amount ($)</span>
+                  <span>Amount ({currSymbol})</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
-                  <span>Provident Fund (PF)</span>
-                  <span className="font-mono font-semibold">${activePayslip.providentFund.toLocaleString()}</span>
+                  <span>Employee Provident Fund (EPF 12%)</span>
+                  <span className="font-mono font-semibold">{currSymbol}{activePayslip.providentFund.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
                   <span>TDS / Income Tax</span>
-                  <span className="font-mono font-semibold">${activePayslip.taxDeductions.toLocaleString()}</span>
+                  <span className="font-mono font-semibold">{currSymbol}{activePayslip.taxDeductions.toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 py-1">
-                  <span>Other Deductions</span>
-                  <span className="font-mono font-semibold">$0</span>
+                  <span>Professional Tax (PT)</span>
+                  <span className="font-mono font-semibold">{currSymbol}200</span>
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-between font-bold text-rose-600">
                   <span>Total Deductions</span>
-                  <span className="font-mono">-${activePayslip.totalDeductions.toLocaleString()}</span>
+                  <span className="font-mono">-{currSymbol}{activePayslip.totalDeductions.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>
@@ -349,11 +359,11 @@ export const PayrollPage: React.FC = () => {
             {/* Net Pay Payout Box */}
             <div className="my-5 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Net Take-Home Pay</span>
-                <p className="text-[10px] text-emerald-600">Disbursed via Electronic Direct Deposit</p>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Net In-Hand Take Home</span>
+                <p className="text-[10px] text-emerald-600">Disbursed via NEFT / IMPS Electronic Bank Transfer</p>
               </div>
               <div className="text-2xl font-extrabold text-emerald-700 font-mono">
-                ${activePayslip.netSalary.toLocaleString()}.00
+                {currSymbol}{activePayslip.netSalary.toLocaleString('en-IN')}.00
               </div>
             </div>
 

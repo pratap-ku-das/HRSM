@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { RoleSwitcherModal } from './components/layout/RoleSwitcherModal';
+import { CommandPalette } from './components/layout/CommandPalette';
 
 // Public Pages
 import { LandingPage } from './pages/public/LandingPage';
@@ -26,13 +28,27 @@ import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 
 const MainApp: React.FC = () => {
-  const { isAuthenticated, currentUser } = useAuth();
+  const { isAuthenticated } = useAuth();
   
   // Page mode: 'public_landing' | 'public_login' | 'public_register' | 'authenticated'
   const [pageMode, setPageMode] = useState<'public_landing' | 'public_login' | 'public_register' | 'authenticated'>('authenticated');
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+
+  // Global keyboard listener for Ctrl+K or Cmd+K
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // If user is not authenticated and in app mode, render landing page
   if (!isAuthenticated && pageMode === 'authenticated') {
@@ -115,30 +131,44 @@ const MainApp: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="app-shell h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-brand-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
         onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
         onNavigateToPublic={() => setPageMode('public_landing')}
         activeView={activeView}
         setActiveView={setActiveView}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
       />
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar Navigation */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Sidebar Navigation (with Mobile Drawer & Collapse) */}
         <Sidebar
           activeView={activeView}
           setActiveView={setActiveView}
           isCollapsed={isSidebarCollapsed}
           setIsCollapsed={setIsSidebarCollapsed}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
         {/* Dynamic Page Content */}
-        <main className="flex-1 overflow-y-auto bg-slate-950/80 relative">
-          {renderActiveView()}
+        <main className="app-workspace flex-1 overflow-y-auto relative">
+          <div className="app-page-frame">
+            {renderActiveView()}
+          </div>
         </main>
       </div>
+
+      {/* Universal Command Palette (Ctrl+K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        setActiveView={setActiveView}
+        onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+      />
 
       {/* Instant Demo Role Switcher Modal */}
       <RoleSwitcherModal
@@ -152,7 +182,9 @@ const MainApp: React.FC = () => {
 export function App() {
   return (
     <AuthProvider>
-      <MainApp />
+      <ToastProvider>
+        <MainApp />
+      </ToastProvider>
     </AuthProvider>
   );
 }

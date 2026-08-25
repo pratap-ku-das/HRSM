@@ -1,30 +1,152 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
   Building2, ChevronDown, Bell, Search, Shield, User as UserIcon, 
-  LogOut, Sparkles, Check, Globe
+  LogOut, Sparkles, Globe, Clock, CheckCircle2, AlertCircle, 
+  Moon, Sun, Laptop, ArrowRight, X, Megaphone, CalendarCheck, Menu
 } from 'lucide-react';
 import { storageService } from '../../services/storageService';
+import { useToast } from '../../context/ToastContext';
 
 interface NavbarProps {
   onOpenRoleSwitcher: () => void;
   onNavigateToPublic: () => void;
   activeView: string;
   setActiveView: (view: string) => void;
+  onOpenCommandPalette?: () => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ 
   onOpenRoleSwitcher, 
   onNavigateToPublic,
-  setActiveView 
+  setActiveView,
+  onOpenCommandPalette,
+  onToggleMobileSidebar,
 }) => {
-  const { currentUser, currentCompany, companies, switchCompany, logout } = useAuth();
-  const [showCompanyMenu, setShowCompanyMenu] = useState(false);
+  const { currentUser, currentCompany, logout } = useAuth();
+  const toast = useToast();
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [notificationTab, setNotificationTab] = useState<'all' | 'approvals' | 'broadcasts'>('all');
 
-  const pendingLeaves = storageService.getLeaveRequests(currentCompany?.id).filter(r => r.status === 'PENDING').length;
-  const announcements = storageService.getAnnouncements(currentCompany?.id).slice(0, 3);
+  // Clock in/out tracking state
+  const [isClockedIn, setIsClockedIn] = useState<boolean>(false);
+  const [clockInTime, setClockInTime] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+
+  const employees = storageService.getEmployees(currentCompany?.id);
+  const myEmployee = employees.find(e => e.email === currentUser?.email) || employees[0];
+  const pendingLeaves = storageService.getLeaveRequests(currentCompany?.id).filter(r => r.status === 'PENDING');
+  const announcements = storageService.getAnnouncements(currentCompany?.id);
+  const leaveTypes = storageService.getLeaveTypes(currentCompany?.id);
+
+  // Check today's attendance status
+  useEffect(() => {
+    if (!myEmployee) return;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const records = storageService.getAttendanceRecords(currentCompany?.id);
+    const todayRecord = records.find(r => r.employeeId === myEmployee.id && r.date === todayStr);
+
+    if (todayRecord && todayRecord.clockInTime && !todayRecord.clockOutTime) {
+      setIsClockedIn(true);
+      setClockInTime(todayRecord.clockInTime);
+    } else {
+      setIsClockedIn(false);
+      setClockInTime(null);
+    }
+  }, [currentCompany?.id, myEmployee]);
+
+  // Live Timer for clocked in duration
+  useEffect(() => {
+    let interval: any;
+    if (isClockedIn) {
+      interval = setInterval(() => {
+        setElapsedSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(interval);
+  }, [isClockedIn]);
+
+  const formatElapsed = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleToggleClock = () => {
+    if (!myEmployee) {
+      toast.error('No employee profile found for this user account');
+      return;
+    }
+    const todayStr = new Date().toISOString().split('T')[0];
+    const records = storageService.getAttendanceRecords(currentCompany?.id);
+    const existing = records.find(r => r.employeeId === myEmployee.id && r.date === todayStr);
+    const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const nowIso = new Date().toISOString();
+
+    if (!isClockedIn) {
+      // Clock In
+      const attendanceTimestamp = new Date().toISOString();
+      storageService.saveAttendanceRecord({
+        id: existing?.id || 'att_' + Math.random().toString(36).substring(2, 9),
+        companyId: currentCompany?.id || '',
+        employeeId: myEmployee.id,
+        date: todayStr,
+        clockInTime: nowTime,
+        status: 'PRESENT',
+        faceAuthVerified: true,
+        source: 'MOBILE_FACE',
+        deviceId: 'DEV-SIMULATED-BROWSER-V2',
+        createdAt: existing?.createdAt || attendanceTimestamp,
+        updatedAt: attendanceTimestamp,
+      });
+
+      storageService.logAudit({
+        companyId: currentCompany?.id || '',
+        userId: currentUser?.id || '',
+        userName: currentUser?.fullName || 'Employee',
+        userRole: currentUser?.role || 'EMPLOYEE',
+        action: 'ATTENDANCE_CLOCK_IN',
+        category: 'ATTENDANCE',
+        details: `Clocked In at ${nowTime} with simulated face-auth.`,
+        timestamp: nowIso,
+        ipAddress: '127.0.0.1 (Local)',
+      });
+
+      setIsClockedIn(true);
+      setClockInTime(nowTime);
+      toast.success(`Clocked In successfully at ${nowTime}! (Simulated Face-Auth Verified)`);
+    } else {
+      // Clock Out
+      if (existing) {
+        storageService.saveAttendanceRecord({
+          ...existing,
+          clockOutTime: nowTime,
+        });
+      }
+
+      storageService.logAudit({
+        companyId: currentCompany?.id || '',
+        userId: currentUser?.id || '',
+        userName: currentUser?.fullName || 'Employee',
+        userRole: currentUser?.role || 'EMPLOYEE',
+        action: 'ATTENDANCE_CLOCK_OUT',
+        category: 'ATTENDANCE',
+        details: `Clocked Out at ${nowTime}.`,
+        timestamp: nowIso,
+        ipAddress: '127.0.0.1 (Local)',
+      });
+
+      setIsClockedIn(false);
+      setClockInTime(null);
+      toast.info(`Clocked Out successfully at ${nowTime}. Total active session recorded.`);
+    }
+  };
 
   const getRoleBadgeColor = (role?: string) => {
     switch (role) {
@@ -54,231 +176,239 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="h-16 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-30 px-4 md:px-6 flex items-center justify-between">
-      {/* Left: Company Workspace Selector */}
-      <div className="flex items-center space-x-3">
-        <div className="relative">
+    <header className="app-navbar h-16 border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-2xl sticky top-0 z-30 px-3 sm:px-5 md:px-6 flex items-center justify-between">
+      {/* Left: Mobile Drawer Trigger + Product Brand */}
+      <div className="flex items-center space-x-2 sm:space-x-3">
+        {onToggleMobileSidebar && (
           <button
-            onClick={() => setShowCompanyMenu(!showCompanyMenu)}
-            className="flex items-center space-x-3 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition-all text-left group"
+            onClick={onToggleMobileSidebar}
+            className="md:hidden p-2 rounded-xl text-slate-400 hover:text-white bg-slate-800/80 border border-slate-700/60"
+            aria-label="Toggle navigation drawer"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-indigo-600 flex items-center justify-center text-white shadow-sm font-bold text-sm">
-              {currentCompany?.name.charAt(0) || 'H'}
-            </div>
-            <div className="hidden sm:block">
-              <div className="text-xs font-semibold text-slate-200 group-hover:text-white flex items-center space-x-1.5">
-                <span>{currentCompany?.name || 'Workspace'}</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-brand-500/20 text-brand-300 border border-brand-500/30">
-                  {currentCompany?.plan || 'PRO'}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-400 font-mono">
-                {currentCompany?.slug || 'workspace'}.hrms.io
-              </div>
-            </div>
-            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showCompanyMenu ? 'rotate-180' : ''}`} />
+            <Menu className="w-5 h-5 text-brand-400" />
           </button>
+        )}
 
-          {/* Company Switcher Dropdown */}
-          {showCompanyMenu && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setShowCompanyMenu(false)} />
-              <div className="absolute left-0 mt-2 w-64 rounded-xl glass-dropdown z-50 p-2 py-2 border border-slate-700/80 shadow-2xl animate-fade-in">
-                <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                  Switch Workspace
-                </div>
-                {companies.map((comp) => (
-                  <button
-                    key={comp.id}
-                    onClick={() => {
-                      switchCompany(comp.id);
-                      setShowCompanyMenu(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition-all ${
-                      comp.id === currentCompany?.id
-                        ? 'bg-brand-500/20 text-brand-200 font-medium'
-                        : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5 truncate">
-                      <div className="w-6 h-6 rounded bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">
-                        {comp.name.charAt(0)}
-                      </div>
-                      <span className="truncate">{comp.name}</span>
-                    </div>
-                    {comp.id === currentCompany?.id && <Check className="w-3.5 h-3.5 text-brand-400 shrink-0" />}
-                  </button>
-                ))}
-                <div className="border-t border-slate-800 my-1 pt-1">
-                  <button
-                    onClick={() => {
-                      setShowCompanyMenu(false);
-                      onNavigateToPublic();
-                    }}
-                    className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-slate-400 hover:text-brand-300 hover:bg-slate-800/50 rounded-lg transition-colors"
-                  >
-                    <Building2 className="w-3.5 h-3.5" />
-                    <span>Register New Company</span>
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Global Public Website Link */}
         <button
-          onClick={onNavigateToPublic}
-          className="hidden md:flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-all border border-transparent hover:border-slate-700"
-          title="Visit Public Website & Marketing Landing Page"
+          onClick={() => setActiveView('dashboard')}
+          className="hidden lg:flex items-center gap-2.5 pr-4 mr-1 border-r border-slate-200"
+          aria-label="Go to dashboard"
         >
-          <Globe className="w-3.5 h-3.5" />
-          <span>Public Site</span>
+          <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 text-white grid place-items-center shadow-lg shadow-brand-500/20">
+            <Building2 className="w-4 h-4" />
+          </span>
+          <span className="text-left leading-tight">
+            <strong className="block text-sm font-extrabold text-slate-900 tracking-tight">OrbitHR</strong>
+            <small className="block text-[9px] font-bold uppercase tracking-widest text-slate-400">People OS</small>
+          </span>
+        </button>
+
+      </div>
+
+      {/* Center: Global Command Search Trigger (Responsive) */}
+      <div className="flex-1 max-w-md mx-2 sm:mx-4 hidden md:block">
+        <button
+          onClick={onOpenCommandPalette}
+          className="w-full flex items-center justify-between px-3.5 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-400 hover:text-slate-200 transition-all text-xs group shadow-inner"
+        >
+          <div className="flex items-center space-x-2">
+            <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand-400 transition-colors" />
+            <span className="font-medium text-[11px]">Omnisearch commands or staff...</span>
+          </div>
+          <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-slate-900 text-slate-400 border border-slate-700 rounded-md">
+            Ctrl+K
+          </kbd>
         </button>
       </div>
 
-      {/* Center Search Input */}
-      <div className="hidden lg:flex items-center flex-1 max-w-md mx-6">
-        <div className="relative w-full">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Quick search employees, departments, policies..."
-            className="w-full bg-slate-800/60 border border-slate-700/60 focus:border-brand-500 rounded-xl pl-9 pr-4 py-1.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-all"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                setActiveView('employees');
-              }
-            }}
-          />
-          <kbd className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700">
-            /
-          </kbd>
-        </div>
-      </div>
+      {/* Right Action Icons & User Profile */}
+      <div className="flex items-center space-x-1.5 sm:space-x-2.5">
+        {/* Mobile Search Icon */}
+        <button
+          onClick={onOpenCommandPalette}
+          className="md:hidden p-2 rounded-xl text-slate-400 hover:text-white bg-slate-800/80 border border-slate-700/60"
+          title="Search"
+        >
+          <Search className="w-4 h-4" />
+        </button>
 
-      {/* Right Controls */}
-      <div className="flex items-center space-x-3">
-        {/* Quick Demo Role Switcher CTA */}
+        {/* Live Attendance Clock-In Widget */}
+        <div className="flex items-center">
+          <button
+            onClick={handleToggleClock}
+            className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all shadow-sm ${
+              isClockedIn
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+            title={isClockedIn ? 'Click to Clock Out' : 'Click to Clock In'}
+          >
+            <span className={`w-2 h-2 rounded-full shrink-0 ${isClockedIn ? 'bg-emerald-400 pulse-dot' : 'bg-slate-500'}`} />
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span className="font-mono text-[11px] hidden xs:inline">
+              {isClockedIn ? formatElapsed(elapsedSeconds) : 'Clock In'}
+            </span>
+          </button>
+        </div>
+
+        {/* Demo Persona Switcher Tag */}
         <button
           onClick={onOpenRoleSwitcher}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-brand-500/20 to-purple-500/20 hover:from-brand-500/30 hover:to-purple-500/30 border border-brand-500/30 text-xs font-medium text-brand-200 shadow-sm transition-all animate-pulse-subtle"
-          title="Switch between Admin, HR Manager, Lead, and Employee roles"
+          className={`hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium border transition-all hover:scale-105 ${getRoleBadgeColor(currentUser?.role)}`}
+          title="Switch Demo Persona"
         >
-          <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-          <span className="hidden sm:inline">Role Switcher</span>
+          <Sparkles className="w-3 h-3" />
+          <span>{formatRoleName(currentUser?.role)}</span>
         </button>
 
-        {/* Notifications Tray */}
+        {/* Notifications Drawer Toggle */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all border border-slate-700/40"
+            className="relative p-2 rounded-xl text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-all"
+            title="Notifications & Approvals"
           >
             <Bell className="w-4 h-4" />
-            {pendingLeaves > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            )}
-            {pendingLeaves > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400" />
+            {pendingLeaves.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center border-2 border-slate-900">
+                {pendingLeaves.length}
+              </span>
             )}
           </button>
 
+          {/* Notifications Flyout */}
           {showNotifications && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
-              <div className="absolute right-0 mt-2 w-80 rounded-2xl glass-dropdown z-50 p-4 border border-slate-700/80 shadow-2xl animate-fade-in">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Notifications</h4>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 font-semibold">
-                    {pendingLeaves} Action Required
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl glass-dropdown z-50 p-4 border border-slate-700/80 shadow-2xl animate-slide-down">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center space-x-2">
+                    <Bell className="w-4 h-4 text-brand-400" />
+                    <span className="text-xs font-bold text-white">Notifications & Alerts</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300">
+                    {pendingLeaves.length} Action Items
                   </span>
                 </div>
 
-                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
-                  {pendingLeaves > 0 && (
-                    <div 
-                      onClick={() => {
-                        setActiveView('leaves');
-                        setShowNotifications(false);
-                      }}
-                      className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 cursor-pointer transition-all"
-                    >
-                      <div className="text-xs font-semibold text-amber-300">Pending Leave Approvals</div>
-                      <p className="text-[11px] text-slate-300 mt-0.5">
-                        {pendingLeaves} employee leave request{pendingLeaves > 1 ? 's' : ''} awaiting review.
-                      </p>
-                    </div>
-                  )}
+                {/* Tabs */}
+                <div className="flex items-center space-x-1 pt-3 pb-2 text-[11px] font-medium">
+                  <button
+                    onClick={() => setNotificationTab('all')}
+                    className={`px-2.5 py-1 rounded-lg transition-colors ${
+                      notificationTab === 'all' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    All ({pendingLeaves.length + announcements.length})
+                  </button>
+                  <button
+                    onClick={() => setNotificationTab('approvals')}
+                    className={`px-2.5 py-1 rounded-lg transition-colors ${
+                      notificationTab === 'approvals' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Approvals ({pendingLeaves.length})
+                  </button>
+                  <button
+                    onClick={() => setNotificationTab('broadcasts')}
+                    className={`px-2.5 py-1 rounded-lg transition-colors ${
+                      notificationTab === 'broadcasts' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Broadcasts ({announcements.length})
+                  </button>
+                </div>
 
-                  {announcements.map((anc) => (
-                    <div 
-                      key={anc.id}
-                      onClick={() => {
-                        setActiveView('holidays');
-                        setShowNotifications(false);
-                      }}
-                      className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-800 cursor-pointer transition-all"
-                    >
-                      <div className="text-xs font-semibold text-slate-200 truncate">{anc.title}</div>
-                      <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{anc.content}</p>
+                {/* Notification Items */}
+                <div className="mt-2 space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {pendingLeaves.map(leave => {
+                    const emp = employees.find(e => e.id === leave.employeeId);
+                    const lType = leaveTypes.find(t => t.id === leave.leaveTypeId);
+                    return (
+                      <div key={leave.id} className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-white truncate">
+                            {emp ? `${emp.firstName} ${emp.lastName}` : 'Employee'}
+                          </span>
+                          <span className="text-amber-400 font-mono">{leave.totalDays} Days</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Requested {lType?.name || 'Leave'}: {leave.startDate} to {leave.endDate}
+                        </p>
+                        <div className="mt-2 flex items-center space-x-2">
+                          <button
+                            onClick={() => {
+                              setActiveView('leaves');
+                              setShowNotifications(false);
+                            }}
+                            className="text-[10px] font-bold text-brand-400 hover:text-brand-300 flex items-center space-x-1"
+                          >
+                            <span>Review in Leave Manager</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {announcements.map(a => (
+                    <div key={a.id} className="p-2.5 rounded-xl bg-slate-800/40 border border-slate-800 text-xs">
+                      <div className="flex items-center space-x-1.5 text-blue-400 font-semibold text-[11px]">
+                        <Megaphone className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{a.title}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{a.content}</p>
                     </div>
                   ))}
+
+                  {pendingLeaves.length === 0 && announcements.length === 0 && (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400 mx-auto mb-1 opacity-80" />
+                      <div>All caught up! No pending approvals.</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
           )}
         </div>
 
-        {/* User Profile Menu */}
+        {/* User Profile Avatar Dropdown */}
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center space-x-2.5 p-1.5 pr-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition-all text-left"
+            className="flex items-center space-x-2 p-1 pl-2 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-all"
           >
             <img
-              src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-              alt={currentUser?.fullName || 'User'}
-              className="w-7 h-7 rounded-lg object-cover border border-slate-600"
+              src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
+              alt={currentUser?.fullName}
+              className="w-7 h-7 rounded-lg object-cover border border-slate-700 shrink-0"
             />
-            <div className="hidden md:block">
-              <div className="text-xs font-semibold text-slate-200 leading-tight">
-                {currentUser?.fullName || 'User'}
-              </div>
-              <div className="flex items-center space-x-1 mt-0.5">
-                <span className={`text-[9px] px-1.5 py-0.2 rounded border font-medium ${getRoleBadgeColor(currentUser?.role)}`}>
-                  {formatRoleName(currentUser?.role)}
-                </span>
-              </div>
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden md:block" />
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform shrink-0 ${showUserMenu ? 'rotate-180' : ''}`} />
           </button>
 
-          {/* User Menu Dropdown */}
           {showUserMenu && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-              <div className="absolute right-0 mt-2 w-56 rounded-xl glass-dropdown z-50 p-2 border border-slate-700/80 shadow-2xl animate-fade-in">
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl glass-dropdown z-50 p-2 border border-slate-700/80 shadow-2xl animate-slide-down text-xs">
                 <div className="px-3 py-2 border-b border-slate-800">
-                  <div className="text-xs font-bold text-slate-200">{currentUser?.fullName}</div>
-                  <div className="text-[11px] text-slate-400 truncate">{currentUser?.email}</div>
-                  <div className="mt-1.5 inline-block">
-                    <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${getRoleBadgeColor(currentUser?.role)}`}>
-                      {formatRoleName(currentUser?.role)}
-                    </span>
-                  </div>
+                  <div className="font-bold text-white truncate">{currentUser?.fullName}</div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate">{currentUser?.email}</div>
+                  <span className={`inline-block mt-1 px-1.5 py-0.2 rounded text-[9px] font-semibold border ${getRoleBadgeColor(currentUser?.role)}`}>
+                    {formatRoleName(currentUser?.role)}
+                  </span>
                 </div>
 
-                <div className="py-1">
+                <div className="py-1 space-y-0.5">
                   <button
                     onClick={() => {
-                      setActiveView('employees');
+                      onOpenRoleSwitcher();
                       setShowUserMenu(false);
                     }}
-                    className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-all"
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all"
                   >
-                    <UserIcon className="w-3.5 h-3.5 text-slate-400" />
-                    <span>My Profile</span>
+                    <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+                    <span>Switch Demo Persona</span>
                   </button>
 
                   <button
@@ -286,21 +416,33 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setActiveView('settings');
                       setShowUserMenu(false);
                     }}
-                    className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-all"
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all"
                   >
-                    <Shield className="w-3.5 h-3.5 text-slate-400" />
+                    <UserIcon className="w-3.5 h-3.5 text-slate-400" />
                     <span>Workspace Settings</span>
                   </button>
 
-                  <div className="border-t border-slate-800 my-1"></div>
+                  <button
+                    onClick={() => {
+                      onNavigateToPublic();
+                      setShowUserMenu(false);
+                    }}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-slate-400" />
+                    <span>View Public Landing</span>
+                  </button>
+                </div>
 
+                <div className="pt-1 border-t border-slate-800">
                   <button
                     onClick={() => {
                       logout();
-                      setShowUserMenu(false);
                       onNavigateToPublic();
+                      setShowUserMenu(false);
+                      toast.info('Logged out from workspace.');
                     }}
-                    className="w-full flex items-center space-x-2 px-3 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-all"
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-all font-semibold"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                     <span>Sign Out</span>

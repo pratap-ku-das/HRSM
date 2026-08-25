@@ -14,12 +14,12 @@ export const SettingsPage: React.FC = () => {
   const [companyName, setCompanyName] = useState<string>('');
   const [legalName, setLegalName] = useState<string>('');
   const [taxId, setTaxId] = useState<string>('');
-  const [currency, setCurrency] = useState<string>('USD');
-  const [currencySymbol, setCurrencySymbol] = useState<string>('$');
-  const [timezone, setTimezone] = useState<string>('America/Los_Angeles (PST)');
+  const [currency, setCurrency] = useState<string>('INR');
+  const [currencySymbol, setCurrencySymbol] = useState<string>('₹');
+  const [timezone, setTimezone] = useState<string>('Asia/Kolkata (IST - UTC+5:30)');
   const [workDays, setWorkDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [hoursStart, setHoursStart] = useState<string>('09:00');
-  const [hoursEnd, setHoursEnd] = useState<string>('18:00');
+  const [hoursStart, setHoursStart] = useState<string>('09:30');
+  const [hoursEnd, setHoursEnd] = useState<string>('18:30');
   const [autoOvertime, setAutoOvertime] = useState<boolean>(true);
   const [auditLogging, setAuditLogging] = useState<boolean>(true);
   const [probationMonths, setProbationMonths] = useState<number>(3);
@@ -40,8 +40,8 @@ export const SettingsPage: React.FC = () => {
       setProbationMonths(settings.defaultProbationPeriodMonths);
     } else if (currentCompany) {
       setCompanyName(currentCompany.name);
-      setLegalName(`${currentCompany.name} Inc.`);
-      setTaxId('TAX-8291048');
+      setLegalName(`${currentCompany.name} Private Limited`);
+      setTaxId('GSTIN: 29AABCA1234F1Z8 | PAN: AABCA1234F');
     }
   }, [settings, currentCompany]);
 
@@ -103,7 +103,7 @@ export const SettingsPage: React.FC = () => {
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-4xl mx-auto">
+    <div className="neo-page neo-settings">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
         <div>

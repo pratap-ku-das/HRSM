@@ -102,14 +102,14 @@ app.post('/api/auth/register-company', async (req, res) => {
       data: {
         companyId: company.id,
         companyName: company.name,
-        legalEntityName: `${company.name} Inc.`,
-        taxRegistrationNumber: `TAX-${Math.floor(10000000 + Math.random() * 90000000)}`,
-        currency: 'USD',
-        currencySymbol: '$',
-        timezone: 'America/Los_Angeles (PST)',
+        legalEntityName: `${company.name} Private Limited`,
+        taxRegistrationNumber: `GSTIN: 29AABCA${Math.floor(1000 + Math.random() * 9000)}F1Z8`,
+        currency: 'INR',
+        currencySymbol: '₹',
+        timezone: 'Asia/Kolkata (IST - UTC+5:30)',
         workDays: [1, 2, 3, 4, 5],
-        businessHoursStart: '09:00',
-        businessHoursEnd: '18:00',
+        businessHoursStart: '09:30',
+        businessHoursEnd: '18:30',
         enableAutomaticOvertime: true,
         enableAuditLogging: true,
         defaultProbationPeriodMonths: 3,
@@ -119,18 +119,18 @@ app.post('/api/auth/register-company', async (req, res) => {
     // Seed default departments
     await prisma.department.createMany({
       data: [
-        { companyId: company.id, name: 'Executive & Leadership', code: 'EXEC', budget: 150000, location: 'Floor 1', description: 'Core leadership.' },
-        { companyId: company.id, name: 'Engineering & Technology', code: 'ENG', budget: 350000, location: 'Floor 4', description: 'Software engineering.' },
-        { companyId: company.id, name: 'People & Operations', code: 'HR', budget: 120000, location: 'Floor 2', description: 'Human resources and recruitment.' },
+        { companyId: company.id, name: 'Executive & Leadership', code: 'EXEC', budget: 5000000, location: 'Tower A, Floor 5', description: 'Core leadership.' },
+        { companyId: company.id, name: 'Engineering & Technology', code: 'ENG', budget: 15000000, location: 'Tower A, Floor 4', description: 'Software engineering.' },
+        { companyId: company.id, name: 'People Operations & HR', code: 'HR', budget: 3000000, location: 'Tower B, Floor 2', description: 'Human resources and talent acquisition.' },
       ],
     });
 
-    // Seed default leave policies
+    // Seed default Indian statutory leave policies
     await prisma.leaveType.createMany({
       data: [
-        { companyId: company.id, name: 'Paid Annual Leave', code: 'AL', daysAllowedPerYear: 20, isPaid: true, color: '#3b82f6' },
-        { companyId: company.id, name: 'Sick & Medical Leave', code: 'SL', daysAllowedPerYear: 12, isPaid: true, color: '#ef4444' },
-        { companyId: company.id, name: 'Casual Personal Leave', code: 'CL', daysAllowedPerYear: 10, isPaid: true, color: '#f59e0b' },
+        { companyId: company.id, name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
+        { companyId: company.id, name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
+        { companyId: company.id, name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
       ],
     });
 
