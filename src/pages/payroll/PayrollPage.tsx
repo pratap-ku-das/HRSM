@@ -369,7 +369,7 @@ export const PayrollPage: React.FC = () => {
 
             {/* Actions */}
             <div className="pt-4 flex items-center justify-between">
-              <span className="text-[10px] text-slate-400">Generated automatically by HRSM Cloud Platform</span>
+              <span className="text-[10px] text-slate-400">Generated automatically by OrbitHR Platform</span>
 
               <div className="flex items-center space-x-2">
                 <button

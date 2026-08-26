@@ -5,6 +5,9 @@ import {
   Sparkles, Check, Globe, Phone, MapPin, Briefcase, Users as UsersIcon,
   Lock, Mail, Award
 } from 'lucide-react';
+import { BrandCredit } from '../../components/BrandCredit';
+import { ProductLogo } from '../../components/ProductLogo';
+import { AuthShowcase } from '../../components/AuthShowcase';
 
 interface RegisterCompanyPageProps {
   onNavigateToLogin: () => void;
@@ -70,7 +73,8 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 font-sans selection:bg-brand-500 selection:text-white relative">
+    <div className="auth-screen min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-4 sm:px-6 lg:ml-[43vw] lg:px-10 font-sans selection:bg-brand-500 selection:text-white relative">
+      <AuthShowcase mode="register" />
       {/* Background glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[450px] bg-gradient-to-tr from-brand-600/15 via-purple-600/15 to-transparent blur-[140px] pointer-events-none rounded-full" />
 
@@ -78,12 +82,9 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
       <div className="sm:mx-auto sm:w-full sm:max-w-2xl text-center mb-8">
         <button
           onClick={onNavigateToLanding}
-          className="inline-flex items-center space-x-2.5 hover:opacity-90 transition-opacity"
+          className="inline-flex items-center rounded-2xl bg-white/95 px-5 py-2 shadow-xl shadow-indigo-950/25 hover:opacity-95 transition-opacity"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-brand-500/25">
-            <Building2 className="w-5 h-5" />
-          </div>
-          <span className="text-xl font-extrabold text-white tracking-tight">HRSM Cloud</span>
+          <ProductLogo className="h-20 w-64" />
         </button>
         <h2 className="mt-4 text-3xl font-extrabold tracking-tight text-white">
           Create Your Company Workspace
@@ -129,7 +130,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
 
       {/* Card Body */}
       <div className="sm:mx-auto sm:w-full sm:max-w-2xl">
-        <div className="bg-slate-900/90 backdrop-blur-xl py-8 px-6 sm:px-10 border border-slate-800 rounded-3xl shadow-2xl space-y-6">
+        <div className="auth-form-card bg-slate-900/90 backdrop-blur-xl py-8 px-6 sm:px-10 border border-slate-800 rounded-3xl shadow-2xl space-y-6">
           {/* STEP 1: Company Profile */}
           {currentStep === 1 && (
             <div className="space-y-4 animate-fade-in text-xs">
@@ -471,6 +472,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                 Sign In to existing workspace
               </button>
             </p>
+            <BrandCredit className="mt-4" />
           </div>
         </div>
       </div>

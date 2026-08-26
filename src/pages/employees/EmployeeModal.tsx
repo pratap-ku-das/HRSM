@@ -179,12 +179,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={onClose} />
-
-      <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden z-10 animate-slide-up flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 bg-slate-950">
+      <div className="employee-onboarding-page relative w-full h-full bg-slate-900 overflow-hidden z-10 animate-fade-in flex flex-col">
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+        <div className="employee-onboarding-header px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-500 to-indigo-600 flex items-center justify-center text-white font-bold">
               <User className="w-5 h-5" />
@@ -202,10 +200,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex px-6 pt-3 border-b border-slate-800 bg-slate-900 space-x-2 text-xs font-semibold overflow-x-auto">
+        <div className="employee-onboarding-nav flex justify-center px-6 pt-3 border-b border-slate-800 bg-slate-900 space-x-2 text-xs font-semibold overflow-x-auto">
           <button
             type="button"
-            onClick={() => setActiveTab('basic')}
+            onClick={() => { setActiveTab('basic'); document.getElementById('onboarding-basic')?.scrollIntoView({ behavior: 'smooth' }); }}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'basic' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -216,7 +214,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveTab('employment')}
+            onClick={() => { setActiveTab('employment'); document.getElementById('onboarding-employment')?.scrollIntoView({ behavior: 'smooth' }); }}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'employment' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -227,7 +225,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveTab('salary')}
+            onClick={() => { setActiveTab('salary'); document.getElementById('onboarding-salary')?.scrollIntoView({ behavior: 'smooth' }); }}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'salary' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -238,7 +236,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveTab('bank')}
+            onClick={() => { setActiveTab('bank'); document.getElementById('onboarding-bank')?.scrollIntoView({ behavior: 'smooth' }); }}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'bank' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -249,7 +247,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveTab('emergency')}
+            onClick={() => { setActiveTab('emergency'); document.getElementById('onboarding-emergency')?.scrollIntoView({ behavior: 'smooth' }); }}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'emergency' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -260,10 +258,14 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         </div>
 
         {/* Modal Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="employee-onboarding-form flex-1 overflow-y-auto scroll-smooth p-6 md:p-8 space-y-6 text-xs">
+          <div className="mx-auto max-w-6xl rounded-2xl border border-brand-500/20 bg-gradient-to-r from-brand-500/10 to-indigo-500/10 p-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-400">Complete employee onboarding</p>
+            <h3 className="mt-1 text-xl font-black text-white">All employee information in one workflow</h3>
+            <p className="mt-1 text-slate-400">Complete every section below, then provision the employee once at the end.</p>
+          </div>
           {/* TAB 1: BASIC DETAILS */}
-          {activeTab === 'basic' && (
-            <div className="space-y-4 animate-fade-in">
+          <section id="onboarding-basic" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="01 · Basic Details">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">First Name *</label>
@@ -347,12 +349,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   />
                 </div>
               </div>
-            </div>
-          )}
+          </section>
 
           {/* TAB 2: EMPLOYMENT */}
-          {activeTab === 'employment' && (
-            <div className="space-y-4 animate-fade-in">
+          <section id="onboarding-employment" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="02 · Employment & Organization">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Employee Code / ID *</label>
@@ -456,12 +456,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-brand-500"
                 />
               </div>
-            </div>
-          )}
+          </section>
 
           {/* TAB 3: SALARY */}
-          {activeTab === 'salary' && (
-            <div className="space-y-4 animate-fade-in">
+          <section id="onboarding-salary" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="03 · Compensation & Salary">
               <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-300 text-[11px]">
                 Define statutory compensation structure. Gross and net payout will be automatically computed during monthly payroll runs.
               </div>
@@ -542,12 +540,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+          </section>
 
           {/* TAB 4: BANK */}
-          {activeTab === 'bank' && (
-            <div className="space-y-4 animate-fade-in">
+          <section id="onboarding-bank" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="04 · Bank & Statutory">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Bank Name</label>
@@ -593,12 +589,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   />
                 </div>
               </div>
-            </div>
-          )}
+          </section>
 
           {/* TAB 5: EMERGENCY */}
-          {activeTab === 'emergency' && (
-            <div className="space-y-4 animate-fade-in">
+          <section id="onboarding-emergency" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="05 · Emergency Contact">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Contact Name</label>
@@ -637,11 +631,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   />
                 </div>
               </div>
-            </div>
-          )}
+          </section>
 
           {/* Footer Submit Actions */}
-          <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+          <div className="employee-onboarding-actions sticky bottom-0 mx-auto max-w-6xl rounded-2xl border border-slate-700 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-xl flex items-center justify-between">
             <button
               type="button"
               onClick={onClose}

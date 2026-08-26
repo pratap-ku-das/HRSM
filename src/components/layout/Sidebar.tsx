@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
+import { BrandCredit } from '../BrandCredit';
+import { ProductLogo } from '../ProductLogo';
 
 interface SidebarProps {
   activeView: string;
@@ -147,19 +149,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const sidebarContent = (
     <div className="flex flex-col justify-between h-full">
-      {/* Workspace Header & Collapse Toggle */}
-      <div className="sidebar-heading h-[72px] px-4 border-b border-slate-800/60 flex items-center justify-between">
-        {!isCollapsed && (
-          <div className="min-w-0">
-            <div className="text-[9px] font-extrabold text-brand-500 tracking-[0.14em] uppercase">
-              Main workspace
-            </div>
-            <div className="mt-1 text-sm font-extrabold text-slate-900 truncate">
-              People operations
-            </div>
-          </div>
-        )}
-        <div className="flex items-center space-x-1">
+      {/* Product brand and sidebar controls */}
+      <div className={`sidebar-heading h-16 px-3 border-b border-slate-800/60 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+        {!isCollapsed && <ProductLogo className="h-10 w-36" />}
+        <div className="flex items-center shrink-0">
           {/* Desktop collapse toggle */}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
@@ -251,6 +244,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot shrink-0" />
           </div>
+          <BrandCredit compact light className="mt-3" />
         </div>
       )}
     </div>

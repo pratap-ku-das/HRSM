@@ -136,6 +136,41 @@
 .lp-brand { display:flex; align-items:center; gap:10px; border:0; background:none; color:var(--ink); font:800 20px var(--font-display); cursor:pointer; }
 .lp-brand small { padding:4px 8px; border-left:1px solid #d9d4df; color:#888196; font:600 10px var(--font-sans); letter-spacing:.08em; text-transform:uppercase; }
 .lp-brandmark { width:36px; height:36px; display:grid; place-items:center; color:white; border-radius:12px; background:linear-gradient(145deg,#825cff,#5430d9); box-shadow:0 10px 22px #6d3df544,inset 0 1px #ffffff66; }
+.lp-brandmark img { width:100%; height:100%; object-fit:contain; border-radius:10px; background:#fff; }
+
+/* OrbitHR authentication experience */
+.auth-screen,.auth-showcase { background-color:#151a58;background-image:radial-gradient(circle at 85% 18%,#5038c955 0,transparent 34%),radial-gradient(circle at 12% 88%,#1e7ac633 0,transparent 30%),linear-gradient(145deg,#111c5b 0%,#211368 55%,#18205d 100%); }
+.auth-showcase { border-right:1px solid #a5b4fc24;box-shadow:none; }
+.auth-showcase::after { content:'';position:absolute;inset:0;background-image:linear-gradient(#ffffff0a 1px,transparent 1px),linear-gradient(90deg,#ffffff0a 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,#000,transparent); }
+.auth-orb { position:absolute;border-radius:999px;filter:blur(1px);pointer-events:none; }
+.auth-orb-one { width:420px;height:420px;right:-170px;top:18%;background:#14d9ff28;border:1px solid #ffffff1f;box-shadow:inset 0 0 80px #5ee7ff22; }
+.auth-orb-two { width:260px;height:260px;left:-90px;bottom:5%;background:#be7cff20;border:1px solid #ffffff18; }
+.auth-feature-card { display:flex;min-height:126px;flex-direction:column;gap:8px;border:1px solid #ffffff24;border-radius:22px;background:#ffffff12;padding:18px;color:white;backdrop-filter:blur(18px);box-shadow:inset 0 1px #ffffff20,0 18px 45px #02061725; }
+.auth-feature-card strong { font-size:13px; }
+.auth-feature-card span { color:#dbeafeaa;font-size:10px;line-height:1.55; }
+.auth-form-card { background:linear-gradient(145deg,#111b50eb,#21154feb)!important;border-color:#a5b4fc2e!important;box-shadow:0 35px 90px #080b3580,inset 0 1px #ffffff18!important; }
+.auth-form-card input { transition:border-color .2s,box-shadow .2s,transform .2s; }
+.auth-form-card input:focus { box-shadow:0 0 0 4px #7c3aed1f,0 12px 30px #02061735;transform:translateY(-1px); }
+
+.employee-onboarding-page { background:#f5f7fc!important;color:#20243a!important; }
+.employee-onboarding-header { background:#fff!important;border-color:#e4e7f0!important;box-shadow:0 4px 18px #23305b0b; }
+.employee-onboarding-header h2 { color:#242239!important;font-size:17px!important; }
+.employee-onboarding-header p { color:#7c8193!important; }
+.employee-onboarding-header button { color:#71778a!important; }
+.employee-onboarding-nav { background:#fff!important;border-color:#e4e7f0!important; }
+.employee-onboarding-form { background:linear-gradient(180deg,#f8f9fd 0%,#f1f3f9 100%)!important; }
+.employee-onboarding-section { scroll-margin-top:140px;border:1px solid #e1e5ef;border-radius:22px;background:#fff;padding:26px;box-shadow:0 12px 32px #27345d12; }
+.employee-onboarding-section::before { content:attr(data-title);display:block;margin-bottom:20px;padding-bottom:13px;border-bottom:1px solid #e7eaf2;color:#6941d9;font-size:13px;font-weight:800;letter-spacing:.025em; }
+.employee-onboarding-section label { color:#4d5366!important;font-size:12px!important;font-weight:650!important; }
+.employee-onboarding-section input,.employee-onboarding-section select { background:#f8f9fc!important;border:1px solid #d9deea!important;color:#23263a!important;box-shadow:inset 0 1px 2px #26325208!important; }
+.employee-onboarding-section input::placeholder { color:#9ca3b5!important; }
+.employee-onboarding-section input:focus,.employee-onboarding-section select:focus { background:#fff!important;border-color:#7857e8!important;box-shadow:0 0 0 4px #7857e817!important; }
+.employee-onboarding-section [class*="bg-slate-950"],.employee-onboarding-section [class*="bg-slate-800"] { background:#f5f6fb!important;border-color:#e0e4ee!important; }
+.employee-onboarding-section [class*="text-slate-300"],.employee-onboarding-section [class*="text-slate-400"] { color:#697083!important; }
+.employee-onboarding-section [class*="text-white"] { color:#25283b!important; }
+.employee-onboarding-actions { background:#ffffffee!important;border-color:#dfe3ed!important;box-shadow:0 -8px 28px #26345d16!important; }
+.employee-onboarding-actions button[type="button"] { background:#eef0f6!important;color:#4e5568!important; }
+.employee-onboarding-actions button[type="submit"] { background:linear-gradient(135deg,#7957e8,#5232c9)!important;color:#fff!important;box-shadow:0 10px 24px #6941d933!important; }
 .lp-links { display:flex; gap:34px; }
 .lp-links a,.lp-footer a { color:#655f75; text-decoration:none; font-size:13px; font-weight:700; }
 .lp-links a:hover { color:var(--purple); }

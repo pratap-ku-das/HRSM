@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
-  Building2, Lock, Mail, ArrowRight, Eye, EyeOff, 
-  AlertCircle, CheckCircle2, User, Sparkles, ShieldCheck, ChevronRight
+  Lock, Mail, ArrowRight, Eye, EyeOff, 
+  AlertCircle, CheckCircle2, User, ShieldCheck, ChevronRight
 } from 'lucide-react';
-import { storageService } from '../../services/storageService';
+import { BrandCredit } from '../../components/BrandCredit';
+import { ProductLogo } from '../../components/ProductLogo';
+import { AuthShowcase } from '../../components/AuthShowcase';
 
 interface LoginPageProps {
   onNavigateToRegister: () => void;
@@ -17,7 +19,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onNavigateToLanding,
   onLoginSuccess,
 }) => {
-  const { login, loginAsDemoUser } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
@@ -47,10 +49,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   };
 
-  const registeredUsers = storageService.getUsers();
-
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative font-sans selection:bg-brand-500 selection:text-white overflow-hidden">
+    <div className="auth-screen min-h-screen bg-slate-950 flex flex-col justify-center py-12 px-4 sm:px-6 lg:ml-[43vw] lg:px-12 relative font-sans selection:bg-brand-500 selection:text-white overflow-hidden">
+      <AuthShowcase mode="login" />
       {/* Background glowing gradients */}
       <div className="fixed top-1/4 left-1/2 -translate-x-1/2 w-[650px] h-[450px] ambient-mesh ambient-blue pointer-events-none" />
       <div className="fixed bottom-10 right-10 w-[500px] h-[500px] ambient-mesh ambient-purple pointer-events-none" />
@@ -59,20 +60,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6 relative z-10">
         <button
           onClick={onNavigateToLanding}
-          className="inline-flex items-center space-x-3 hover:opacity-90 transition-all hover:scale-105 group"
+          className="inline-flex items-center rounded-2xl bg-white/95 px-5 py-2 shadow-xl shadow-indigo-950/25 hover:opacity-95 transition-all hover:scale-105 group"
         >
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-brand-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-xl shadow-brand-500/25">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div className="text-left">
-            <div className="text-xl font-black text-white tracking-tight flex items-center space-x-1.5">
-              <span>HRSM Cloud</span>
-              <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded-full bg-brand-500/20 text-brand-300 border border-brand-500/30">
-                PRO
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 font-mono">Enterprise Workforce OS</p>
-          </div>
+          <ProductLogo className="h-20 w-64" />
         </button>
         <h2 className="mt-5 text-2xl sm:text-3xl font-black tracking-tight text-white">
           Sign In to Workspace
@@ -84,7 +74,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       {/* Form Container */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
-        <div className="glass-card py-8 px-6 sm:px-8 border border-white/15 rounded-3xl shadow-2xl space-y-6">
+        <div className="auth-form-card glass-card py-8 px-6 sm:px-8 border border-white/15 rounded-3xl shadow-2xl space-y-6">
           {errorMsg && (
             <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-start space-x-2.5 text-xs text-rose-300 animate-slide-up">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -170,38 +160,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </button>
           </form>
 
-          {/* Quick 1-Click Demo Accounts */}
-          {registeredUsers.length > 0 && (
-            <div className="pt-4 border-t border-slate-800/80 space-y-2.5">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-                <span>1-Click Demo Accounts ({registeredUsers.length})</span>
-              </div>
-
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {registeredUsers.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => {
-                      loginAsDemoUser(u.id);
-                      onLoginSuccess();
-                    }}
-                    className="w-full p-2.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-brand-500/40 flex items-center justify-between text-left transition-all group"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <div className="text-xs font-bold text-white truncate group-hover:text-brand-300 transition-colors">{u.fullName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono truncate">{u.email}</div>
-                    </div>
-                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 font-bold shrink-0 border border-brand-500/30">
-                      {u.role}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Bottom Register CTA */}
           <div className="text-center pt-2 border-t border-slate-800/80">
             <p className="text-xs text-slate-400">
@@ -218,6 +176,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       </div>
 
       {/* Forgot Password Modal */}
+      <BrandCredit className="relative z-10 mt-6" />
+
       {showForgotModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setShowForgotModal(false)} />

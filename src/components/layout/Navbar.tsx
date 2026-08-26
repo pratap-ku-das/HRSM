@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { 
-  Building2, ChevronDown, Bell, Search, Shield, User as UserIcon, 
+  ChevronDown, Bell, Search, Shield, User as UserIcon, 
   LogOut, Sparkles, Globe, Clock, CheckCircle2, AlertCircle, 
   Moon, Sun, Laptop, ArrowRight, X, Megaphone, CalendarCheck, Menu
 } from 'lucide-react';
@@ -188,20 +188,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Menu className="w-5 h-5 text-brand-400" />
           </button>
         )}
-
-        <button
-          onClick={() => setActiveView('dashboard')}
-          className="hidden lg:flex items-center gap-2.5 pr-4 mr-1 border-r border-slate-200"
-          aria-label="Go to dashboard"
-        >
-          <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 text-white grid place-items-center shadow-lg shadow-brand-500/20">
-            <Building2 className="w-4 h-4" />
-          </span>
-          <span className="text-left leading-tight">
-            <strong className="block text-sm font-extrabold text-slate-900 tracking-tight">OrbitHR</strong>
-            <small className="block text-[9px] font-bold uppercase tracking-widest text-slate-400">People OS</small>
-          </span>
-        </button>
 
       </div>
 

@@ -403,7 +403,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           </div>
           <div className="flex items-center space-x-1.5 text-slate-400">
             <Command className="w-3 h-3 text-brand-400" />
-            <span>HRSM Global Command Hub</span>
+            <span>OrbitHR Global Command Hub</span>
           </div>
         </div>
       </div>

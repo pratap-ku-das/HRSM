@@ -131,20 +131,9 @@ const MainApp: React.FC = () => {
   };
 
   return (
-    <div className="app-shell h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-brand-500 selection:text-white">
-      {/* Top Navbar */}
-      <Navbar
-        onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
-        onNavigateToPublic={() => setPageMode('public_landing')}
-        activeView={activeView}
-        setActiveView={setActiveView}
-        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
-      />
-
-      {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Sidebar Navigation (with Mobile Drawer & Collapse) */}
+    <div className="app-shell h-screen overflow-hidden bg-slate-950 text-slate-100 flex font-sans selection:bg-brand-500 selection:text-white">
+      {/* Full-height sidebar */}
+      <div className="h-full flex-none">
         <Sidebar
           activeView={activeView}
           setActiveView={setActiveView}
@@ -152,6 +141,18 @@ const MainApp: React.FC = () => {
           setIsCollapsed={setIsSidebarCollapsed}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        />
+      </div>
+
+      {/* Header and workspace content */}
+      <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
+        <Navbar
+          onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+          onNavigateToPublic={() => setPageMode('public_landing')}
+          activeView={activeView}
+          setActiveView={setActiveView}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
         />
 
         {/* Dynamic Page Content */}

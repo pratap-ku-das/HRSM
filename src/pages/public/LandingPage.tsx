@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
-  ArrowRight, BarChart3, Building2, CalendarCheck, Check, ChevronRight,
+  ArrowRight, BarChart3, CalendarCheck, Check, ChevronRight,
   CircleCheck, CreditCard, FileText, Fingerprint, Globe2, Menu, Play,
   Receipt, ShieldCheck, Sparkles, Target, TrendingUp, Users, X, Zap,
 } from 'lucide-react';
+import { BrandCredit } from '../../components/BrandCredit';
+import { ProductLogo } from '../../components/ProductLogo';
 
 interface LandingPageProps {
   onNavigateToLogin: () => void;
@@ -38,9 +40,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     <div className="lp-root">
       <nav className="lp-nav">
         <button className="lp-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-          <span className="lp-brandmark"><Building2 size={20} strokeWidth={2.4} /></span>
-          <span>OrbitHR</span>
-          <small>by HRSM</small>
+          <ProductLogo className="h-12 w-44" />
+          <small>by BalajiOne Enterprises</small>
         </button>
 
         <div className="lp-links">
@@ -178,7 +179,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <section className="lp-cta"><div className="lp-cta-orb" /><span><Sparkles size={16} /> Your next chapter starts here</span><h2>Make work feel<br /><em>remarkably human.</em></h2><p>Join the teams building happier, higher-performing workplaces with OrbitHR.</p><div><button className="lp-primary lp-light" onClick={onNavigateToRegister}>Start free today <ArrowRight size={18} /></button><button className="lp-ghost" onClick={onNavigateToLogin}>Talk to our team</button></div></section>
       </main>
 
-      <footer className="lp-footer"><div className="lp-brand"><span className="lp-brandmark"><Building2 size={19} /></span><span>OrbitHR</span></div><p>People operations, beautifully connected.</p><div><a href="#platform">Platform</a><a href="#pricing">Pricing</a><button onClick={onNavigateToLogin}>Sign in</button></div><small>© 2026 HRSM Technologies · Bengaluru, India</small></footer>
+      <footer className="lp-footer"><div className="lp-brand"><ProductLogo className="h-12 w-44" /></div><p>People operations, beautifully connected.</p><div><a href="#platform">Platform</a><a href="#pricing">Pricing</a><button onClick={onNavigateToLogin}>Sign in</button></div><BrandCredit compact light /><small>© 2026 BalajiOne Enterprises · Bengaluru, India</small></footer>
     </div>
   );
 };
