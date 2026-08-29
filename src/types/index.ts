@@ -42,7 +42,7 @@ export interface BankDetails {
   bankName: string;
   accountNumber: string;
   routingOrIfsc: string;
-  taxIdentifier: string; // PAN / SSN / Tax ID
+  taxIdentifier: string; // Indian PAN identifier
 }
 
 export interface EmergencyContact {

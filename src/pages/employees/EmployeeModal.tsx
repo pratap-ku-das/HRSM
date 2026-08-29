@@ -20,8 +20,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   employeeToEdit,
   onSaved,
 }) => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const [activeTab, setActiveTab] = useState<'basic' | 'employment' | 'salary' | 'bank' | 'emergency'>('basic');
+  const [stepError, setStepError] = useState<string>('');
+  const steps = ['basic', 'employment', 'salary', 'bank', 'emergency'] as const;
+  const stepLabels = ['Basic Details', 'Employment & Org', 'Compensation', 'Bank & Statutory', 'Emergency Contact'];
+  const activeStepIndex = steps.indexOf(activeTab);
 
   const departments = storageService.getDepartments(currentCompany?.id);
   const designations = storageService.getDesignations(currentCompany?.id);
@@ -43,22 +48,22 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [dateOfJoining, setDateOfJoining] = useState<string>(new Date().toISOString().split('T')[0]);
   const [employmentType, setEmploymentType] = useState<EmploymentType>('FULL_TIME');
   const [status, setStatus] = useState<EmployeeStatus>('ACTIVE');
-  const [workLocation, setWorkLocation] = useState<string>('Headquarters (Hybrid)');
+  const [workLocation, setWorkLocation] = useState<string>('Bengaluru (Hybrid)');
   const [skillsStr, setSkillsStr] = useState<string>('TypeScript, React, Node.js');
 
   // Salary
-  const [basicSalary, setBasicSalary] = useState<number>(6000);
-  const [hra, setHra] = useState<number>(2000);
-  const [allowances, setAllowances] = useState<number>(1000);
-  const [providentFund, setProvidentFund] = useState<number>(720);
-  const [taxDeduction, setTaxDeduction] = useState<number>(1100);
-  const [currency, setCurrency] = useState<string>('USD');
+  const [basicSalary, setBasicSalary] = useState<number>(60000);
+  const [hra, setHra] = useState<number>(24000);
+  const [allowances, setAllowances] = useState<number>(8000);
+  const [providentFund, setProvidentFund] = useState<number>(7200);
+  const [taxDeduction, setTaxDeduction] = useState<number>(5000);
+  const [currency, setCurrency] = useState<string>('INR');
 
   // Bank
-  const [bankName, setBankName] = useState<string>('Chase Commercial Bank');
+  const [bankName, setBankName] = useState<string>('State Bank of India');
   const [accountNumber, setAccountNumber] = useState<string>('••••••••9841');
-  const [routingOrIfsc, setRoutingOrIfsc] = useState<string>('CHASUS33XX');
-  const [taxIdentifier, setTaxIdentifier] = useState<string>('SSN-XXX-4920');
+  const [routingOrIfsc, setRoutingOrIfsc] = useState<string>('SBIN0001234');
+  const [taxIdentifier, setTaxIdentifier] = useState<string>('ABCDE1234F');
 
   // Emergency
   const [emergencyName, setEmergencyName] = useState<string>('');
@@ -66,6 +71,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [emergencyPhone, setEmergencyPhone] = useState<string>('');
 
   useEffect(() => {
+    setActiveTab('basic');
+    setStepError('');
     if (employeeToEdit) {
       setFirstName(employeeToEdit.firstName);
       setLastName(employeeToEdit.lastName);
@@ -116,8 +123,32 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
   if (!isOpen) return null;
 
+  const validateStep = (step: typeof activeTab): string => {
+    if (step === 'basic' && (!firstName.trim() || !lastName.trim() || !email.trim())) return 'First name, last name, and work email are required.';
+    if (step === 'employment' && (!employeeCode.trim() || !dateOfJoining || !departmentId || !designationId)) return 'Employee code, joining date, department, and designation are required.';
+    if (step === 'salary' && Number(basicSalary) <= 0) return 'Basic monthly salary must be greater than zero.';
+    if (step === 'bank' && (!bankName.trim() || !accountNumber.trim() || !routingOrIfsc.trim() || !taxIdentifier.trim())) return 'Bank name, account number, IFSC code, and PAN are required.';
+    if (step === 'emergency' && (!emergencyName.trim() || !emergencyPhone.trim())) return 'Emergency contact name and phone are required.';
+    return '';
+  };
+
+  const goToStep = (step: typeof activeTab) => {
+    setStepError('');
+    setActiveTab(step);
+  };
+
+  const handleNext = () => {
+    const error = validateStep(activeTab);
+    if (error) { setStepError(error); return; }
+    if (activeStepIndex < steps.length - 1) goToStep(steps[activeStepIndex + 1]);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    for (const step of steps) {
+      const error = validateStep(step);
+      if (error) { setActiveTab(step); setStepError(error); return; }
+    }
 
     const newEmp: Employee = {
       id: employeeToEdit ? employeeToEdit.id : `emp-${Date.now()}`,
@@ -203,7 +234,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         <div className="employee-onboarding-nav flex justify-center px-6 pt-3 border-b border-slate-800 bg-slate-900 space-x-2 text-xs font-semibold overflow-x-auto">
           <button
             type="button"
-            onClick={() => { setActiveTab('basic'); document.getElementById('onboarding-basic')?.scrollIntoView({ behavior: 'smooth' }); }}
+            onClick={() => goToStep('basic')}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'basic' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -214,7 +245,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => { setActiveTab('employment'); document.getElementById('onboarding-employment')?.scrollIntoView({ behavior: 'smooth' }); }}
+            onClick={() => goToStep('employment')}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'employment' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -225,7 +256,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => { setActiveTab('salary'); document.getElementById('onboarding-salary')?.scrollIntoView({ behavior: 'smooth' }); }}
+            onClick={() => goToStep('salary')}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'salary' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -236,7 +267,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => { setActiveTab('bank'); document.getElementById('onboarding-bank')?.scrollIntoView({ behavior: 'smooth' }); }}
+            onClick={() => goToStep('bank')}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'bank' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -247,7 +278,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           <button
             type="button"
-            onClick={() => { setActiveTab('emergency'); document.getElementById('onboarding-emergency')?.scrollIntoView({ behavior: 'smooth' }); }}
+            onClick={() => goToStep('emergency')}
             className={`pb-3 px-3 border-b-2 transition-all flex items-center space-x-1.5 ${
               activeTab === 'emergency' ? 'border-brand-500 text-brand-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -260,12 +291,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
         {/* Modal Form Body */}
         <form onSubmit={handleSubmit} className="employee-onboarding-form flex-1 overflow-y-auto scroll-smooth p-6 md:p-8 space-y-6 text-xs">
           <div className="mx-auto max-w-6xl rounded-2xl border border-brand-500/20 bg-gradient-to-r from-brand-500/10 to-indigo-500/10 p-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-400">Complete employee onboarding</p>
-            <h3 className="mt-1 text-xl font-black text-white">All employee information in one workflow</h3>
-            <p className="mt-1 text-slate-400">Complete every section below, then provision the employee once at the end.</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-400">Step {activeStepIndex + 1} of {steps.length}</p>
+            <h3 className="mt-1 text-xl font-black text-white">Complete this section to continue</h3>
+            <p className="mt-1 text-slate-400">Your information is preserved while moving between tabs.</p>
           </div>
+          {stepError && <div className="mx-auto max-w-6xl rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-rose-300 font-medium">{stepError}</div>}
           {/* TAB 1: BASIC DETAILS */}
-          <section id="onboarding-basic" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="01 · Basic Details">
+          {activeTab === 'basic' && <section id="onboarding-basic" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="01 · Basic Details">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">First Name *</label>
@@ -309,7 +341,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+1 (555) 321-7890"
+                    placeholder="+91 98765 43210"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>
@@ -349,10 +381,10 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   />
                 </div>
               </div>
-          </section>
+          </section>}
 
           {/* TAB 2: EMPLOYMENT */}
-          <section id="onboarding-employment" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="02 · Employment & Organization">
+          {activeTab === 'employment' && <section id="onboarding-employment" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="02 · Employment & Organization">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Employee Code / ID *</label>
@@ -456,17 +488,17 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-brand-500"
                 />
               </div>
-          </section>
+          </section>}
 
           {/* TAB 3: SALARY */}
-          <section id="onboarding-salary" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="03 · Compensation & Salary">
+          {activeTab === 'salary' && <section id="onboarding-salary" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="03 · Compensation & Salary">
               <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-300 text-[11px]">
                 Define statutory compensation structure. Gross and net payout will be automatically computed during monthly payroll runs.
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Basic Monthly Salary ($) *</label>
+                  <label className="block text-slate-300 font-medium mb-1">Basic Monthly Salary ({currencySymbol}) *</label>
                   <input
                     type="number"
                     required
@@ -477,7 +509,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">HRA Allowance ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">HRA Allowance ({currencySymbol})</label>
                   <input
                     type="number"
                     value={hra}
@@ -487,7 +519,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Special Allowances ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Special Allowances ({currencySymbol})</label>
                   <input
                     type="number"
                     value={allowances}
@@ -499,7 +531,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Provident Fund (PF) Deduction ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Provident Fund (PF) Deduction ({currencySymbol})</label>
                   <input
                     type="number"
                     value={providentFund}
@@ -509,7 +541,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Statutory Tax / TDS Deduction ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Statutory Tax / TDS Deduction ({currencySymbol})</label>
                   <input
                     type="number"
                     value={taxDeduction}
@@ -524,26 +556,26 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 <div>
                   <div className="text-[11px] text-slate-400">Total Monthly Gross</div>
                   <div className="text-base font-bold text-white font-mono mt-0.5">
-                    ${Number(basicSalary) + Number(hra) + Number(allowances)}
+                    {currencySymbol}{(Number(basicSalary) + Number(hra) + Number(allowances)).toLocaleString('en-IN')}
                   </div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Total Monthly Deductions</div>
                   <div className="text-base font-bold text-rose-400 font-mono mt-0.5">
-                    -${Number(providentFund) + Number(taxDeduction)}
+                    -{currencySymbol}{(Number(providentFund) + Number(taxDeduction)).toLocaleString('en-IN')}
                   </div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Estimated Net Pay</div>
                   <div className="text-base font-bold text-emerald-400 font-mono mt-0.5">
-                    ${(Number(basicSalary) + Number(hra) + Number(allowances)) - (Number(providentFund) + Number(taxDeduction))}
+                    {currencySymbol}{((Number(basicSalary) + Number(hra) + Number(allowances)) - (Number(providentFund) + Number(taxDeduction))).toLocaleString('en-IN')}
                   </div>
                 </div>
               </div>
-          </section>
+          </section>}
 
           {/* TAB 4: BANK */}
-          <section id="onboarding-bank" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="04 · Bank & Statutory">
+          {activeTab === 'bank' && <section id="onboarding-bank" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="04 · Bank & Statutory">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Bank Name</label>
@@ -551,7 +583,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     type="text"
                     value={bankName}
                     onChange={(e) => setBankName(e.target.value)}
-                    placeholder="Chase / Citibank / Wells Fargo"
+                    placeholder="SBI / HDFC Bank / ICICI Bank"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>
@@ -574,25 +606,25 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     type="text"
                     value={routingOrIfsc}
                     onChange={(e) => setRoutingOrIfsc(e.target.value)}
-                    placeholder="CHASUS33"
+                    placeholder="SBIN0001234"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Tax ID / SSN / PAN Identifier</label>
+                  <label className="block text-slate-300 font-medium mb-1">PAN Identifier</label>
                   <input
                     type="text"
                     value={taxIdentifier}
                     onChange={(e) => setTaxIdentifier(e.target.value)}
-                    placeholder="SSN-XXX-4920"
+                    placeholder="ABCDE1234F"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
                   />
                 </div>
               </div>
-          </section>
+          </section>}
 
           {/* TAB 5: EMERGENCY */}
-          <section id="onboarding-emergency" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="05 · Emergency Contact">
+          {activeTab === 'emergency' && <section id="onboarding-emergency" className="employee-onboarding-section mx-auto max-w-6xl space-y-4" data-title="05 · Emergency Contact">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Contact Name</label>
@@ -626,30 +658,33 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                     type="tel"
                     value={emergencyPhone}
                     onChange={(e) => setEmergencyPhone(e.target.value)}
-                    placeholder="+1 (555) 000-0000"
+                    placeholder="+91 98765 43210"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-brand-500"
                   />
                 </div>
               </div>
-          </section>
+          </section>}
 
           {/* Footer Submit Actions */}
           <div className="employee-onboarding-actions sticky bottom-0 mx-auto max-w-6xl rounded-2xl border border-slate-700 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-xl flex items-center justify-between">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium"
-            >
-              Cancel
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium">Cancel</button>
+              {activeStepIndex > 0 && (
+                <button type="button" onClick={() => goToStep(steps[activeStepIndex - 1])} className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl font-medium">Back</button>
+              )}
+            </div>
 
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 text-white rounded-xl font-bold flex items-center space-x-1.5 shadow-md shadow-brand-500/25"
-            >
-              <Check className="w-4 h-4" />
-              <span>{employeeToEdit ? 'Update Employee Profile' : 'Save & Provision Employee'}</span>
-            </button>
+            {activeTab !== 'emergency' ? (
+              <button type="button" onClick={handleNext} className="employee-step-primary px-6 py-2.5 rounded-xl font-bold">
+                <span>Continue: {stepLabels[activeStepIndex + 1]}</span>
+                <span aria-hidden="true">→</span>
+              </button>
+            ) : (
+              <button type="submit" className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-500/25">
+                <Check className="w-4 h-4" />
+                <span>{employeeToEdit ? 'Update Employee Profile' : 'Save & Provision Employee'}</span>
+              </button>
+            )}
           </div>
         </form>
       </div>

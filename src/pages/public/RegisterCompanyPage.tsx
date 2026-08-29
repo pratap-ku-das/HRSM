@@ -180,7 +180,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+1 (555) 000-0000"
+                      placeholder="+91 98765 43210"
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
                     />
                   </div>
@@ -233,7 +233,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                       type="text"
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
-                      placeholder="San Francisco, CA, USA"
+                      placeholder="Bengaluru, Karnataka, India"
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
                     />
                   </div>
@@ -384,7 +384,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                     }`}
                   >
                     <div className="font-bold text-white">Starter</div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">$79<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹1,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
                     <div className="text-[10px] text-slate-400 mt-1">Up to 25 staff</div>
                   </div>
 
@@ -400,7 +400,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                       <span>Growth</span>
                       <span className="text-[9px] bg-brand-500 text-white px-1 rounded font-bold">TOP</span>
                     </div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">$199<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹4,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
                     <div className="text-[10px] text-slate-400 mt-1">Up to 150 staff</div>
                   </div>
 
@@ -413,7 +413,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                     }`}
                   >
                     <div className="font-bold text-white">Enterprise</div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">$499<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹12,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
                     <div className="text-[10px] text-slate-400 mt-1">Unlimited staff</div>
                   </div>
                 </div>

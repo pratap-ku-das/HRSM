@@ -192,7 +192,7 @@ model Employee {
   allowances         Float           @default(0)
   providentFund      Float           @default(0)
   taxDeduction       Float           @default(0)
-  currency           String          @default("USD")
+  currency           String          @default("INR")
 
   // Bank & Tax
   bankName           String?
@@ -407,7 +407,7 @@ model JobPosting {
   experienceLevel String
   minSalary       Float
   maxSalary       Float
-  currency        String         @default("USD")
+  currency        String         @default("INR")
   status          JobStatus      @default(OPEN)
   description     String
   requirements    String[]
@@ -477,7 +477,7 @@ model Asset {
   assignedDate         DateTime?   @db.Date
   purchaseDate         DateTime    @db.Date
   purchaseCost         Float
-  currency             String      @default("USD")
+  currency             String      @default("INR")
   status               AssetStatus @default(AVAILABLE)
   condition            String      @default("NEW")
 
@@ -543,7 +543,7 @@ model ExpenseClaim {
   title       String
   category    String
   amount      Float
-  currency    String        @default("USD")
+  currency    String        @default("INR")
   expenseDate DateTime      @db.Date
   status      ExpenseStatus @default(PENDING)
   notes       String?
@@ -581,8 +581,8 @@ model CompanySettings {
   companyName                  String
   legalEntityName              String
   taxRegistrationNumber        String
-  currency                     String   @default("USD")
-  currencySymbol               String   @default("$")
+  currency                     String   @default("INR")
+  currencySymbol               String   @default("₹")
   timezone                     String   @default("UTC")
   workDays                     Int[]    @default([1, 2, 3, 4, 5])
   businessHoursStart           String   @default("09:00")

@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 
 export const DepartmentsPage: React.FC = () => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const [activeTab, setActiveTab] = useState<'departments' | 'designations'>('departments');
 
   const [isDeptModalOpen, setIsDeptModalOpen] = useState<boolean>(false);
@@ -238,7 +239,7 @@ export const DepartmentsPage: React.FC = () => {
                         <DollarSign className="w-3.5 h-3.5" />
                         <span>Annual Budget:</span>
                       </span>
-                      <span className="font-mono font-bold text-emerald-400">${dept.budget.toLocaleString()}</span>
+                      <span className="font-mono font-bold text-emerald-400">{currencySymbol}{dept.budget.toLocaleString('en-IN')}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -300,7 +301,7 @@ export const DepartmentsPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 px-4 font-mono text-emerald-400 font-semibold">
-                        ${desig.minSalary.toLocaleString()} - ${desig.maxSalary.toLocaleString()}
+                        {currencySymbol}{desig.minSalary.toLocaleString('en-IN')} - {currencySymbol}{desig.maxSalary.toLocaleString('en-IN')}
                       </td>
                       <td className="py-3 px-4 text-slate-400 max-w-xs truncate">{desig.description}</td>
                       <td className="py-3 px-4 text-right">
@@ -364,7 +365,7 @@ export const DepartmentsPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Annual Budget ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Annual Budget ({currencySymbol})</label>
                   <input
                     type="number"
                     value={deptBudget}
@@ -484,7 +485,7 @@ export const DepartmentsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Min Salary ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Min Salary ({currencySymbol})</label>
                   <input
                     type="number"
                     value={desigMinSal}
@@ -493,7 +494,7 @@ export const DepartmentsPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Max Salary ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Max Salary ({currencySymbol})</label>
                   <input
                     type="number"
                     value={desigMaxSal}

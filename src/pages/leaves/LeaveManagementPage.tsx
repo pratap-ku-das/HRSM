@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LeaveRequest, LeaveType } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { api } from '../../services/api';
 import { 
   CalendarDays, Plus, Check, X, Clock, CheckCircle2, 
-  XCircle, Filter, Calendar, User, FileText, Sparkles
+  XCircle, Filter, Calendar, User, FileText, Sparkles, Edit3, Trash2
 } from 'lucide-react';
 
 export const LeaveManagementPage: React.FC = () => {
@@ -18,10 +19,132 @@ export const LeaveManagementPage: React.FC = () => {
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [totalDays, setTotalDays] = useState<number>(1);
   const [reason, setReason] = useState<string>('');
+  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [isLoadingLeaveTypes, setIsLoadingLeaveTypes] = useState<boolean>(true);
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState<boolean>(false);
+  const [editingPolicy, setEditingPolicy] = useState<LeaveType | null>(null);
+  const [policyName, setPolicyName] = useState('');
+  const [policyCode, setPolicyCode] = useState('');
+  const [policyDays, setPolicyDays] = useState(12);
+  const [policyPaid, setPolicyPaid] = useState(true);
+  const [policyColor, setPolicyColor] = useState('#3b82f6');
+  const [policyError, setPolicyError] = useState('');
 
   const employees = storageService.getEmployees(currentCompany?.id);
-  const leaveTypes = storageService.getLeaveTypes(currentCompany?.id);
-  const leaveRequests = storageService.getLeaveRequests(currentCompany?.id);
+  const designations = storageService.getDesignations(currentCompany?.id);
+  const currentEmployee = employees.find(employee => employee.id === currentUser?.employeeId)
+    || employees.find(employee => employee.email.toLowerCase() === currentUser?.email.toLowerCase());
+  const isGeneralManager = (employeeId: string) => {
+    const employee = employees.find(item => item.id === employeeId);
+    const title = designations.find(item => item.id === employee?.designationId)?.title || '';
+    return /general manager/i.test(title);
+  };
+  const currentUserIsGeneralManager = currentEmployee ? isGeneralManager(currentEmployee.id) : false;
+  const currentUserIsAdmin = currentUser?.role === 'COMPANY_ADMIN' || currentUser?.role === 'SUPER_ADMIN';
+
+  const canReviewRequest = (request: LeaveRequest) => {
+    if (!currentUser || request.employeeId === currentEmployee?.id) return false;
+    const requesterIsGeneralManager = isGeneralManager(request.employeeId);
+    return requesterIsGeneralManager ? currentUserIsAdmin : currentUserIsGeneralManager;
+  };
+
+  const requiredApproverLabel = (request: LeaveRequest) => isGeneralManager(request.employeeId)
+    ? 'Company Admin approval required'
+    : 'General Manager approval required';
+
+  const openPolicyModal = (policy?: LeaveType) => {
+    setEditingPolicy(policy || null);
+    setPolicyName(policy?.name || '');
+    setPolicyCode(policy?.code || '');
+    setPolicyDays(policy?.daysAllowedPerYear ?? 12);
+    setPolicyPaid(policy?.isPaid ?? true);
+    setPolicyColor(policy?.color || '#3b82f6');
+    setPolicyError('');
+    setIsPolicyModalOpen(true);
+  };
+
+  const handleSavePolicy = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentCompany || !currentUser || !currentUserIsAdmin) return;
+    setPolicyError('');
+    try {
+      const saved = await api.saveLeaveType({
+        id: editingPolicy?.id,
+        companyId: currentCompany.id,
+        name: policyName,
+        code: policyCode,
+        daysAllowedPerYear: policyDays,
+        isPaid: policyPaid,
+        color: policyColor,
+      }, currentUser.id);
+      const updated = editingPolicy
+        ? leaveTypes.map(item => item.id === saved.id ? saved : item)
+        : [...leaveTypes, saved];
+      setLeaveTypes(updated);
+      storageService.cacheLeaveTypes(currentCompany.id, updated);
+      setIsPolicyModalOpen(false);
+    } catch (error) {
+      setPolicyError(error instanceof Error ? error.message : 'Unable to save leave category');
+    }
+  };
+
+  const handleDeletePolicy = async (policy: LeaveType) => {
+    if (!currentCompany || !currentUser || !currentUserIsAdmin) return;
+    if (!window.confirm(`Delete leave category "${policy.name}"?`)) return;
+    try {
+      await api.deleteLeaveType(policy.id, currentUser.id);
+      const updated = leaveTypes.filter(item => item.id !== policy.id);
+      setLeaveTypes(updated);
+      storageService.cacheLeaveTypes(currentCompany.id, updated);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to delete leave category');
+    }
+  };
+
+  useEffect(() => {
+    if (!currentCompany?.id) {
+      setLeaveTypes([]);
+      setIsLoadingLeaveTypes(false);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingLeaveTypes(true);
+    api.getLeaveTypes(currentCompany.id)
+      .then(types => {
+        if (!active) return;
+        storageService.cacheLeaveTypes(currentCompany.id, types);
+        setLeaveTypes(types);
+        setLeaveTypeId(current => current || types[0]?.id || '');
+      })
+      .catch(() => {
+        if (!active) return;
+        const types = storageService.ensureIndianLeaveTypes(currentCompany.id);
+        setLeaveTypes(types);
+        setLeaveTypeId(current => current || types[0]?.id || '');
+      })
+      .finally(() => {
+        if (active) setIsLoadingLeaveTypes(false);
+      });
+
+    return () => { active = false; };
+  }, [currentCompany?.id]);
+
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    let active = true;
+    api.getLeaveRequests(currentCompany.id)
+      .then(requests => {
+        if (!active) return;
+        storageService.cacheLeaveRequests(currentCompany.id, requests);
+        setLeaveRequests(requests);
+      })
+      .catch(() => {
+        if (active) setLeaveRequests(storageService.getLeaveRequests(currentCompany.id));
+      });
+    return () => { active = false; };
+  }, [currentCompany?.id]);
 
   const filteredRequests = leaveRequests.filter(r => {
     return statusFilter === 'ALL' || r.status === statusFilter;
@@ -29,11 +152,12 @@ export const LeaveManagementPage: React.FC = () => {
 
   const handleApplyLeave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!leaveTypeId || leaveTypes.length === 0 || !currentEmployee) return;
     const newReq: LeaveRequest = {
       id: `lr-${Date.now()}`,
       companyId: currentCompany?.id || '',
-      employeeId: currentUser?.employeeId || employees[0]?.id || 'emp-1',
-      leaveTypeId: leaveTypeId || leaveTypes[0]?.id || '',
+      employeeId: currentEmployee.id,
+      leaveTypeId,
       startDate,
       endDate,
       totalDays: Number(totalDays),
@@ -43,6 +167,7 @@ export const LeaveManagementPage: React.FC = () => {
     };
 
     storageService.saveLeaveRequest(newReq);
+    setLeaveRequests(current => [newReq, ...current.filter(item => item.id !== newReq.id)]);
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -68,7 +193,9 @@ export const LeaveManagementPage: React.FC = () => {
       reviewerComment: newStatus === 'APPROVED' ? 'Approved by HR Operations.' : 'Request declined.',
     };
 
-    storageService.saveLeaveRequest(updated);
+    if (!currentUser || !canReviewRequest(req)) return;
+    storageService.reviewLeaveRequest(updated, currentUser.id);
+    setLeaveRequests(current => current.map(item => item.id === updated.id ? updated : item));
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -106,11 +233,12 @@ export const LeaveManagementPage: React.FC = () => {
         </div>
 
         <button
+          disabled={isLoadingLeaveTypes || leaveTypes.length === 0}
           onClick={() => {
             if (leaveTypes.length > 0) setLeaveTypeId(leaveTypes[0].id);
             setIsApplyModalOpen(true);
           }}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 shadow-md shadow-brand-500/20 transition-all flex items-center space-x-1.5"
+          className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-brand-500/20 transition-all flex items-center space-x-1.5"
         >
           <Plus className="w-4 h-4" />
           <span>Apply for Leave</span>
@@ -233,7 +361,7 @@ export const LeaveManagementPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right">
-                        {req.status === 'PENDING' ? (
+                        {req.status === 'PENDING' && canReviewRequest(req) ? (
                           <div className="flex items-center justify-end space-x-1.5">
                             <button
                               onClick={() => handleReview(req, 'APPROVED')}
@@ -250,6 +378,8 @@ export const LeaveManagementPage: React.FC = () => {
                               <span>Decline</span>
                             </button>
                           </div>
+                        ) : req.status === 'PENDING' ? (
+                          <span className="text-[10px] text-amber-300 font-medium">{requiredApproverLabel(req)}</span>
                         ) : (
                           <span className="text-[11px] text-slate-500 font-mono">
                             {req.approvedBy ? `by ${req.approvedBy}` : 'Processed'}
@@ -267,7 +397,15 @@ export const LeaveManagementPage: React.FC = () => {
 
       {/* TAB 2: POLICIES */}
       {activeTab === 'policies' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <div className="space-y-4 text-xs">
+          {currentUserIsAdmin && (
+            <div className="flex justify-end">
+              <button onClick={() => openPolicyModal()} className="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold flex items-center gap-1.5">
+                <Plus className="w-4 h-4" /> Add Leave Category
+              </button>
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {leaveTypes.map((t) => (
             <div key={t.id} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
@@ -275,7 +413,13 @@ export const LeaveManagementPage: React.FC = () => {
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
                   <span className="font-bold text-white text-sm">{t.name}</span>
                 </div>
-                <span className="font-mono text-slate-400 text-xs font-bold">{t.code}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-slate-400 text-xs font-bold">{t.code}</span>
+                  {currentUserIsAdmin && <>
+                    <button onClick={() => openPolicyModal(t)} className="p-1.5 rounded-lg text-brand-300 hover:bg-brand-500/20" title="Edit category"><Edit3 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => handleDeletePolicy(t)} className="p-1.5 rounded-lg text-rose-300 hover:bg-rose-500/20" title="Delete category"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </>}
+                </div>
               </div>
               <p className="text-slate-400">
                 Annual allocation quota is <strong className="text-white">{t.daysAllowedPerYear} days</strong> per calendar year. 
@@ -283,6 +427,29 @@ export const LeaveManagementPage: React.FC = () => {
               </p>
             </div>
           ))}
+          </div>
+        </div>
+      )}
+
+      {isPolicyModalOpen && currentUserIsAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsPolicyModalOpen(false)} />
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 text-xs">
+            <h3 className="text-base font-bold text-white">{editingPolicy ? 'Edit' : 'Add'} Leave Category</h3>
+            <form onSubmit={handleSavePolicy} className="mt-4 space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2"><label className="block text-slate-300 mb-1">Category Name *</label><input required value={policyName} onChange={e => setPolicyName(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white" /></div>
+                <div><label className="block text-slate-300 mb-1">Code *</label><input required value={policyCode} onChange={e => setPolicyCode(e.target.value.toUpperCase())} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white uppercase" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-slate-300 mb-1">Days per Year *</label><input type="number" min="0" required value={policyDays} onChange={e => setPolicyDays(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white" /></div>
+                <div><label className="block text-slate-300 mb-1">Display Colour</label><input type="color" value={policyColor} onChange={e => setPolicyColor(e.target.value)} className="w-full h-9 bg-slate-800 border border-slate-700 rounded-xl px-2" /></div>
+              </div>
+              <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={policyPaid} onChange={e => setPolicyPaid(e.target.checked)} /> Paid leave category</label>
+              {policyError && <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300">{policyError}</div>}
+              <div className="flex justify-end gap-2"><button type="button" onClick={() => setIsPolicyModalOpen(false)} className="px-4 py-2 bg-slate-800 rounded-xl text-slate-300">Cancel</button><button type="submit" className="px-5 py-2 bg-brand-500 rounded-xl text-white font-bold">Save Category</button></div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -298,10 +465,12 @@ export const LeaveManagementPage: React.FC = () => {
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Leave Category *</label>
                 <select
+                  required
                   value={leaveTypeId}
                   onChange={(e) => setLeaveTypeId(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                 >
+                  <option value="" disabled>{isLoadingLeaveTypes ? 'Loading leave categories…' : 'Select leave category'}</option>
                   {leaveTypes.map((t) => (
                     <option key={t.id} value={t.id}>{t.name} ({t.daysAllowedPerYear} days/yr)</option>
                   ))}
@@ -366,7 +535,8 @@ export const LeaveManagementPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-bold"
+                  disabled={!currentEmployee || !leaveTypeId}
+                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold"
                 >
                   Submit Request
                 </button>

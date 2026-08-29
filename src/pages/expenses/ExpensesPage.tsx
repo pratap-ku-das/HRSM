@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 
 export const ExpensesPage: React.FC = () => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState<boolean>(false);
 
   const [title, setTitle] = useState<string>('');
@@ -29,7 +30,7 @@ export const ExpensesPage: React.FC = () => {
       title,
       category,
       amount: Number(amount),
-      currency: 'USD',
+      currency: settings?.currency || 'INR',
       expenseDate: new Date().toISOString().split('T')[0],
       status: 'PENDING',
       notes,
@@ -45,7 +46,7 @@ export const ExpensesPage: React.FC = () => {
       userRole: currentUser?.role || 'EMPLOYEE',
       action: 'SUBMIT_EXPENSE',
       category: 'PAYROLL',
-      details: `Submitted expense claim: ${newClaim.title} ($${newClaim.amount})`,
+      details: `Submitted expense claim: ${newClaim.title} (${currencySymbol}${newClaim.amount.toLocaleString('en-IN')})`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -69,7 +70,7 @@ export const ExpensesPage: React.FC = () => {
       userRole: currentUser?.role || 'ADMIN',
       action: 'REVIEW_EXPENSE',
       category: 'PAYROLL',
-      details: `${newStatus} expense claim (${claim.title} - $${claim.amount})`,
+      details: `${newStatus} expense claim (${claim.title} - ${currencySymbol}${claim.amount.toLocaleString('en-IN')})`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -150,7 +151,7 @@ export const ExpensesPage: React.FC = () => {
                         {exp.category}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-mono font-bold text-emerald-400 text-sm">${exp.amount}.00</td>
+                    <td className="py-3 px-4 font-mono font-bold text-emerald-400 text-sm">{currencySymbol}{exp.amount.toLocaleString('en-IN')}</td>
                     <td className="py-3 px-4 font-mono text-slate-400">{exp.expenseDate}</td>
                     <td className="py-3 px-4">
                       <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold ${getStatusBadge(exp.status)}`}>
@@ -222,7 +223,7 @@ export const ExpensesPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Amount ($) *</label>
+                  <label className="block text-slate-300 font-medium mb-1">Amount ({currencySymbol}) *</label>
                   <input
                     type="number"
                     required

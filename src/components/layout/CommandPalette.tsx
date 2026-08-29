@@ -72,7 +72,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         
         if (myEmp) {
           const existing = records.find(r => r.employeeId === myEmp.id && r.date === todayStr);
-          const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
           const nowIso = new Date().toISOString();
           
           if (!existing || !existing.clockInTime) {

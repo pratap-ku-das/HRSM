@@ -1,3 +1,4 @@
+// @refresh reset
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Company, UserRole, CompanySettings } from '../types';
 import { storageService } from '../services/storageService';
@@ -18,6 +19,13 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const useIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
+  ...value,
+  currency: 'INR',
+  currencySymbol: '₹',
+  timezone: 'Asia/Kolkata (IST - UTC+5:30)',
+} : null;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -44,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentCompany(comp);
             setCurrentUser(user);
             const liveSettings = await api.getSettings(comp.id).catch(() => storageService.getSettings(comp.id));
-            setSettings(liveSettings);
+            setSettings(useIndianSettings(liveSettings));
             return;
           }
         } catch (e) {
@@ -59,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentCompany(firstComp);
         setCurrentUser(user);
         const liveSettings = await api.getSettings(firstComp.id).catch(() => storageService.getSettings(firstComp.id));
-        setSettings(liveSettings);
+        setSettings(useIndianSettings(liveSettings));
       } else {
         setCurrentCompany(null);
         setCurrentUser(null);
@@ -93,7 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (result && result.user && result.company) {
         setCurrentUser(result.user);
         setCurrentCompany(result.company);
-        setSettings(result.settings);
+        setSettings(useIndianSettings(result.settings));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: result.user.id, companyId: result.company.id }));
         return true;
       }
@@ -110,7 +118,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (comp) {
         setCurrentUser(user);
         setCurrentCompany(comp);
-        setSettings(storageService.getSettings(comp.id));
+        setSettings(useIndianSettings(storageService.getSettings(comp.id)));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: user.id, companyId: comp.id }));
       }
     }
@@ -146,8 +154,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: companyData.name || 'New Enterprise Corp',
         slug: (companyData.name || 'new-corp').toLowerCase().replace(/[^a-z0-9]/g, '-'),
         email: companyData.email || 'admin@newcorp.com',
-        phone: companyData.phone || '+1 (555) 000-0000',
-        address: companyData.address || 'Corporate Headquarters',
+        phone: companyData.phone || '+91 80 4000 0000',
+        address: companyData.address || 'Bengaluru, Karnataka, India',
         industry: companyData.industry || 'Technology & Services',
         size: companyData.size || '11-50',
         plan: plan,
@@ -168,11 +176,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: `set-${companyId}`,
         companyId: companyId,
         companyName: newCompany.name,
-        legalEntityName: `${newCompany.name} Inc.`,
-        taxRegistrationNumber: `TAX-${Math.floor(10000000 + Math.random() * 90000000)}`,
-        currency: 'USD',
-        currencySymbol: '$',
-        timezone: 'America/Los_Angeles (PST)',
+        legalEntityName: `${newCompany.name} Private Limited`,
+        taxRegistrationNumber: `GSTIN: 29AABCA${Math.floor(1000 + Math.random() * 9000)}F1Z8`,
+        currency: 'INR',
+        currencySymbol: '₹',
+        timezone: 'Asia/Kolkata (IST)',
         workDays: [1, 2, 3, 4, 5],
         businessHoursStart: '09:00',
         businessHoursEnd: '18:00',
@@ -197,7 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userToSet = companyUsers[0] || null;
       setCurrentCompany(comp);
       setCurrentUser(userToSet);
-      setSettings(storageService.getSettings(comp.id));
+      setSettings(useIndianSettings(storageService.getSettings(comp.id)));
       if (userToSet) {
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: userToSet.id, companyId: comp.id }));
       }

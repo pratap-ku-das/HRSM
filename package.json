@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently -k -n \"server,client\" -c \"blue,green\" \"npm:server\" \"npm:client\"",
     "client": "vite",
-    "server": "tsx server/index.ts",
+    "server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
@@ -19,6 +19,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.16.0",
     "pg": "^8.13.3",
     "react": "^19.0.0",

@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 
 export const RecruitmentPage: React.FC = () => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const [activeTab, setActiveTab] = useState<'pipeline' | 'jobs'>('pipeline');
   const [selectedJobId, setSelectedJobId] = useState<string>('ALL');
 
@@ -18,10 +19,10 @@ export const RecruitmentPage: React.FC = () => {
   // Job Modal State
   const [jobTitle, setJobTitle] = useState<string>('');
   const [jobDeptId, setJobDeptId] = useState<string>('');
-  const [jobLocation, setJobLocation] = useState<string>('San Francisco / Remote');
+  const [jobLocation, setJobLocation] = useState<string>('Bengaluru / Remote');
   const [jobExp, setJobExp] = useState<string>('3+ Years');
-  const [minSal, setMinSal] = useState<number>(100000);
-  const [maxSal, setMaxSal] = useState<number>(140000);
+  const [minSal, setMinSal] = useState<number>(1000000);
+  const [maxSal, setMaxSal] = useState<number>(1400000);
   const [jobDesc, setJobDesc] = useState<string>('');
 
   const departments = storageService.getDepartments(currentCompany?.id);
@@ -52,7 +53,7 @@ export const RecruitmentPage: React.FC = () => {
       experienceLevel: jobExp,
       minSalary: Number(minSal),
       maxSalary: Number(maxSal),
-      currency: 'USD',
+      currency: settings?.currency || 'INR',
       status: 'OPEN',
       description: jobDesc,
       requirements: ['TypeScript', 'System Architecture', 'Communication'],
@@ -262,7 +263,7 @@ export const RecruitmentPage: React.FC = () => {
                 <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-slate-400">
                   <div className="flex items-center space-x-3">
                     <span className="font-mono text-emerald-400 font-bold">
-                      ${job.minSalary.toLocaleString()} - ${job.maxSalary.toLocaleString()}
+                      {currencySymbol}{job.minSalary.toLocaleString('en-IN')} - {currencySymbol}{job.maxSalary.toLocaleString('en-IN')}
                     </span>
                     <span>•</span>
                     <span>{job.experienceLevel}</span>
@@ -385,7 +386,7 @@ export const RecruitmentPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Min Annual Salary ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Min Annual Salary ({currencySymbol})</label>
                   <input
                     type="number"
                     value={minSal}
@@ -394,7 +395,7 @@ export const RecruitmentPage: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Max Annual Salary ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Max Annual Salary ({currencySymbol})</label>
                   <input
                     type="number"
                     value={maxSal}

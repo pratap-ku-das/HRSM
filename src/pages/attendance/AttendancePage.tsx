@@ -10,7 +10,9 @@ import {
 
 export const AttendancePage: React.FC = () => {
   const { currentCompany, currentUser } = useAuth();
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-08');
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const [selectedMonth, setSelectedMonth] = useState<string>(todayStr.slice(0, 7));
   const [activeTab, setActiveTab] = useState<'matrix' | 'adjustments' | 'mobile_blueprint'>('matrix');
 
   // Selected cell for adjustment modal
@@ -39,6 +41,16 @@ export const AttendancePage: React.FC = () => {
   const departments = storageService.getDepartments(currentCompany?.id);
   const attendanceRecords = storageService.getAttendanceRecords(currentCompany?.id);
 
+  type DisplayStatus = AttendanceStatus | 'NOT_JOINED' | 'FUTURE' | 'NO_RECORD';
+
+  const getDisplayStatus = (employeeDateOfJoining: string, date: string, dayOfWeek: number, record?: AttendanceRecord): DisplayStatus => {
+    if (date < employeeDateOfJoining) return 'NOT_JOINED';
+    if (date > todayStr) return 'FUTURE';
+    if (record) return record.status;
+    if (dayOfWeek === 0 || dayOfWeek === 6) return 'WEEKEND';
+    return 'NO_RECORD';
+  };
+
   // Generate days in selected month (e.g. 2026-08)
   const [yearStr, monthStr] = selectedMonth.split('-');
   const year = parseInt(yearStr);
@@ -53,11 +65,11 @@ export const AttendancePage: React.FC = () => {
       dayNum: d,
       dateStr,
       dayOfWeek: dateObj.getDay(),
-      dayLabel: dateObj.toLocaleDateString('en-US', { weekday: 'narrow' }),
+      dayLabel: dateObj.toLocaleDateString('en-IN', { weekday: 'narrow' }),
     });
   }
 
-  const getStatusBadgeStyle = (status: AttendanceStatus) => {
+  const getStatusBadgeStyle = (status: DisplayStatus) => {
     switch (status) {
       case 'PRESENT':
         return 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/40';
@@ -71,13 +83,19 @@ export const AttendancePage: React.FC = () => {
         return 'bg-purple-500/25 text-purple-300 border-purple-500/40 hover:bg-purple-500/40';
       case 'WEEKEND':
         return 'bg-slate-800/40 text-slate-500 border-slate-800 hover:bg-slate-800/60';
+      case 'NOT_JOINED':
+        return 'bg-slate-950/60 text-slate-600 border-slate-800 cursor-not-allowed';
+      case 'FUTURE':
+        return 'bg-slate-900/40 text-slate-600 border-slate-800 cursor-not-allowed';
+      case 'NO_RECORD':
+        return 'bg-slate-800/20 text-slate-500 border-slate-700/50 hover:bg-slate-800/40';
       case 'ABSENT':
       default:
         return 'bg-rose-500/25 text-rose-300 border-rose-500/40 hover:bg-rose-500/40';
     }
   };
 
-  const getStatusAbbr = (status: AttendanceStatus) => {
+  const getStatusAbbr = (status: DisplayStatus) => {
     switch (status) {
       case 'PRESENT': return 'P';
       case 'LATE': return 'L';
@@ -85,6 +103,9 @@ export const AttendancePage: React.FC = () => {
       case 'LEAVE': return 'LV';
       case 'HOLIDAY': return 'H';
       case 'WEEKEND': return '—';
+      case 'NOT_JOINED': return 'N/A';
+      case 'FUTURE': return '—';
+      case 'NO_RECORD': return '·';
       case 'ABSENT': return 'A';
       default: return '—';
     }
@@ -138,9 +159,10 @@ export const AttendancePage: React.FC = () => {
 
   const handleBulkMark = (e: React.FormEvent) => {
     e.preventDefault();
-    const targetEmployees = bulkDeptId === 'ALL'
+    const departmentEmployees = bulkDeptId === 'ALL'
       ? employees
       : employees.filter(e => e.departmentId === bulkDeptId);
+    const targetEmployees = departmentEmployees.filter(emp => emp.dateOfJoining <= bulkDate && bulkDate <= todayStr);
 
     const newRecords: AttendanceRecord[] = targetEmployees.map(emp => ({
       id: `att-${emp.id}-${bulkDate}`,
@@ -178,7 +200,7 @@ export const AttendancePage: React.FC = () => {
       const dept = departments.find(d => d.id === emp.departmentId)?.name || '';
       const dayStatuses = monthDays.map(d => {
         const rec = attendanceRecords.find(a => a.employeeId === emp.id && a.date === d.dateStr);
-        return rec ? rec.status : (d.dayOfWeek === 0 || d.dayOfWeek === 6 ? 'WEEKEND' : 'PRESENT');
+        return getDisplayStatus(emp.dateOfJoining, d.dateStr, d.dayOfWeek, rec);
       });
       return [emp.employeeCode, `"${emp.firstName} ${emp.lastName}"`, `"${dept}"`, ...dayStatuses].join(',');
     });
@@ -333,6 +355,14 @@ export const AttendancePage: React.FC = () => {
               <span className="w-4 h-4 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-500 flex items-center justify-center">—</span>
               <span className="text-slate-400">Weekend</span>
             </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-4 h-4 rounded bg-slate-800/30 border border-slate-700 text-[10px] text-slate-400 flex items-center justify-center">·</span>
+              <span className="text-slate-400">No record</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-6 h-4 rounded bg-slate-950/50 border border-slate-800 text-[8px] text-slate-500 flex items-center justify-center">N/A</span>
+              <span className="text-slate-400">Not employed</span>
+            </div>
             <span className="ml-auto text-[11px] text-brand-400">💡 Click any cell to view or adjust record</span>
           </div>
 
@@ -385,21 +415,20 @@ export const AttendancePage: React.FC = () => {
                         {monthDays.map((d) => {
                           const record = attendanceRecords.find(a => a.employeeId === emp.id && a.date === d.dateStr);
                           const isWeekend = d.dayOfWeek === 0 || d.dayOfWeek === 6;
-                          const status: AttendanceStatus = record 
-                            ? record.status 
-                            : (isWeekend ? 'WEEKEND' : 'PRESENT');
+                          const status = getDisplayStatus(emp.dateOfJoining, d.dateStr, d.dayOfWeek, record);
+                          const isLocked = status === 'NOT_JOINED' || status === 'FUTURE';
 
                           return (
                             <td
                               key={d.dayNum}
-                              onClick={() => handleCellClick(emp.id, `${emp.firstName} ${emp.lastName}`, d.dateStr)}
-                              className={`py-1.5 px-0.5 text-center cursor-pointer transition-all ${
+                              onClick={() => !isLocked && handleCellClick(emp.id, `${emp.firstName} ${emp.lastName}`, d.dateStr)}
+                              className={`py-1.5 px-0.5 text-center transition-all ${isLocked ? 'cursor-not-allowed' : 'cursor-pointer'} ${
                                 isWeekend ? 'bg-slate-950/30' : ''
                               }`}
                             >
                               <div
                                 className={`w-7 h-7 mx-auto rounded-lg border flex items-center justify-center font-mono font-bold text-[10px] transition-transform hover:scale-110 ${getStatusBadgeStyle(status)}`}
-                                title={`${emp.firstName} on ${d.dateStr}: ${status}`}
+                                title={status === 'NOT_JOINED' ? `${emp.firstName} had not joined yet` : status === 'FUTURE' ? 'Future date' : `${emp.firstName} on ${d.dateStr}: ${status.replace('_', ' ')}`}
                               >
                                 {getStatusAbbr(status)}
                               </div>
@@ -645,6 +674,7 @@ export const AttendancePage: React.FC = () => {
                 <input
                   type="date"
                   required
+                  max={todayStr}
                   value={bulkDate}
                   onChange={(e) => setBulkDate(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-brand-500"

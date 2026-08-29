@@ -86,7 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     const todayStr = new Date().toISOString().split('T')[0];
     const records = storageService.getAttendanceRecords(currentCompany?.id);
     const existing = records.find(r => r.employeeId === myEmployee.id && r.date === todayStr);
-    const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
     const nowIso = new Date().toISOString();
 
     if (!isClockedIn) {

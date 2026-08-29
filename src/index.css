@@ -171,6 +171,9 @@
 .employee-onboarding-actions { background:#ffffffee!important;border-color:#dfe3ed!important;box-shadow:0 -8px 28px #26345d16!important; }
 .employee-onboarding-actions button[type="button"] { background:#eef0f6!important;color:#4e5568!important; }
 .employee-onboarding-actions button[type="submit"] { background:linear-gradient(135deg,#7957e8,#5232c9)!important;color:#fff!important;box-shadow:0 10px 24px #6941d933!important; }
+.employee-onboarding-actions .employee-step-primary { min-width:230px;min-height:46px;padding:11px 20px!important;display:inline-flex;align-items:center;justify-content:center;gap:12px;border:1px solid #6741d9!important;background:linear-gradient(135deg,#805be9 0%,#5733ce 100%)!important;color:#fff!important;box-shadow:0 12px 25px #6842d94d!important;font-size:13px;font-weight:800;letter-spacing:.01em; }
+.employee-onboarding-actions .employee-step-primary:hover { background:linear-gradient(135deg,#7049df 0%,#4825bd 100%)!important;box-shadow:0 15px 30px #6842d966!important;transform:translateY(-1px); }
+.employee-onboarding-actions .employee-step-primary span:last-child { font-size:18px;line-height:1; }
 .lp-links { display:flex; gap:34px; }
 .lp-links a,.lp-footer a { color:#655f75; text-decoration:none; font-size:13px; font-weight:700; }
 .lp-links a:hover { color:var(--purple); }

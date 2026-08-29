@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PayrollRun, Payslip, Employee } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { downloadPayslipPdf } from '../../utils/payslipPdf';
 import { 
   CreditCard, DollarSign, Download, Printer, CheckCircle2, 
   Calendar, FileText, X, Sparkles, Building2, User, ArrowUpRight
@@ -12,10 +13,13 @@ export const PayrollPage: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-07');
   const [activePayslip, setActivePayslip] = useState<Payslip | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
 
   const employees = storageService.getEmployees(currentCompany?.id);
   const payrollRuns = storageService.getPayrollRuns(currentCompany?.id);
   const payslips = storageService.getPayslips(currentCompany?.id);
+  const departments = storageService.getDepartments(currentCompany?.id);
+  const designations = storageService.getDesignations(currentCompany?.id);
   const settings = storageService.getSettings(currentCompany?.id || '');
 
   const currentRun = payrollRuns.find(r => r.month === selectedMonth);
@@ -82,7 +86,7 @@ export const PayrollPage: React.FC = () => {
         userRole: currentUser?.role || 'ADMIN',
         action: 'PROCESS_PAYROLL',
         category: 'PAYROLL',
-        details: `Generated and disbursed payroll for ${selectedMonth} (${newRun.totalEmployees} employees, Net: $${newRun.totalNetPayout.toLocaleString()}).`,
+        details: `Generated and disbursed payroll for ${selectedMonth} (${newRun.totalEmployees} employees, Net: ₹${newRun.totalNetPayout.toLocaleString('en-IN')}).`,
         timestamp: new Date().toISOString(),
         ipAddress: '127.0.0.1',
       });
@@ -91,8 +95,23 @@ export const PayrollPage: React.FC = () => {
     }, 1000);
   };
 
-  const handlePrintPayslip = () => {
-    window.print();
+  const handleDownloadPayslip = async () => {
+    if (!activePayslip || !currentCompany || !settings) return;
+    const employee = employees.find(item => item.id === activePayslip.employeeId);
+    if (!employee) return;
+    setIsGeneratingPdf(true);
+    try {
+      await downloadPayslipPdf({
+        company: currentCompany,
+        settings,
+        employee,
+        department: departments.find(item => item.id === employee.departmentId),
+        designation: designations.find(item => item.id === employee.designationId),
+        payslip: activePayslip,
+      });
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const currSymbol = settings?.currencySymbol || '₹';
@@ -373,11 +392,12 @@ export const PayrollPage: React.FC = () => {
 
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={handlePrintPayslip}
-                  className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-xl font-bold flex items-center space-x-1.5"
+                  onClick={handleDownloadPayslip}
+                  disabled={isGeneratingPdf}
+                  className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-60 rounded-xl font-bold flex items-center space-x-1.5"
                 >
-                  <Printer className="w-4 h-4" />
-                  <span>Print Payslip</span>
+                  <Download className="w-4 h-4" />
+                  <span>{isGeneratingPdf ? 'Generating PDF…' : 'Download PDF'}</span>
                 </button>
                 <button
                   onClick={() => setActivePayslip(null)}

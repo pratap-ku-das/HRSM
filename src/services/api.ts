@@ -92,16 +92,26 @@ export const api = {
 
   // Leaves
   getLeaveTypes: (companyId: string) => fetchJSON<LeaveType[]>(`${API_BASE}/leaves/types?companyId=${companyId}`),
+  saveLeaveType: (leaveType: Partial<LeaveType>, adminUserId: string) =>
+    fetchJSON<LeaveType>(`${API_BASE}/leaves/types`, {
+      method: 'POST',
+      body: JSON.stringify({ ...leaveType, adminUserId }),
+    }),
+  deleteLeaveType: (id: string, adminUserId: string) =>
+    fetchJSON<{ success: boolean }>(`${API_BASE}/leaves/types/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ adminUserId }),
+    }),
   getLeaveRequests: (companyId: string) => fetchJSON<LeaveRequest[]>(`${API_BASE}/leaves/requests?companyId=${companyId}`),
   applyLeave: (req: any) => 
     fetchJSON<LeaveRequest>(`${API_BASE}/leaves/apply`, {
       method: 'POST',
       body: JSON.stringify(req),
     }),
-  reviewLeave: (id: string, status: string, approvedBy: string, reviewerComment?: string) =>
+  reviewLeave: (id: string, status: string, approvedBy: string, reviewerUserId: string, reviewerComment?: string) =>
     fetchJSON<LeaveRequest>(`${API_BASE}/leaves/review`, {
       method: 'POST',
-      body: JSON.stringify({ id, status, approvedBy, reviewerComment }),
+      body: JSON.stringify({ id, status, approvedBy, reviewerUserId, reviewerComment }),
     }),
 
   // Payroll

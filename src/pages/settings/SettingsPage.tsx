@@ -29,9 +29,9 @@ export const SettingsPage: React.FC = () => {
       setCompanyName(settings.companyName);
       setLegalName(settings.legalEntityName);
       setTaxId(settings.taxRegistrationNumber);
-      setCurrency(settings.currency);
-      setCurrencySymbol(settings.currencySymbol);
-      setTimezone(settings.timezone);
+      setCurrency('INR');
+      setCurrencySymbol('₹');
+      setTimezone('Asia/Kolkata (IST - UTC+5:30)');
       setWorkDays(settings.workDays);
       setHoursStart(settings.businessHoursStart);
       setHoursEnd(settings.businessHoursEnd);
@@ -63,9 +63,9 @@ export const SettingsPage: React.FC = () => {
       companyName,
       legalEntityName: legalName,
       taxRegistrationNumber: taxId,
-      currency,
-      currencySymbol,
-      timezone,
+      currency: 'INR',
+      currencySymbol: '₹',
+      timezone: 'Asia/Kolkata (IST - UTC+5:30)',
       workDays,
       businessHoursStart: hoursStart,
       businessHoursEnd: hoursEnd,
@@ -234,14 +234,7 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => setTimezone(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
               >
-                <option>America/Los_Angeles (PST)</option>
-                <option>America/New_York (EST)</option>
-                <option>Europe/London (GMT)</option>
-                <option>Europe/Berlin (CET)</option>
-                <option>Asia/Dubai (GST)</option>
-                <option>Asia/Kolkata (IST)</option>
-                <option>Asia/Singapore (SGT)</option>
-                <option>Asia/Tokyo (JST)</option>
+                <option>Asia/Kolkata (IST - UTC+5:30)</option>
               </select>
             </div>
             <div>
@@ -251,13 +244,7 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => setCurrency(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
               >
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
-                <option value="GBP">GBP (£)</option>
                 <option value="INR">INR (₹)</option>
-                <option value="CAD">CAD ($)</option>
-                <option value="AUD">AUD ($)</option>
-                <option value="SGD">SGD ($)</option>
               </select>
             </div>
           </div>

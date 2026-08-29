@@ -22,7 +22,8 @@ interface DashboardOverviewProps {
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ 
   setActiveView,
 }) => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const toast = useToast();
   const [chartRange, setChartRange] = useState<'7d' | '14d' | '30d'>('14d');
 
@@ -41,22 +42,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
   const todayAttendance = attendanceRecords.filter(a => a.date === todayStr);
 
-  const totalEmployeesCount = employees.length;
+  const eligibleTodayEmployees = employees.filter(e => e.dateOfJoining <= todayStr);
+  const totalEmployeesCount = eligibleTodayEmployees.length;
   const activeEmployees = employees.filter(e => e.status === 'ACTIVE').length;
   const probationEmployees = employees.filter(e => e.status === 'ON_PROBATION').length;
 
   const presentCount = todayAttendance.filter(a => a.status === 'PRESENT').length;
   const lateCount = todayAttendance.filter(a => a.status === 'LATE').length;
   const leaveCount = todayAttendance.filter(a => a.status === 'LEAVE').length;
-  const absentCount = Math.max(0, totalEmployeesCount - (presentCount + lateCount + leaveCount));
+  const absentCount = todayAttendance.filter(a => a.status === 'ABSENT').length;
 
   const attendancePercentage = totalEmployeesCount > 0 
     ? Math.round(((presentCount + lateCount) / totalEmployeesCount) * 100) 
     : 100;
 
   // Compute monthly payroll estimate (basic + hra + allowances)
-  const totalMonthlyPayroll = employees.reduce((sum, e) => {
-    const gross = (e.salary?.basic || 50000) + (e.salary?.hra || 15000) + (e.salary?.allowances || 5000);
+  const totalMonthlyPayroll = eligibleTodayEmployees.reduce((sum, e) => {
+    const gross = (e.salary?.basic || 0) + (e.salary?.hra || 0) + (e.salary?.allowances || 0);
     return sum + gross;
   }, 0);
 
@@ -68,20 +70,20 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     const dateKey = d.toISOString().split('T')[0];
-    const dayLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dayLabel = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
     const dayRecords = attendanceRecords.filter(a => a.date === dateKey);
 
     const present = dayRecords.filter(a => a.status === 'PRESENT').length;
     const late = dayRecords.filter(a => a.status === 'LATE').length;
     const onLeave = dayRecords.filter(a => a.status === 'LEAVE').length;
-    const absent = Math.max(0, (totalEmployeesCount || 8) - (present + late + onLeave));
+    const absent = dayRecords.filter(a => a.status === 'ABSENT').length;
 
     trendData.push({
       date: dayLabel,
-      Present: present || Math.max(1, (totalEmployeesCount || 7) - 1),
-      Late: late || 1,
-      Absent: absent || 0,
-      Leave: onLeave || 0,
+      Present: present,
+      Late: late,
+      Absent: absent,
+      Leave: onLeave,
     });
   }
 
@@ -91,7 +93,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return {
       name: dept.name,
       code: dept.code,
-      employees: count || dept.employeeCount || 1,
+      employees: count,
     };
   });
 
@@ -156,7 +158,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         ...exp,
         status: 'APPROVED',
       });
-      toast.success('Expense Claim Approved', `Approved $${exp.amount.toLocaleString()} for payout.`);
+      toast.success('Expense Claim Approved', `Approved ${currencySymbol}${exp.amount.toLocaleString('en-IN')} for payout.`);
     }
   };
 
@@ -312,7 +314,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline space-x-1.5">
             <div className="text-2xl font-black text-white font-mono">
-              ${(totalMonthlyPayroll / 1000).toFixed(0)}k
+              {currencySymbol}{(totalMonthlyPayroll / 100000).toFixed(1)}L
             </div>
             <span className="text-[10px] text-purple-300">/ mo</span>
           </div>
@@ -591,7 +593,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                           <div className="text-xs font-bold text-white truncate flex items-center space-x-2">
                             <span>Expense: {exp.title}</span>
                             <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                              ${exp.amount.toLocaleString()}
+                              {currencySymbol}{exp.amount.toLocaleString('en-IN')}
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-400 mt-0.5 truncate">

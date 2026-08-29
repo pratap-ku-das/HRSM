@@ -21,7 +21,8 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
   onEdit,
   onDelete,
 }) => {
-  const { currentCompany } = useAuth();
+  const { currentCompany, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
 
   if (!employee) return null;
 
@@ -131,7 +132,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
               </div>
               <div className="flex items-center space-x-3 text-slate-300">
                 <Calendar className="w-4 h-4 text-slate-400" />
-                <span>Joined on {new Date(employee.dateOfJoining).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                <span>Joined on {new Date(employee.dateOfJoining).toLocaleDateString('en-IN', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
               </div>
             </div>
 
@@ -147,26 +148,26 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="text-slate-400">Basic Pay</div>
-                  <div className="text-sm font-bold text-white font-mono mt-0.5">${employee.salary.basic}</div>
+                  <div className="text-sm font-bold text-white font-mono mt-0.5">{currencySymbol}{employee.salary.basic.toLocaleString('en-IN')}</div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="text-slate-400">HRA Allowance</div>
-                  <div className="text-sm font-bold text-white font-mono mt-0.5">${employee.salary.hra}</div>
+                  <div className="text-sm font-bold text-white font-mono mt-0.5">{currencySymbol}{employee.salary.hra.toLocaleString('en-IN')}</div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="text-slate-400">Special Allowances</div>
-                  <div className="text-sm font-bold text-white font-mono mt-0.5">${employee.salary.allowances}</div>
+                  <div className="text-sm font-bold text-white font-mono mt-0.5">{currencySymbol}{employee.salary.allowances.toLocaleString('en-IN')}</div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="text-slate-400">PF & Tax Deductions</div>
-                  <div className="text-sm font-bold text-rose-400 font-mono mt-0.5">-${employee.salary.providentFund + employee.salary.taxDeduction}</div>
+                  <div className="text-sm font-bold text-rose-400 font-mono mt-0.5">-{currencySymbol}{(employee.salary.providentFund + employee.salary.taxDeduction).toLocaleString('en-IN')}</div>
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
                 <span className="font-semibold text-emerald-300">Net Monthly Disbursed</span>
                 <span className="text-base font-bold text-emerald-400 font-mono">
-                  ${(employee.salary.basic + employee.salary.hra + employee.salary.allowances) - (employee.salary.providentFund + employee.salary.taxDeduction)}
+                  {currencySymbol}{((employee.salary.basic + employee.salary.hra + employee.salary.allowances) - (employee.salary.providentFund + employee.salary.taxDeduction)).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>

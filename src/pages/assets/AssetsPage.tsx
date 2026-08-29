@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 
 export const AssetsPage: React.FC = () => {
-  const { currentCompany, currentUser } = useAuth();
+  const { currentCompany, currentUser, settings } = useAuth();
+  const currencySymbol = settings?.currencySymbol || '₹';
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
@@ -16,7 +17,7 @@ export const AssetsPage: React.FC = () => {
   const [assetName, setAssetName] = useState<string>('');
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('LAPTOP');
   const [assetSerial, setAssetSerial] = useState<string>('');
-  const [assetCost, setAssetCost] = useState<number>(2499);
+  const [assetCost, setAssetCost] = useState<number>(75000);
   const [assetCondition, setAssetCondition] = useState<Asset['condition']>('NEW');
   const [assignedEmpId, setAssignedEmpId] = useState<string>('');
 
@@ -41,7 +42,7 @@ export const AssetsPage: React.FC = () => {
       assignedDate: assignedEmpId ? new Date().toISOString().split('T')[0] : undefined,
       purchaseDate: new Date().toISOString().split('T')[0],
       purchaseCost: Number(assetCost),
-      currency: 'USD',
+      currency: settings?.currency || 'INR',
       status: assignedEmpId ? 'ASSIGNED' : 'AVAILABLE',
       condition: assetCondition,
     };
@@ -168,7 +169,7 @@ export const AssetsPage: React.FC = () => {
                         <span className="text-slate-500 italic">In Storage / Available</span>
                       )}
                     </td>
-                    <td className="py-3 px-4 font-mono text-slate-300 font-semibold">${asset.purchaseCost}</td>
+                    <td className="py-3 px-4 font-mono text-slate-300 font-semibold">{currencySymbol}{asset.purchaseCost.toLocaleString('en-IN')}</td>
                     <td className="py-3 px-4">
                       <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
                         {asset.condition}
@@ -237,7 +238,7 @@ export const AssetsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Purchase Cost ($)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Purchase Cost ({currencySymbol})</label>
                   <input
                     type="number"
                     value={assetCost}

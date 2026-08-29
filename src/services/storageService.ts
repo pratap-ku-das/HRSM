@@ -54,6 +54,26 @@ class StorageService {
     // Clear all legacy mock data
     const oldKeys = Object.keys(localStorage).filter(k => k.startsWith('hrms_') && !k.endsWith('_v2'));
     oldKeys.forEach(k => localStorage.removeItem(k));
+
+    // Migrate previously saved US defaults so existing workspaces immediately use India settings.
+    const settings = this.get<CompanySettings[]>(STORAGE_KEYS.SETTINGS, []);
+    if (settings.length) {
+      this.set(STORAGE_KEYS.SETTINGS, settings.map(item => ({
+        ...item,
+        currency: 'INR',
+        currencySymbol: '₹',
+        timezone: 'Asia/Kolkata (IST - UTC+5:30)',
+      })));
+    }
+
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    if (employees.length) this.set(STORAGE_KEYS.EMPLOYEES, employees.map(item => ({ ...item, salary: { ...item.salary, currency: 'INR' } })));
+    const jobs = this.get<JobPosting[]>(STORAGE_KEYS.JOB_POSTINGS, []);
+    if (jobs.length) this.set(STORAGE_KEYS.JOB_POSTINGS, jobs.map(item => ({ ...item, currency: 'INR' })));
+    const assets = this.get<Asset[]>(STORAGE_KEYS.ASSETS, []);
+    if (assets.length) this.set(STORAGE_KEYS.ASSETS, assets.map(item => ({ ...item, currency: 'INR' })));
+    const expenses = this.get<ExpenseClaim[]>(STORAGE_KEYS.EXPENSES, []);
+    if (expenses.length) this.set(STORAGE_KEYS.EXPENSES, expenses.map(item => ({ ...item, currency: 'INR' })));
   }
 
   // Clear all data completely
@@ -86,9 +106,9 @@ class StorageService {
 
     // Seed default starter departments for the clean new company
     const defaultDepts: Department[] = [
-      { id: `dept-${Date.now()}-1`, companyId: company.id, name: 'Executive & Leadership', code: 'EXEC', budget: 150000, location: 'HQ', description: 'Core leadership.' },
-      { id: `dept-${Date.now()}-2`, companyId: company.id, name: 'Engineering & Technology', code: 'ENG', budget: 350000, location: 'HQ', description: 'Software engineering.' },
-      { id: `dept-${Date.now()}-3`, companyId: company.id, name: 'People & HR', code: 'HR', budget: 100000, location: 'HQ', description: 'Human resources and operations.' },
+      { id: `dept-${Date.now()}-1`, companyId: company.id, name: 'Executive & Leadership', code: 'EXEC', budget: 5000000, location: 'Bengaluru Headquarters', description: 'Core leadership.' },
+      { id: `dept-${Date.now()}-2`, companyId: company.id, name: 'Engineering & Technology', code: 'ENG', budget: 15000000, location: 'Bengaluru Technology Centre', description: 'Software engineering.' },
+      { id: `dept-${Date.now()}-3`, companyId: company.id, name: 'People & HR', code: 'HR', budget: 3000000, location: 'Bengaluru Headquarters', description: 'Human resources and operations.' },
     ];
     const depts = this.getDepartments();
     depts.push(...defaultDepts);
@@ -147,7 +167,18 @@ class StorageService {
     }
     this.set(STORAGE_KEYS.EMPLOYEES, all);
 
-    api.saveEmployee(emp).catch(err => console.warn('API saveEmployee sync:', err.message));
+    const department = this.getDepartments(emp.companyId).find(item => item.id === emp.departmentId);
+    const designation = this.getDesignations(emp.companyId).find(item => item.id === emp.designationId);
+    api.saveEmployee({
+      ...emp,
+      departmentCode: department?.code,
+      departmentName: department?.name,
+      departmentLocation: department?.location,
+      designationTitle: designation?.title,
+      designationGradeLevel: designation?.gradeLevel,
+      designationMinSalary: designation?.minSalary,
+      designationMaxSalary: designation?.maxSalary,
+    } as Partial<Employee>).catch(err => console.warn('API saveEmployee sync:', err.message));
   }
 
   public deleteEmployee(id: string): void {
@@ -245,9 +276,34 @@ class StorageService {
     return companyId ? all.filter(l => l.companyId === companyId) : all;
   }
 
+  public cacheLeaveTypes(companyId: string, leaveTypes: LeaveType[]): void {
+    const otherCompanies = this.getLeaveTypes().filter(item => item.companyId !== companyId);
+    this.set(STORAGE_KEYS.LEAVE_TYPES, [...otherCompanies, ...leaveTypes]);
+  }
+
+  public ensureIndianLeaveTypes(companyId: string): LeaveType[] {
+    const existing = this.getLeaveTypes(companyId);
+    if (existing.length) return existing;
+
+    const defaults: LeaveType[] = [
+      { id: `lt-${companyId}-pl`, companyId, name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
+      { id: `lt-${companyId}-cl`, companyId, name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
+      { id: `lt-${companyId}-sl`, companyId, name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
+      { id: `lt-${companyId}-ml`, companyId, name: 'Maternity Leave', code: 'ML', daysAllowedPerYear: 182, isPaid: true, color: '#ec4899' },
+      { id: `lt-${companyId}-lop`, companyId, name: 'Loss of Pay (LOP)', code: 'LOP', daysAllowedPerYear: 365, isPaid: false, color: '#64748b' },
+    ];
+    this.cacheLeaveTypes(companyId, defaults);
+    return defaults;
+  }
+
   public getLeaveRequests(companyId?: string): LeaveRequest[] {
     const all = this.get<LeaveRequest[]>(STORAGE_KEYS.LEAVE_REQUESTS, []);
     return companyId ? all.filter(r => r.companyId === companyId) : all;
+  }
+
+  public cacheLeaveRequests(companyId: string, requests: LeaveRequest[]): void {
+    const otherCompanies = this.getLeaveRequests().filter(item => item.companyId !== companyId);
+    this.set(STORAGE_KEYS.LEAVE_REQUESTS, [...otherCompanies, ...requests]);
   }
 
   public saveLeaveRequest(req: LeaveRequest): void {
@@ -261,6 +317,16 @@ class StorageService {
     this.set(STORAGE_KEYS.LEAVE_REQUESTS, all);
 
     api.applyLeave(req).catch(err => console.warn('API applyLeave sync:', err.message));
+  }
+
+  public reviewLeaveRequest(req: LeaveRequest, reviewerUserId: string): void {
+    const all = this.getLeaveRequests();
+    const idx = all.findIndex(item => item.id === req.id);
+    if (idx >= 0) all[idx] = req;
+    else all.push(req);
+    this.set(STORAGE_KEYS.LEAVE_REQUESTS, all);
+    api.reviewLeave(req.id, req.status, req.approvedBy || '', reviewerUserId, req.reviewerComment)
+      .catch(err => console.warn('API reviewLeave sync:', err.message));
   }
 
   // Payroll
@@ -458,11 +524,11 @@ class StorageService {
       id: `set-${companyId}`,
       companyId: companyId,
       companyName: 'Company Workspace',
-      legalEntityName: 'Company Workspace Inc.',
+      legalEntityName: 'Company Workspace Private Limited',
       taxRegistrationNumber: 'TAX-00000000',
-      currency: 'USD',
-      currencySymbol: '$',
-      timezone: 'UTC',
+      currency: 'INR',
+      currencySymbol: '₹',
+      timezone: 'Asia/Kolkata (IST)',
       workDays: [1, 2, 3, 4, 5],
       businessHoursStart: '09:00',
       businessHoursEnd: '18:00',
