@@ -20,7 +20,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const useIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
+const normalizeIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
   ...value,
   currency: 'INR',
   currencySymbol: '₹',
@@ -52,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentCompany(comp);
             setCurrentUser(user);
             const liveSettings = await api.getSettings(comp.id).catch(() => storageService.getSettings(comp.id));
-            setSettings(useIndianSettings(liveSettings));
+            setSettings(normalizeIndianSettings(liveSettings));
             return;
           }
         } catch (e) {
@@ -67,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentCompany(firstComp);
         setCurrentUser(user);
         const liveSettings = await api.getSettings(firstComp.id).catch(() => storageService.getSettings(firstComp.id));
-        setSettings(useIndianSettings(liveSettings));
+        setSettings(normalizeIndianSettings(liveSettings));
       } else {
         setCurrentCompany(null);
         setCurrentUser(null);
@@ -101,7 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (result && result.user && result.company) {
         setCurrentUser(result.user);
         setCurrentCompany(result.company);
-        setSettings(useIndianSettings(result.settings));
+        setSettings(normalizeIndianSettings(result.settings));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: result.user.id, companyId: result.company.id }));
         return true;
       }
@@ -118,7 +118,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (comp) {
         setCurrentUser(user);
         setCurrentCompany(comp);
-        setSettings(useIndianSettings(storageService.getSettings(comp.id)));
+        setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: user.id, companyId: comp.id }));
       }
     }
@@ -205,7 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userToSet = companyUsers[0] || null;
       setCurrentCompany(comp);
       setCurrentUser(userToSet);
-      setSettings(useIndianSettings(storageService.getSettings(comp.id)));
+      setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
       if (userToSet) {
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: userToSet.id, companyId: comp.id }));
       }
