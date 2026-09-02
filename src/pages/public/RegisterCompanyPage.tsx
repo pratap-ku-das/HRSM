@@ -63,6 +63,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
         {
           fullName: adminName || 'Admin User',
           email: adminEmail,
+          password,
         },
         selectedPlan
       );

@@ -6,6 +6,10 @@ import {
 } from '../types';
 
 const API_BASE = '/api';
+const ACCESS_TOKEN_KEY = 'orbithr_access_token';
+const REFRESH_TOKEN_KEY = 'orbithr_refresh_token';
+
+type ApiEnvelope<T> = { data: T; meta?: Record<string, unknown> };
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -18,7 +22,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ error: 'Network request failed' }));
-    throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+    throw new Error(typeof errorData.error === 'string' ? errorData.error : errorData.error?.message || `HTTP ${res.status}: ${res.statusText}`);
   }
 
   return res.json();
@@ -34,6 +38,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email }),
     }),
+  loginV1: async (email: string, password: string) => {
+    const result = await fetchJSON<ApiEnvelope<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>>(`${API_BASE}/v1/auth/login`, {
+      method: 'POST', body: JSON.stringify({ email, password, deviceName: 'OrbitHR Web' }),
+    });
+    localStorage.setItem(ACCESS_TOKEN_KEY, result.data.accessToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
+    return result.data;
+  },
+  activateAccount: (token: string, password: string) =>
+    fetchJSON<ApiEnvelope<{ activated: boolean }>>(`${API_BASE}/v1/auth/activate`, {
+      method: 'POST', body: JSON.stringify({ token, password }),
+    }),
+  getMeV1: () => fetchJSON<ApiEnvelope<{ user: User; company: Company; employee?: Employee }>>(`${API_BASE}/v1/me`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  }),
+  clearV1Session: () => {
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  },
 
   registerCompany: (companyData: any, adminData: any, plan: string) =>
     fetchJSON<{ company: Company; user: User; settings: CompanySettings }>(`${API_BASE}/auth/register-company`, {
@@ -49,6 +72,15 @@ export const api = {
   saveEmployee: (emp: Partial<Employee>) => 
     fetchJSON<Employee>(`${API_BASE}/employees`, {
       method: 'POST',
+      body: JSON.stringify(emp),
+    }),
+  onboardEmployee: (emp: Pick<Employee, 'employeeCode' | 'firstName' | 'lastName' | 'email' | 'departmentId' | 'designationId' | 'dateOfJoining' | 'employmentType'> & Partial<Pick<Employee, 'reportingManagerId' | 'workLocation' | 'phone'>>) =>
+    fetchJSON<ApiEnvelope<{ employee: Employee; emailDelivery: { id: string; status: string } }>>(`${API_BASE}/v1/employees/onboard`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}`,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
       body: JSON.stringify(emp),
     }),
   deleteEmployee: (id: string) => 

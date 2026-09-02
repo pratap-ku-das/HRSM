@@ -8,6 +8,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.toolchains/
+android-app/local.properties
+android-app/.gradle/
+android-app/app/build/
 dist
 dist-ssr
 # Environment Variables
@@ -25,4 +29,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-

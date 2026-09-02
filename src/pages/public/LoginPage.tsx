@@ -36,7 +36,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsSubmitting(true);
 
     try {
-      const success = await login(email);
+      const success = await login(email, password);
       if (success) {
         onLoginSuccess();
       } else {

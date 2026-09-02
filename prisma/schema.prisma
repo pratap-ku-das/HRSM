@@ -109,18 +109,18 @@ enum ExpenseStatus {
 // MULTI-TENANT COMPANY / WORKSPACE
 // --------------------------------------------------------
 model Company {
-  id          String    @id @default(uuid())
-  name        String
-  slug        String    @unique
-  email       String
-  phone       String?
-  address     String?
-  industry    String
-  size        String
-  plan        PlanTier  @default(GROWTH)
-  logoUrl     String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  email     String
+  phone     String?
+  address   String?
+  industry  String
+  size      String
+  plan      PlanTier @default(GROWTH)
+  logoUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   users             User[]
   employees         Employee[]
@@ -147,78 +147,162 @@ model Company {
 // USER & AUTHENTICATION
 // --------------------------------------------------------
 model User {
-  id           String    @id @default(uuid())
-  companyId    String
-  email        String    @unique
-  passwordHash String?
-  fullName     String
-  role         UserRole  @default(COMPANY_ADMIN)
-  avatarUrl    String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  companyId       String
+  email           String    @unique
+  passwordHash    String?
+  emailVerifiedAt DateTime?
+  tokenVersion    Int       @default(0)
+  fullName        String
+  role            UserRole  @default(COMPANY_ADMIN)
+  avatarUrl       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee     Employee?
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee      Employee?
+  refreshTokens RefreshToken[]
+  actionTokens  ActionToken[]
 
   @@index([companyId])
+}
+
+enum ActionTokenType {
+  ACCOUNT_ACTIVATION
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  familyId   String
+  deviceName String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+model ActionToken {
+  id        String          @id @default(uuid())
+  userId    String
+  type      ActionTokenType
+  tokenHash String          @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime        @default(now())
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+model EmailDelivery {
+  id             String              @id @default(uuid())
+  companyId      String
+  userId         String?
+  employeeId     String?
+  idempotencyKey String              @unique
+  messageType    String
+  recipient      String
+  providerId     String?
+  status         EmailDeliveryStatus @default(PENDING)
+  attemptCount   Int                 @default(0)
+  nextAttemptAt  DateTime?
+  lastError      String?
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([companyId, status])
+  @@index([nextAttemptAt])
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid())
+  companyId    String
+  userId       String
+  key          String
+  operation    String
+  responseJson Json
+  statusCode   Int
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@unique([companyId, userId, key, operation])
+  @@index([expiresAt])
 }
 
 // --------------------------------------------------------
 // EMPLOYEE PROFILE (360-DEGREE LIFECYCLE)
 // --------------------------------------------------------
 model Employee {
-  id                 String          @id @default(uuid())
+  id                 String         @id @default(uuid())
   companyId          String
-  userId             String?         @unique
+  userId             String?        @unique
   employeeCode       String
   firstName          String
   lastName           String
   email              String
   phone              String?
   avatarUrl          String?
-  dateOfBirth        DateTime?       @db.Date
+  dateOfBirth        DateTime?      @db.Date
   gender             String?
   departmentId       String
   designationId      String
   reportingManagerId String?
-  dateOfJoining      DateTime        @db.Date
-  employmentType     EmploymentType  @default(FULL_TIME)
-  status             EmployeeStatus  @default(ACTIVE)
+  dateOfJoining      DateTime       @db.Date
+  employmentType     EmploymentType @default(FULL_TIME)
+  status             EmployeeStatus @default(ACTIVE)
   workLocation       String?
 
   // Compensation breakdown
-  basicSalary        Float           @default(0)
-  hra                Float           @default(0)
-  allowances         Float           @default(0)
-  providentFund      Float           @default(0)
-  taxDeduction       Float           @default(0)
-  currency           String          @default("INR")
+  basicSalary   Float  @default(0)
+  hra           Float  @default(0)
+  allowances    Float  @default(0)
+  providentFund Float  @default(0)
+  taxDeduction  Float  @default(0)
+  currency      String @default("INR")
 
   // Bank & Tax
-  bankName           String?
-  accountNumber      String?
-  routingOrIfsc      String?
-  taxIdentifier      String?
+  bankName      String?
+  accountNumber String?
+  routingOrIfsc String?
+  taxIdentifier String?
 
   // Emergency contact
-  emergencyName      String?
-  emergencyRelation  String?
-  emergencyPhone     String?
+  emergencyName     String?
+  emergencyRelation String?
+  emergencyPhone    String?
 
-  skills             String[]
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  skills    String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  company            Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user               User?           @relation(fields: [userId], references: [id])
-  department         Department      @relation(fields: [departmentId], references: [id])
-  designation        Designation     @relation(fields: [designationId], references: [id])
-  attendanceRecords  AttendanceRecord[]
-  leaveRequests      LeaveRequest[]
-  payslips           Payslip[]
-  goals              PerformanceGoal[]
-  assets             Asset[]
-  expenses           ExpenseClaim[]
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user              User?              @relation(fields: [userId], references: [id])
+  department        Department         @relation(fields: [departmentId], references: [id])
+  designation       Designation        @relation(fields: [designationId], references: [id])
+  attendanceRecords AttendanceRecord[]
+  leaveRequests     LeaveRequest[]
+  payslips          Payslip[]
+  goals             PerformanceGoal[]
+  assets            Asset[]
+  expenses          ExpenseClaim[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId])
@@ -229,39 +313,39 @@ model Employee {
 // DEPARTMENTS & DESIGNATIONS
 // --------------------------------------------------------
 model Department {
-  id             String        @id @default(uuid())
+  id             String   @id @default(uuid())
   companyId      String
   name           String
   code           String
   headEmployeeId String?
-  budget         Float         @default(0)
+  budget         Float    @default(0)
   location       String?
   description    String?
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime @default(now())
 
-  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employees      Employee[]
-  designations   Designation[]
-  jobPostings    JobPosting[]
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+  designations Designation[]
+  jobPostings  JobPosting[]
 
   @@unique([companyId, code])
   @@index([companyId])
 }
 
 model Designation {
-  id           String      @id @default(uuid())
+  id           String   @id @default(uuid())
   companyId    String
   departmentId String
   title        String
-  gradeLevel   String      @default("L3")
-  minSalary    Float       @default(0)
-  maxSalary    Float       @default(0)
+  gradeLevel   String   @default("L3")
+  minSalary    Float    @default(0)
+  maxSalary    Float    @default(0)
   description  String?
-  createdAt    DateTime    @default(now())
+  createdAt    DateTime @default(now())
 
-  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department   Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  employees    Employee[]
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  employees  Employee[]
 
   @@index([companyId])
 }
@@ -270,11 +354,11 @@ model Designation {
 // ATTENDANCE (FUTURE-PROOF WITH PHASE 6 MOBILE FACE-AUTH)
 // --------------------------------------------------------
 model AttendanceRecord {
-  id                  String           @id @default(uuid())
-  companyId           String
-  employeeId          String
-  date                DateTime         @db.Date
-  status              AttendanceStatus @default(PRESENT)
+  id         String           @id @default(uuid())
+  companyId  String
+  employeeId String
+  date       DateTime         @db.Date
+  status     AttendanceStatus @default(PRESENT)
 
   // Future Mobile Face-Auth & Biometrics (Ready for Phase 6)
   clockInTime         DateTime?
@@ -289,13 +373,13 @@ model AttendanceRecord {
   source              AttendanceSource @default(WEB_ADMIN)
 
   // Web Admin manual adjustments
-  correctionNote      String?
-  correctedBy         String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  correctionNote String?
+  correctedBy    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee            Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, date])
   @@index([companyId, date])
@@ -305,38 +389,38 @@ model AttendanceRecord {
 // LEAVE MANAGEMENT
 // --------------------------------------------------------
 model LeaveType {
-  id                 String         @id @default(uuid())
+  id                 String  @id @default(uuid())
   companyId          String
   name               String
   code               String
-  daysAllowedPerYear Int            @default(20)
-  isPaid             Boolean        @default(true)
-  color              String         @default("#3b82f6")
+  daysAllowedPerYear Int     @default(20)
+  isPaid             Boolean @default(true)
+  color              String  @default("#3b82f6")
 
-  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leaveRequests      LeaveRequest[]
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leaveRequests LeaveRequest[]
 
   @@unique([companyId, code])
   @@index([companyId])
 }
 
 model LeaveRequest {
-  id              String       @id @default(uuid())
+  id              String      @id @default(uuid())
   companyId       String
   employeeId      String
   leaveTypeId     String
-  startDate       DateTime     @db.Date
-  endDate         DateTime     @db.Date
+  startDate       DateTime    @db.Date
+  endDate         DateTime    @db.Date
   totalDays       Float
   reason          String
-  status          LeaveStatus  @default(PENDING)
+  status          LeaveStatus @default(PENDING)
   approvedBy      String?
   reviewerComment String?
-  appliedAt       DateTime     @default(now())
+  appliedAt       DateTime    @default(now())
 
-  company         Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee        Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType       LeaveType    @relation(fields: [leaveTypeId], references: [id])
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@index([companyId])
   @@index([employeeId])
@@ -348,7 +432,7 @@ model LeaveRequest {
 model PayrollRun {
   id               String        @id @default(uuid())
   companyId        String
-  month            String        // YYYY-MM
+  month            String // YYYY-MM
   status           PayrollStatus @default(DRAFT)
   totalEmployees   Int
   totalGrossSalary Float
@@ -357,38 +441,38 @@ model PayrollRun {
   processedDate    DateTime?
   createdAt        DateTime      @default(now())
 
-  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payslips         Payslip[]
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payslips Payslip[]
 
   @@unique([companyId, month])
   @@index([companyId])
 }
 
 model Payslip {
-  id              String      @id @default(uuid())
+  id              String    @id @default(uuid())
   companyId       String
   payrollRunId    String
   employeeId      String
-  month           String      // YYYY-MM
+  month           String // YYYY-MM
   basicSalary     Float
   hra             Float
   allowances      Float
   grossSalary     Float
   providentFund   Float
   taxDeductions   Float
-  otherDeductions Float       @default(0)
+  otherDeductions Float     @default(0)
   totalDeductions Float
   netSalary       Float
   workingDays     Int
   presentDays     Int
   paidLeaveDays   Int
-  unpaidDays      Int         @default(0)
-  status          String      @default("PAID")
-  paymentDate     DateTime?   @db.Date
+  unpaidDays      Int       @default(0)
+  status          String    @default("PAID")
+  paymentDate     DateTime? @db.Date
 
-  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payrollRun      PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  employee        Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([payrollRunId, employeeId])
   @@index([companyId])
@@ -414,29 +498,29 @@ model JobPosting {
   applicantCount  Int            @default(0)
   postedAt        DateTime       @default(now())
 
-  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department      Department     @relation(fields: [departmentId], references: [id])
-  applicants      JobApplicant[]
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department Department     @relation(fields: [departmentId], references: [id])
+  applicants JobApplicant[]
 
   @@index([companyId])
 }
 
 model JobApplicant {
-  id              String      @id @default(uuid())
+  id              String   @id @default(uuid())
   companyId       String
   jobPostingId    String
   fullName        String
   email           String
   phone           String?
   currentCompany  String?
-  experienceYears Float       @default(0)
-  stage           JobStage    @default(APPLIED)
-  rating          Int         @default(5)
+  experienceYears Float    @default(0)
+  stage           JobStage @default(APPLIED)
+  rating          Int      @default(5)
   notes           String?
-  appliedAt       DateTime    @default(now())
+  appliedAt       DateTime @default(now())
 
-  company         Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  jobPosting      JobPosting  @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  jobPosting JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@index([jobPostingId])
@@ -457,8 +541,8 @@ model PerformanceGoal {
   status      GoalStatus @default(IN_PROGRESS)
   createdAt   DateTime   @default(now())
 
-  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee    Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@index([employeeId])
@@ -481,8 +565,8 @@ model Asset {
   status               AssetStatus @default(AVAILABLE)
   condition            String      @default("NEW")
 
-  company              Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  assignedTo           Employee?   @relation(fields: [assignedToEmployeeId], references: [id])
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignedTo Employee? @relation(fields: [assignedToEmployeeId], references: [id])
 
   @@unique([companyId, serialNumber])
   @@index([companyId])
@@ -492,16 +576,16 @@ model Asset {
 // DOCUMENTS, HOLIDAYS & BROADCASTS
 // --------------------------------------------------------
 model CompanyDocument {
-  id         String   @id @default(uuid())
-  companyId  String
-  title      String
-  category   String
-  fileSize   String
-  fileType   String
+  id          String   @id @default(uuid())
+  companyId   String
+  title       String
+  category    String
+  fileSize    String
+  fileType    String
   downloadUrl String
-  uploadedAt DateTime @default(now())
+  uploadedAt  DateTime @default(now())
 
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
 }
@@ -513,7 +597,7 @@ model Holiday {
   date      DateTime @db.Date
   type      String   @default("NATIONAL")
 
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
 }
@@ -528,7 +612,7 @@ model Announcement {
   authorRole String
   createdAt  DateTime @default(now())
 
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
 }
@@ -549,8 +633,8 @@ model ExpenseClaim {
   notes       String?
   submittedAt DateTime      @default(now())
 
-  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee    Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
 }
@@ -570,26 +654,26 @@ model AuditLog {
   timestamp DateTime @default(now())
   ipAddress String
 
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, timestamp])
 }
 
 model CompanySettings {
-  id                           String   @id @default(uuid())
-  companyId                    String   @unique
+  id                           String  @id @default(uuid())
+  companyId                    String  @unique
   companyName                  String
   legalEntityName              String
   taxRegistrationNumber        String
-  currency                     String   @default("INR")
-  currencySymbol               String   @default("₹")
-  timezone                     String   @default("UTC")
-  workDays                     Int[]    @default([1, 2, 3, 4, 5])
-  businessHoursStart           String   @default("09:00")
-  businessHoursEnd             String   @default("18:00")
-  enableAutomaticOvertime      Boolean  @default(true)
-  enableAuditLogging           Boolean  @default(true)
-  defaultProbationPeriodMonths Int      @default(3)
+  currency                     String  @default("INR")
+  currencySymbol               String  @default("₹")
+  timezone                     String  @default("UTC")
+  workDays                     Int[]   @default([1, 2, 3, 4, 5])
+  businessHoursStart           String  @default("09:00")
+  businessHoursEnd             String  @default("18:00")
+  enableAutomaticOvertime      Boolean @default(true)
+  enableAuditLogging           Boolean @default(true)
+  defaultProbationPeriodMonths Int     @default(3)
 
-  company                      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }

@@ -10,9 +10,9 @@ interface AuthContextType {
   companies: Company[];
   settings: CompanySettings | null;
   isAuthenticated: boolean;
-  login: (email: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<boolean>;
   loginAsDemoUser: (userId: string) => void;
-  registerCompany: (companyData: Partial<Company>, adminData: Partial<User>, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
+  registerCompany: (companyData: Partial<Company>, adminData: Partial<User> & { password?: string }, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
   switchCompany: (companyId: string) => void;
   logout: () => void;
   refreshState: () => Promise<void>;
@@ -20,7 +20,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const useIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
+const normalizeIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
   ...value,
   currency: 'INR',
   currencySymbol: '₹',
@@ -52,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentCompany(comp);
             setCurrentUser(user);
             const liveSettings = await api.getSettings(comp.id).catch(() => storageService.getSettings(comp.id));
-            setSettings(useIndianSettings(liveSettings));
+            setSettings(normalizeIndianSettings(liveSettings));
             return;
           }
         } catch (e) {
@@ -67,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentCompany(firstComp);
         setCurrentUser(user);
         const liveSettings = await api.getSettings(firstComp.id).catch(() => storageService.getSettings(firstComp.id));
-        setSettings(useIndianSettings(liveSettings));
+        setSettings(normalizeIndianSettings(liveSettings));
       } else {
         setCurrentCompany(null);
         setCurrentUser(null);
@@ -82,26 +82,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshState();
   }, []);
 
-  const login = async (email: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Attempt login via PostgreSQL API
-      const result = await api.login(email).catch(async () => {
-        // Fallback to local storage lookup
-        const users = storageService.getUsers();
-        const matched = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-        if (matched) {
-          const comp = storageService.getCompanyById(matched.companyId);
-          if (comp) {
-            return { user: matched, company: comp, settings: storageService.getSettings(comp.id) };
-          }
-        }
-        throw new Error('User not found');
-      });
+      await api.loginV1(email, password);
+      const me = (await api.getMeV1()).data;
+      const result = { user: me.user, company: me.company, settings: await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id)) };
 
       if (result && result.user && result.company) {
         setCurrentUser(result.user);
         setCurrentCompany(result.company);
-        setSettings(useIndianSettings(result.settings));
+        setSettings(normalizeIndianSettings(result.settings));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: result.user.id, companyId: result.company.id }));
         return true;
       }
@@ -118,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (comp) {
         setCurrentUser(user);
         setCurrentCompany(comp);
-        setSettings(useIndianSettings(storageService.getSettings(comp.id)));
+        setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: user.id, companyId: comp.id }));
       }
     }
@@ -126,13 +116,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const registerCompany = async (
     companyData: Partial<Company>, 
-    adminData: Partial<User>, 
+    adminData: Partial<User> & { password?: string },
     plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE'
   ) => {
     try {
       // Register in Supabase PostgreSQL via API
       const res = await api.registerCompany(companyData, adminData, plan);
       if (res && res.company && res.user) {
+        if (adminData.email && adminData.password) await api.loginV1(adminData.email, adminData.password);
         // Synchronize local cache
         storageService.createCompany(res.company, res.user, res.settings);
 
@@ -205,7 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userToSet = companyUsers[0] || null;
       setCurrentCompany(comp);
       setCurrentUser(userToSet);
-      setSettings(useIndianSettings(storageService.getSettings(comp.id)));
+      setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
       if (userToSet) {
         localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: userToSet.id, companyId: comp.id }));
       }
@@ -213,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    api.clearV1Session();
     setCurrentUser(null);
     localStorage.removeItem('hrms_active_session_v2');
   };

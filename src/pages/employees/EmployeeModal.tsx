@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Employee, Department, Designation, EmploymentType, EmployeeStatus } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { api } from '../../services/api';
 import { 
   X, User, Mail, Phone, Calendar, Briefcase, CreditCard, 
   Building2, Shield, Heart, Sparkles, Check
@@ -143,7 +144,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
     if (activeStepIndex < steps.length - 1) goToStep(steps[activeStepIndex + 1]);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     for (const step of steps) {
       const error = validateStep(step);
@@ -191,7 +192,23 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
       createdAt: employeeToEdit ? employeeToEdit.createdAt : new Date().toISOString(),
     };
 
-    storageService.saveEmployee(newEmp);
+    try {
+      if (employeeToEdit) {
+        storageService.saveEmployee(newEmp);
+      } else {
+        const onboarded = await api.onboardEmployee({
+          employeeCode: newEmp.employeeCode, firstName: newEmp.firstName, lastName: newEmp.lastName,
+          email: newEmp.email, departmentId: newEmp.departmentId, designationId: newEmp.designationId,
+          reportingManagerId: newEmp.reportingManagerId, dateOfJoining: newEmp.dateOfJoining,
+          employmentType: newEmp.employmentType, workLocation: newEmp.workLocation, phone: newEmp.phone,
+        });
+        newEmp.id = onboarded.data.employee.id;
+        storageService.saveEmployee(newEmp, false);
+      }
+    } catch (caught) {
+      setStepError(caught instanceof Error ? caught.message : 'Employee onboarding failed.');
+      return;
+    }
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',

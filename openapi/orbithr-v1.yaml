@@ -1,0 +1,215 @@
+openapi: 3.1.0
+info:
+  title: OrbitHR API
+  version: 1.0.0
+  description: Authenticated, tenant-isolated API for OrbitHR web and Android clients.
+servers:
+  - url: http://localhost:3001/api/v1
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/SessionResponse'}
+        '401': {$ref: '#/components/responses/ErrorResponse'}
+  /auth/refresh:
+    post:
+      security: []
+      operationId: refreshSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/SessionResponse'}
+        '401': {$ref: '#/components/responses/ErrorResponse'}
+  /auth/logout:
+    post:
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '200': {description: Logged out}
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      responses:
+        '200': {description: All sessions revoked}
+  /auth/activate:
+    post:
+      security: []
+      operationId: activateAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: {type: string}
+                password: {type: string, minLength: 10, maxLength: 128}
+      responses:
+        '200': {description: Account activated}
+  /auth/forgot-password:
+    post:
+      security: []
+      operationId: forgotPassword
+      responses:
+        '200': {description: Request accepted regardless of account existence}
+  /auth/reset-password:
+    post:
+      security: []
+      operationId: resetPassword
+      responses:
+        '200': {description: Password reset}
+  /me:
+    get:
+      operationId: getMe
+      responses:
+        '200': {description: Current user, company, employee, and permissions}
+  /dashboard:
+    get:
+      operationId: getDashboard
+      responses:
+        '200': {description: Role-aware dashboard summary}
+  /me/attendance:
+    get:
+      operationId: getMyAttendance
+      parameters:
+        - {in: query, name: from, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Attendance history}
+  /me/attendance/punch:
+    post:
+      operationId: punchAttendance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: {type: string, enum: [CLOCK_IN, CLOCK_OUT]}
+                latitude: {type: number, minimum: -90, maximum: 90}
+                longitude: {type: number, minimum: -180, maximum: 180}
+                deviceId: {type: string}
+      responses:
+        '200': {description: Existing attendance updated}
+        '201': {description: Attendance created}
+        '409': {$ref: '#/components/responses/ErrorResponse'}
+  /me/leaves:
+    get:
+      operationId: getMyLeaves
+      responses:
+        '200': {description: Leave requests and policies}
+    post:
+      operationId: applyLeave
+      responses:
+        '201': {description: Leave request created}
+  /me/payslips:
+    get:
+      operationId: getMyPayslips
+      responses:
+        '200': {description: Current employee payslips only}
+  /me/expenses:
+    get:
+      operationId: getMyExpenses
+      responses:
+        '200': {description: Current employee expenses only}
+    post:
+      operationId: submitExpense
+      responses:
+        '201': {description: Expense submitted}
+  /employees:
+    get:
+      operationId: getEmployees
+      parameters:
+        - {in: query, name: page, schema: {type: integer, minimum: 1}}
+        - {in: query, name: pageSize, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {in: query, name: search, schema: {type: string}}
+      responses:
+        '200': {description: Permission and tenant-scoped employee page}
+  /employees/onboard:
+    post:
+      operationId: onboardEmployee
+      parameters:
+        - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
+      responses:
+        '201': {description: Employee and portal user created; onboarding email queued}
+  /employees/{id}/resend-onboarding:
+    post:
+      operationId: resendOnboarding
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+        - {in: header, name: Idempotency-Key, schema: {type: string}}
+      responses:
+        '202': {description: Onboarding email accepted}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, minLength: 8}
+        deviceName: {type: string}
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: {type: string}
+        deviceName: {type: string}
+    Session:
+      type: object
+      required: [accessToken, refreshToken, expiresInSeconds]
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        expiresInSeconds: {type: integer}
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            fieldErrors: {type: object}
+        meta:
+          type: object
+          properties:
+            requestId: {type: string, format: uuid}
+  responses:
+    SessionResponse:
+      description: Authenticated session
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: {$ref: '#/components/schemas/Session'}
+    ErrorResponse:
+      description: Standard API error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

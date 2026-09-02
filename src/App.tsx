@@ -10,6 +10,7 @@ import { CommandPalette } from './components/layout/CommandPalette';
 import { LandingPage } from './pages/public/LandingPage';
 import { LoginPage } from './pages/public/LoginPage';
 import { RegisterCompanyPage } from './pages/public/RegisterCompanyPage';
+import { ActivateAccountPage } from './pages/public/ActivateAccountPage';
 
 // Authenticated HRMS Portal Pages
 import { DashboardOverview } from './pages/dashboard/DashboardOverview';
@@ -49,6 +50,10 @@ const MainApp: React.FC = () => {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
+
+  if (window.location.pathname === '/activate') {
+    return <ActivateAccountPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
+  }
 
   // If user is not authenticated and in app mode, render landing page
   if (!isAuthenticated && pageMode === 'authenticated') {
