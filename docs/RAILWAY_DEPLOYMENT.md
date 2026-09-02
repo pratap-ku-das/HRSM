@@ -20,9 +20,13 @@ HR_SUPPORT_EMAIL=hr@balajione.dev
 ```
 
 Railway supplies `PORT`; do not define it manually. `railway.json` builds the web client,
-generates Prisma Client, synchronizes the database schema, starts Express, and checks
+generates Prisma Client, starts Express, and checks
 `/api/health`. Express serves both the API and the Vite `dist` directory, including the
 SPA fallback required for `/activate?token=...`.
+
+Use Supabase's IPv4-compatible pooler URL for `DATABASE_URL`. Transaction mode on port
+`6543` should include `?pgbouncer=true&connection_limit=1`. Database schema changes are
+deployed separately with `npm run db:push`; they are not performed on every container restart.
 
 ## DNS
 
