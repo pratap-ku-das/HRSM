@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z, ZodError } from 'zod';
-import { createOpaqueToken, deliverOnboardingEmail } from './email.js';
+import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './email.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; tokenVersion: number };
 type AuthedRequest = Request & { auth?: AuthUser; requestId?: string };
@@ -223,9 +223,9 @@ export function createV1Router(prisma: PrismaClient) {
     if (old) return ok(res, old.responseJson, old.statusCode);
     const [department, designation] = await Promise.all([prisma.department.findFirst({ where: { id: body.departmentId, companyId: req.auth!.companyId } }), prisma.designation.findFirst({ where: { id: body.designationId, companyId: req.auth!.companyId, departmentId: body.departmentId } })]);
     if (!department || !designation) return fail(res, 400, 'ORGANIZATION_INVALID', 'Department or designation is invalid for this company.');
-    const email = body.email.toLowerCase(); const activation = createOpaqueToken(); const response = await prisma.$transaction(async tx => {
+    const email = body.email.toLowerCase(); const activation = createOpaqueToken(); const temporaryPassword = createTemporaryPassword(); const response = await prisma.$transaction(async tx => {
       const duplicate = await tx.user.findUnique({ where: { email } }); if (duplicate) throw Object.assign(new Error('A user with this email already exists.'), { status: 409, code: 'EMAIL_EXISTS' });
-      const user = await tx.user.create({ data: { companyId: req.auth!.companyId, email, fullName: `${body.firstName} ${body.lastName}`, role: 'EMPLOYEE' } });
+      const user = await tx.user.create({ data: { companyId: req.auth!.companyId, email, fullName: `${body.firstName} ${body.lastName}`, role: 'EMPLOYEE', passwordHash: await bcrypt.hash(temporaryPassword, 12) } });
       const employee = await tx.employee.create({ data: { companyId: req.auth!.companyId, userId: user.id, employeeCode: body.employeeCode, firstName: body.firstName, lastName: body.lastName, email, departmentId: body.departmentId, designationId: body.designationId, reportingManagerId: body.reportingManagerId, dateOfJoining: body.dateOfJoining, employmentType: body.employmentType, status: 'ON_PROBATION', workLocation: body.workLocation, phone: body.phone, skills: [] } });
       await tx.actionToken.create({ data: { userId: user.id, type: 'ACCOUNT_ACTIVATION', tokenHash: activation.hash, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
       const delivery = await tx.emailDelivery.create({ data: { companyId: req.auth!.companyId, userId: user.id, employeeId: employee.id, idempotencyKey: `onboard:${idempotencyKey}`, messageType: 'EMPLOYEE_ONBOARDING', recipient: email } });
@@ -234,20 +234,21 @@ export function createV1Router(prisma: PrismaClient) {
       await tx.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: 'ONBOARD_EMPLOYEE', category: 'EMPLOYEE', details: `Employee ${employee.employeeCode} onboarded.`, ipAddress: req.ip || 'unknown' } });
       return result;
     });
-    void deliverOnboardingEmail(prisma, response.emailDelivery.id, activation.token);
+    void deliverOnboardingEmail(prisma, response.emailDelivery.id, activation.token, temporaryPassword);
     return ok(res, response, 201);
   } catch (e) { next(e); } });
 
   router.post('/employees/:id/resend-onboarding', authenticate, requirePermission('employee.manage'), async (req: AuthedRequest, res, next) => { try {
     const employee = await prisma.employee.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId }, include: { user: true } });
     if (!employee?.user) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee portal account was not found.');
-    const token = createOpaqueToken(); const key = `resend:${employee.id}:${req.header('idempotency-key') || crypto.randomUUID()}`;
+    const token = createOpaqueToken(); const temporaryPassword = createTemporaryPassword(); const key = `resend:${employee.id}:${req.header('idempotency-key') || crypto.randomUUID()}`;
     const existing = await prisma.emailDelivery.findUnique({ where: { idempotencyKey: key } }); if (existing) return ok(res, { id: existing.id, status: existing.status });
     const [delivery] = await prisma.$transaction([
       prisma.emailDelivery.create({ data: { companyId: req.auth!.companyId, userId: employee.user.id, employeeId: employee.id, idempotencyKey: key, messageType: 'EMPLOYEE_ONBOARDING', recipient: employee.email } }),
       prisma.actionToken.create({ data: { userId: employee.user.id, type: 'ACCOUNT_ACTIVATION', tokenHash: token.hash, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } }),
+      prisma.user.update({ where: { id: employee.user.id }, data: { passwordHash: await bcrypt.hash(temporaryPassword, 12), tokenVersion: { increment: 1 } } }),
     ]);
-    void deliverOnboardingEmail(prisma, delivery.id, token.token);
+    void deliverOnboardingEmail(prisma, delivery.id, token.token, temporaryPassword);
     return ok(res, { id: delivery.id, status: delivery.status }, 202);
   } catch (e) { next(e); } });
 

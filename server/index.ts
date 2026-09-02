@@ -1,8 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
+import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
+import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
 
 dotenv.config();
 
@@ -54,6 +58,9 @@ const employeeToClient = (employee: any) => ({
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/v1', createV1Router(prisma));
+app.get('/downloads/orbithr-android.apk', (_req, res) => {
+  res.download(path.resolve('android-app/app/build/outputs/apk/debug/app-debug.apk'), 'OrbitHR.apk');
+});
 
 // Healthcheck
 app.get('/api/health', async (_req, res) => {
@@ -110,6 +117,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/register-company', async (req, res) => {
   try {
     const { companyData, adminData, plan } = req.body;
+    if (!adminData?.password || adminData.password.length < 10) return res.status(400).json({ error: 'Admin password must contain at least 10 characters' });
 
     const slug = (companyData.name || 'company')
       .toLowerCase()
@@ -137,6 +145,8 @@ app.post('/api/auth/register-company', async (req, res) => {
         email: adminData.email.toLowerCase(),
         fullName: adminData.fullName,
         role: 'COMPANY_ADMIN',
+        passwordHash: await bcrypt.hash(adminData.password, 12),
+        emailVerifiedAt: new Date(),
         avatarUrl: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
       },
     });
@@ -307,6 +317,7 @@ app.post('/api/employees', async (req, res) => {
     };
 
     let employee;
+    const isNewEmployee = !id || id.startsWith('temp-');
     if (id && !id.startsWith('temp-')) {
       employee = await prisma.employee.upsert({
         where: { id },
@@ -349,6 +360,18 @@ app.post('/api/employees', async (req, res) => {
         where: { id: employee.id },
         data: { userId: portalUser.id },
       });
+    }
+
+    if (isNewEmployee) {
+      const activation = createOpaqueToken();
+      const temporaryPassword = createTemporaryPassword();
+      const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+      const delivery = await prisma.$transaction(async tx => {
+        await tx.user.update({ where: { id: portalUser.id }, data: { passwordHash } });
+        await tx.actionToken.create({ data: { userId: portalUser.id, type: 'ACCOUNT_ACTIVATION', tokenHash: activation.hash, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
+        return tx.emailDelivery.create({ data: { companyId: employee.companyId, userId: portalUser.id, employeeId: employee.id, idempotencyKey: `legacy-onboard:${employee.id}:${crypto.randomUUID()}`, messageType: 'EMPLOYEE_ONBOARDING', recipient: employee.email } });
+      });
+      void deliverOnboardingEmail(prisma, delivery.id, activation.token, temporaryPassword);
     }
 
     res.json(employeeToClient(employee));
@@ -1213,6 +1236,15 @@ app.put('/api/settings/:companyId', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.resolve('dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
+    return res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`⚡ HRMS PostgreSQL Backend Server running on http://127.0.0.1:${PORT}`);
 });

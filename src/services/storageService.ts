@@ -157,7 +157,7 @@ class StorageService {
     return companyId ? all.filter(e => e.companyId === companyId) : all;
   }
 
-  public saveEmployee(emp: Employee): void {
+  public saveEmployee(emp: Employee, syncToApi = true): void {
     const all = this.getEmployees();
     const idx = all.findIndex(e => e.id === emp.id);
     if (idx >= 0) {
@@ -169,7 +169,7 @@ class StorageService {
 
     const department = this.getDepartments(emp.companyId).find(item => item.id === emp.departmentId);
     const designation = this.getDesignations(emp.companyId).find(item => item.id === emp.designationId);
-    api.saveEmployee({
+    if (syncToApi) api.saveEmployee({
       ...emp,
       departmentCode: department?.code,
       departmentName: department?.name,
