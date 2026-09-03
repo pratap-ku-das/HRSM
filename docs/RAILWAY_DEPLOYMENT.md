@@ -45,5 +45,6 @@ Set this in `android-app/gradle.properties` before producing a signed release:
 ORBIT_API_BASE_URL=https://hr.balajione.dev/api/v1/
 ```
 
-Upload the signed APK to a public release host and set its URL as
-`ANDROID_APP_DOWNLOAD_URL`. The local debug APK is intentionally excluded from Git.
+Build the signed APK with the live API URL and place it at
+`public/downloads/OrbitHR.apk`. The application serves it directly from
+`https://hr.balajione.dev/downloads/orbithr-android.apk`.

@@ -29,8 +29,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const stepLabels = ['Basic Details', 'Employment & Org', 'Compensation', 'Bank & Statutory', 'Emergency Contact'];
   const activeStepIndex = steps.indexOf(activeTab);
 
-  const departments = storageService.getDepartments(currentCompany?.id);
-  const designations = storageService.getDesignations(currentCompany?.id);
+  const [departments, setDepartments] = useState<Department[]>(() => storageService.getDepartments(currentCompany?.id));
+  const [designations, setDesignations] = useState<Designation[]>(() => storageService.getDesignations(currentCompany?.id));
   const existingEmployees = storageService.getEmployees(currentCompany?.id);
 
   // Form State
@@ -70,6 +70,25 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [emergencyName, setEmergencyName] = useState<string>('');
   const [emergencyRelation, setEmergencyRelation] = useState<string>('Spouse');
   const [emergencyPhone, setEmergencyPhone] = useState<string>('');
+
+  useEffect(() => {
+    if (!isOpen || !currentCompany?.id) return;
+    let active = true;
+    Promise.all([api.getDepartments(currentCompany.id), api.getDesignations(currentCompany.id)])
+      .then(([liveDepartments, liveDesignations]) => {
+        if (!active) return;
+        setDepartments(liveDepartments);
+        setDesignations(liveDesignations);
+        if (!employeeToEdit) {
+          const defaultDesignation = liveDesignations[0];
+          const defaultDepartment = liveDepartments.find(item => item.id === defaultDesignation?.departmentId) || liveDepartments[0];
+          setDepartmentId(defaultDepartment?.id || '');
+          setDesignationId(defaultDesignation?.id || '');
+        }
+      })
+      .catch(error => setStepError(error instanceof Error ? error.message : 'Unable to load departments and designations.'));
+    return () => { active = false; };
+  }, [isOpen, currentCompany?.id, employeeToEdit]);
 
   useEffect(() => {
     setActiveTab('basic');

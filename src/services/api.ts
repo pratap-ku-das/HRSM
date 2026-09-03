@@ -57,6 +57,7 @@ export const api = {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   },
+  hasV1Session: () => Boolean(localStorage.getItem(ACCESS_TOKEN_KEY)),
 
   registerCompany: (companyData: any, adminData: any, plan: string) =>
     fetchJSON<{ company: Company; user: User; settings: CompanySettings }>(`${API_BASE}/auth/register-company`, {

@@ -59,7 +59,7 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/v1', createV1Router(prisma));
 app.get('/downloads/orbithr-android.apk', (_req, res) => {
-  res.download(path.resolve('android-app/app/build/outputs/apk/debug/app-debug.apk'), 'OrbitHR.apk');
+  res.download(path.resolve('public/downloads/OrbitHR.apk'), 'OrbitHR.apk');
 });
 
 // Healthcheck
@@ -1211,10 +1211,8 @@ app.post('/api/audit-logs', async (req, res) => {
 app.get('/api/settings/:companyId', async (req, res) => {
   try {
     const { companyId } = req.params;
-    const settings = await prisma.companySettings.update({
-      where: { companyId },
-      data: { currency: 'INR', currencySymbol: '₹', timezone: 'Asia/Kolkata (IST - UTC+5:30)' },
-    });
+    const settings = await prisma.companySettings.findUnique({ where: { companyId } });
+    if (!settings) return res.status(404).json({ error: 'Company settings not found' });
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

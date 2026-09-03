@@ -42,37 +42,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCompanies(liveCompanies);
 
       const storedSession = localStorage.getItem('hrms_active_session_v2');
-      if (storedSession) {
+      if (storedSession && api.hasV1Session()) {
         try {
-          const session = JSON.parse(storedSession);
-          const comp = liveCompanies.find(c => c.id === session.companyId);
-          if (comp) {
-            const users = storageService.getUsersByCompany(comp.id);
-            const user = users.find(u => u.id === session.userId) || users[0] || null;
-            setCurrentCompany(comp);
-            setCurrentUser(user);
-            const liveSettings = await api.getSettings(comp.id).catch(() => storageService.getSettings(comp.id));
-            setSettings(normalizeIndianSettings(liveSettings));
-            return;
-          }
+          const me = (await api.getMeV1()).data;
+          setCurrentCompany(me.company);
+          setCurrentUser(me.user);
+          const liveSettings = await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id));
+          setSettings(normalizeIndianSettings(liveSettings));
+          return;
         } catch (e) {
           console.error('Session load error', e);
+          api.clearV1Session();
+          localStorage.removeItem('hrms_active_session_v2');
         }
       }
 
-      if (liveCompanies.length > 0) {
-        const firstComp = liveCompanies[0];
-        const users = storageService.getUsersByCompany(firstComp.id);
-        const user = users[0] || null;
-        setCurrentCompany(firstComp);
-        setCurrentUser(user);
-        const liveSettings = await api.getSettings(firstComp.id).catch(() => storageService.getSettings(firstComp.id));
-        setSettings(normalizeIndianSettings(liveSettings));
-      } else {
-        setCurrentCompany(null);
-        setCurrentUser(null);
-        setSettings(null);
-      }
+      setCurrentCompany(null);
+      setCurrentUser(null);
+      setSettings(null);
     } catch (err) {
       console.warn('API refresh error:', err);
     }
