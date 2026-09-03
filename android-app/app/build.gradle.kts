@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -17,6 +19,42 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${providers.gradleProperty("ORBIT_API_BASE_URL").orElse("http://10.0.2.2:3001/api/v1/").get()}\"")
+    }
+    signingConfigs {
+        create("release") {
+            val keystorePropsFile = rootProject.file("keystore.properties")
+            val localPropsFile = rootProject.file("local.properties")
+            val props = Properties()
+            if (keystorePropsFile.exists()) {
+                keystorePropsFile.inputStream().buffered().use { props.load(it) }
+            } else if (localPropsFile.exists()) {
+                localPropsFile.inputStream().buffered().use { props.load(it) }
+            }
+
+            val storeFilePath = props.getProperty("RELEASE_STORE_FILE")
+                ?: providers.gradleProperty("RELEASE_STORE_FILE").orNull
+                ?: "../orbithr-release.jks"
+            val storePass = props.getProperty("RELEASE_STORE_PASSWORD")
+                ?: providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
+            val keyAliasName = props.getProperty("RELEASE_KEY_ALIAS")
+                ?: providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
+                ?: "orbithr"
+            val keyPass = props.getProperty("RELEASE_KEY_PASSWORD")
+                ?: providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
+
+            if (storePass != null && keyPass != null && file(storeFilePath).exists()) {
+                storeFile = file(storeFilePath)
+                storePassword = storePass
+                keyAlias = keyAliasName
+                keyPassword = keyPass
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}") }
