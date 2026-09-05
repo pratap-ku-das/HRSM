@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
@@ -1234,8 +1235,8 @@ app.put('/api/settings/:companyId', async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.resolve('dist');
+const distPath = path.resolve('dist');
+if (existsSync(path.join(distPath, 'index.html'))) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
