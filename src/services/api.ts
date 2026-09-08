@@ -50,6 +50,12 @@ export const api = {
     fetchJSON<ApiEnvelope<{ activated: boolean }>>(`${API_BASE}/v1/auth/activate`, {
       method: 'POST', body: JSON.stringify({ token, password }),
     }),
+  forgotPassword: (email: string) => fetchJSON<ApiEnvelope<{ accepted: boolean }>>(`${API_BASE}/v1/auth/forgot-password`, {
+    method: 'POST', body: JSON.stringify({ email }),
+  }),
+  resetPassword: (token: string, password: string) => fetchJSON<ApiEnvelope<{ reset: boolean }>>(`${API_BASE}/v1/auth/reset-password`, {
+    method: 'POST', body: JSON.stringify({ token, password }),
+  }),
   getMeV1: () => fetchJSON<ApiEnvelope<{ user: User; company: Company; employee?: Employee }>>(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
   }),

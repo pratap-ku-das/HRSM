@@ -11,6 +11,7 @@ import { LandingPage } from './pages/public/LandingPage';
 import { LoginPage } from './pages/public/LoginPage';
 import { RegisterCompanyPage } from './pages/public/RegisterCompanyPage';
 import { ActivateAccountPage } from './pages/public/ActivateAccountPage';
+import { ResetPasswordPage } from './pages/public/ResetPasswordPage';
 
 // Authenticated HRMS Portal Pages
 import { DashboardOverview } from './pages/dashboard/DashboardOverview';
@@ -53,6 +54,10 @@ const MainApp: React.FC = () => {
 
   if (window.location.pathname === '/activate') {
     return <ActivateAccountPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
+  }
+
+  if (window.location.pathname === '/reset-password') {
+    return <ResetPasswordPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
   }
 
   // If user is not authenticated and in app mode, render landing page

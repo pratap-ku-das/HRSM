@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z, ZodError } from 'zod';
-import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './email.js';
+import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail, deliverPasswordResetEmail } from './email.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; tokenVersion: number };
 type AuthedRequest = Request & { auth?: AuthUser; requestId?: string };
@@ -116,7 +116,15 @@ export function createV1Router(prisma: PrismaClient) {
   router.post('/auth/forgot-password', authLimiter, async (req, res, next) => { try {
     const body = z.object({ email: z.string().email() }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
-    if (user) { const token = createOpaqueToken(); await prisma.actionToken.create({ data: { userId: user.id, type: 'PASSWORD_RESET', tokenHash: token.hash, expiresAt: new Date(Date.now() + 60 * 60_000) } }); }
+    if (user) {
+      const token = createOpaqueToken();
+      const [, , delivery] = await prisma.$transaction([
+        prisma.actionToken.updateMany({ where: { userId: user.id, type: 'PASSWORD_RESET', usedAt: null }, data: { usedAt: new Date() } }),
+        prisma.actionToken.create({ data: { userId: user.id, type: 'PASSWORD_RESET', tokenHash: token.hash, expiresAt: new Date(Date.now() + 60 * 60_000) } }),
+        prisma.emailDelivery.create({ data: { companyId: user.companyId, userId: user.id, idempotencyKey: `password-reset:${user.id}:${token.hash}`, messageType: 'PASSWORD_RESET', recipient: user.email } }),
+      ]);
+      void deliverPasswordResetEmail(prisma, delivery.id, token.token);
+    }
     return ok(res, { accepted: true });
   } catch (e) { next(e); } });
 
