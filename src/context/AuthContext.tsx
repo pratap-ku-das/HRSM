@@ -87,20 +87,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await api.loginV1(email, password);
       const me = (await api.getMeV1()).data;
-      await syncCompanyData(me.company.id);
-      const result = { user: me.user, company: me.company, settings: await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id)) };
+      setCurrentUser(me.user);
+      setCurrentCompany(me.company);
+      setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
+      localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: me.user.id, companyId: me.company.id }));
 
-      if (result && result.user && result.company) {
-        setCurrentUser(result.user);
-        setCurrentCompany(result.company);
-        setSettings(normalizeIndianSettings(result.settings));
-        localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: result.user.id, companyId: result.company.id }));
-        return true;
-      }
+      // Optional workspace data must not turn a successful authentication into a login failure.
+      void syncCompanyData(me.company.id);
+      void api.getSettings(me.company.id)
+        .then(value => setSettings(normalizeIndianSettings(value)))
+        .catch(error => console.warn('Live settings refresh failed:', error));
+      return true;
     } catch (err) {
       console.warn('Login error:', err);
+      api.clearV1Session();
+      localStorage.removeItem('hrms_active_session_v2');
+      throw err;
     }
-    return false;
   };
 
   const loginAsDemoUser = (userId: string) => {
