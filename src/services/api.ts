@@ -10,8 +10,32 @@ const ACCESS_TOKEN_KEY = 'orbithr_access_token';
 const REFRESH_TOKEN_KEY = 'orbithr_refresh_token';
 
 type ApiEnvelope<T> = { data: T; meta?: Record<string, unknown> };
+let refreshRequest: Promise<string> | null = null;
 
-async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
+async function renewAccessToken(): Promise<string> {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!refreshToken) throw new Error('Your session has expired. Please sign in again.');
+  if (!refreshRequest) {
+    refreshRequest = fetch(`${API_BASE}/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken, deviceName: 'OrbitHR Web' }),
+    }).then(async response => {
+      if (!response.ok) throw new Error('Your session has expired. Please sign in again.');
+      const result = await response.json() as ApiEnvelope<{ accessToken: string; refreshToken: string }>;
+      localStorage.setItem(ACCESS_TOKEN_KEY, result.data.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
+      return result.data.accessToken;
+    }).catch(error => {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      throw error;
+    }).finally(() => { refreshRequest = null; });
+  }
+  return refreshRequest;
+}
+
+async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true): Promise<T> {
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -19,6 +43,13 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
       ...(options?.headers || {}),
     },
   });
+
+  if (res.status === 401 && retryAuth && !url.endsWith('/auth/login') && !url.endsWith('/auth/refresh')) {
+    const accessToken = await renewAccessToken();
+    const headers = new Headers(options?.headers);
+    headers.set('Authorization', `Bearer ${accessToken}`);
+    return fetchJSON<T>(url, { ...options, headers }, false);
+  }
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ error: 'Network request failed' }));

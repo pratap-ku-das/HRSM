@@ -14,6 +14,18 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.orbithr.app.core.model.*
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val attendanceTimeFormat = DateTimeFormatter.ofPattern("HH:mm")
+
+private fun String?.asLocalAttendanceTime(): String {
+    if (this.isNullOrBlank()) return "--:--"
+    return runCatching {
+        Instant.parse(this).atZone(ZoneId.systemDefault()).format(attendanceTimeFormat)
+    }.getOrElse { substringAfter('T').take(5) }
+}
 
 @Composable
 private fun OrbitListItem(
@@ -116,7 +128,7 @@ fun AttendanceScreen(vm: AttendanceViewModel = hiltViewModel()) {
             if (records.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No attendance records yet") }
             else LazyColumn { items(records, key = { it.id }) { record -> OrbitListItem(
                 headline = { Text(record.date.substringBefore('T'), fontWeight = FontWeight.SemiBold) },
-                supporting = { Text("${record.clockInTime?.substringAfter('T')?.take(5) ?: "--:--"} to ${record.clockOutTime?.substringAfter('T')?.take(5) ?: "--:--"}") },
+                supporting = { Text("${record.clockInTime.asLocalAttendanceTime()} to ${record.clockOutTime.asLocalAttendanceTime()}") },
                 leading = { Icon(Icons.Outlined.Schedule, null) }, trailing = { Text(record.status) },
             ) } }
         }

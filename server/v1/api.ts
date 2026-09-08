@@ -29,6 +29,10 @@ const secret = () => {
   return value;
 };
 const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+const indiaDate = (instant = new Date()) => {
+  const value = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
+  return new Date(`${value}T00:00:00.000Z`);
+};
 const ok = (res: Response, data: unknown, status = 200, meta: Record<string, unknown> = {}) => res.status(status).json({ data, meta: { requestId: (res.req as AuthedRequest).requestId, ...meta } });
 const fail = (res: Response, status: number, code: string, message: string, fieldErrors?: unknown) => res.status(status).json({ error: { code, message, fieldErrors }, meta: { requestId: (res.req as AuthedRequest).requestId } });
 
@@ -146,7 +150,7 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.get('/dashboard', authenticate, async (req: AuthedRequest, res, next) => { try {
-    const cid = req.auth!.companyId; const today = new Date(new Date().toISOString().slice(0, 10));
+    const cid = req.auth!.companyId; const today = indiaDate();
     const [employees, attendance, pendingLeaves, announcements, holidays] = await prisma.$transaction([
       prisma.employee.count({ where: { companyId: cid, status: { in: ['ACTIVE', 'ON_PROBATION', 'ON_LEAVE'] } } }),
       prisma.attendanceRecord.count({ where: { companyId: cid, date: today, status: { in: ['PRESENT', 'LATE', 'HALF_DAY'] } } }),
@@ -179,7 +183,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.post('/me/attendance/punch', authenticate, requirePermission('attendance.punch'), async (req: AuthedRequest, res, next) => { try {
     const body = z.object({ action: z.enum(['CLOCK_IN', 'CLOCK_OUT']), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), deviceId: z.string().max(200).optional() }).parse(req.body);
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
-    const now = new Date(); const date = new Date(now.toISOString().slice(0, 10));
+    const now = new Date(); const date = indiaDate(now);
     const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } } });
     if (body.action === 'CLOCK_IN' && existing?.clockInTime) return fail(res, 409, 'ALREADY_CLOCKED_IN', 'You have already clocked in today.');
     if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) return fail(res, 409, 'CLOCK_IN_REQUIRED', 'Clock in before clocking out.');
