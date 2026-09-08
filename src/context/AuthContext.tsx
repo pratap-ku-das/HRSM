@@ -33,6 +33,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [companies, setCompanies] = useState<Company[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
 
+  const syncCompanyData = async (companyId: string) => {
+    const [employees, departments, designations, attendance] = await Promise.allSettled([
+      api.getEmployeesV1(),
+      api.getDepartmentsV1(),
+      api.getDesignationsV1(),
+      api.getAttendanceV1(),
+    ]);
+    if (employees.status === 'fulfilled') storageService.cacheEmployees(companyId, employees.value);
+    if (departments.status === 'fulfilled') storageService.cacheDepartments(companyId, departments.value);
+    if (designations.status === 'fulfilled') storageService.cacheDesignations(companyId, designations.value);
+    if (attendance.status === 'fulfilled') storageService.cacheAttendanceRecords(companyId, attendance.value);
+  };
+
   const refreshState = async () => {
     storageService.init();
 
@@ -45,6 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (storedSession && api.hasV1Session()) {
         try {
           const me = (await api.getMeV1()).data;
+          await syncCompanyData(me.company.id);
           setCurrentCompany(me.company);
           setCurrentUser(me.user);
           const liveSettings = await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id));
@@ -73,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await api.loginV1(email, password);
       const me = (await api.getMeV1()).data;
+      await syncCompanyData(me.company.id);
       const result = { user: me.user, company: me.company, settings: await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id)) };
 
       if (result && result.user && result.company) {

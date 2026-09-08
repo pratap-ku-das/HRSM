@@ -228,6 +228,20 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, items, 200, { page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
   } catch (e) { next(e); } });
 
+  router.get('/departments', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
+    return ok(res, await prisma.department.findMany({
+      where: { companyId: req.auth!.companyId },
+      orderBy: { name: 'asc' },
+    }));
+  } catch (e) { next(e); } });
+
+  router.get('/designations', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
+    return ok(res, await prisma.designation.findMany({
+      where: { companyId: req.auth!.companyId },
+      orderBy: { title: 'asc' },
+    }));
+  } catch (e) { next(e); } });
+
   router.post('/employees/onboard', authenticate, requirePermission('employee.manage'), async (req: AuthedRequest, res, next) => { try {
     const body = z.object({ employeeCode: z.string().trim().min(2).max(30), firstName: z.string().trim().min(1).max(80), lastName: z.string().trim().min(1).max(80), email: z.string().email(), departmentId: z.string().uuid(), designationId: z.string().uuid(), reportingManagerId: z.string().uuid().optional(), dateOfJoining: z.coerce.date(), employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN']).default('FULL_TIME'), workLocation: z.string().max(120).optional(), phone: z.string().max(30).optional() }).parse(req.body);
     const idempotencyKey = req.header('idempotency-key'); if (!idempotencyKey) return fail(res, 400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required.');

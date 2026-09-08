@@ -70,6 +70,16 @@ export const api = {
 
   // Employees
   getEmployees: (companyId: string) => fetchJSON<Employee[]>(`${API_BASE}/employees?companyId=${companyId}`),
+  getEmployeesV1: async () => {
+    const result = await fetchJSON<ApiEnvelope<Employee[]>>(`${API_BASE}/v1/employees?page=1&pageSize=100`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    });
+    return result.data.map(employee => ({
+      ...employee,
+      dateOfJoining: employee.dateOfJoining?.slice(0, 10),
+      dateOfBirth: employee.dateOfBirth?.slice(0, 10),
+    }));
+  },
   saveEmployee: (emp: Partial<Employee>) => 
     fetchJSON<Employee>(`${API_BASE}/employees`, {
       method: 'POST',
@@ -91,6 +101,9 @@ export const api = {
 
   // Departments
   getDepartments: (companyId: string) => fetchJSON<Department[]>(`${API_BASE}/departments?companyId=${companyId}`),
+  getDepartmentsV1: async () => (await fetchJSON<ApiEnvelope<Department[]>>(`${API_BASE}/v1/departments`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
   saveDepartment: (dept: Partial<Department>) => 
     fetchJSON<Department>(`${API_BASE}/departments`, {
       method: 'POST',
@@ -99,6 +112,9 @@ export const api = {
 
   // Designations
   getDesignations: (companyId: string) => fetchJSON<Designation[]>(`${API_BASE}/designations?companyId=${companyId}`),
+  getDesignationsV1: async () => (await fetchJSON<ApiEnvelope<Designation[]>>(`${API_BASE}/v1/designations`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
   saveDesignation: (desig: Partial<Designation>) => 
     fetchJSON<Designation>(`${API_BASE}/designations`, {
       method: 'POST',

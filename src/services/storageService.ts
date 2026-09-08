@@ -157,6 +157,11 @@ class StorageService {
     return companyId ? all.filter(e => e.companyId === companyId) : all;
   }
 
+  public cacheEmployees(companyId: string, employees: Employee[]): void {
+    const otherCompanies = this.getEmployees().filter(employee => employee.companyId !== companyId);
+    this.set(STORAGE_KEYS.EMPLOYEES, [...otherCompanies, ...employees]);
+  }
+
   public saveEmployee(emp: Employee, syncToApi = true): void {
     const all = this.getEmployees();
     const idx = all.findIndex(e => e.id === emp.id);
@@ -194,6 +199,11 @@ class StorageService {
     return companyId ? all.filter(d => d.companyId === companyId) : all;
   }
 
+  public cacheDepartments(companyId: string, departments: Department[]): void {
+    const otherCompanies = this.getDepartments().filter(department => department.companyId !== companyId);
+    this.set(STORAGE_KEYS.DEPARTMENTS, [...otherCompanies, ...departments]);
+  }
+
   public saveDepartment(dept: Department): void {
     const all = this.getDepartments();
     const idx = all.findIndex(d => d.id === dept.id);
@@ -216,6 +226,11 @@ class StorageService {
   public getDesignations(companyId?: string): Designation[] {
     const all = this.get<Designation[]>(STORAGE_KEYS.DESIGNATIONS, []);
     return companyId ? all.filter(d => d.companyId === companyId) : all;
+  }
+
+  public cacheDesignations(companyId: string, designations: Designation[]): void {
+    const otherCompanies = this.getDesignations().filter(designation => designation.companyId !== companyId);
+    this.set(STORAGE_KEYS.DESIGNATIONS, [...otherCompanies, ...designations]);
   }
 
   public saveDesignation(desig: Designation): void {
