@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AttendanceRecord, AttendanceStatus, AttendanceSource } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { api } from '../../services/api';
 import { 
   CalendarCheck, Calendar, Users, Filter, Download, Plus, 
   Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, 
@@ -31,6 +32,31 @@ export const AttendancePage: React.FC = () => {
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [bulkDeptId, setBulkDeptId] = useState<string>('ALL');
   const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('PRESENT');
+  const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
+
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    let active = true;
+    const refreshAttendance = async () => {
+      try {
+        const records = await api.getAttendanceV1();
+        if (!active) return;
+        storageService.cacheAttendanceRecords(currentCompany.id, records);
+        setLiveAttendance(records);
+      } catch (error) {
+        console.warn('Live attendance refresh failed:', error);
+      }
+    };
+    void refreshAttendance();
+    const timer = window.setInterval(refreshAttendance, 30_000);
+    const onFocus = () => void refreshAttendance();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [currentCompany?.id]);
 
   // Mobile API Payload Simulator state
   const [simEmployeeId, setSimEmployeeId] = useState<string>('');
@@ -39,7 +65,9 @@ export const AttendancePage: React.FC = () => {
 
   const employees = storageService.getEmployees(currentCompany?.id);
   const departments = storageService.getDepartments(currentCompany?.id);
-  const attendanceRecords = storageService.getAttendanceRecords(currentCompany?.id);
+  const attendanceRecords = liveAttendance !== null
+    ? liveAttendance
+    : storageService.getAttendanceRecords(currentCompany?.id);
 
   type DisplayStatus = AttendanceStatus | 'NOT_JOINED' | 'FUTURE' | 'NO_RECORD';
 

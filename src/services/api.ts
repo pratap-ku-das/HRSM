@@ -107,6 +107,13 @@ export const api = {
 
   // Attendance
   getAttendance: (companyId: string) => fetchJSON<AttendanceRecord[]>(`${API_BASE}/attendance?companyId=${companyId}`),
+  getAttendanceV1: async (from?: string) => {
+    const query = from ? `?from=${encodeURIComponent(from)}` : '';
+    const result = await fetchJSON<ApiEnvelope<AttendanceRecord[]>>(`${API_BASE}/v1/attendance${query}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    });
+    return result.data.map(record => ({ ...record, date: record.date.slice(0, 10) }));
+  },
   saveAttendanceRecord: (record: any) => 
     fetchJSON<AttendanceRecord>(`${API_BASE}/attendance`, {
       method: 'POST',

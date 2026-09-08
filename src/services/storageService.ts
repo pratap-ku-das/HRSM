@@ -242,6 +242,11 @@ class StorageService {
     return companyId ? all.filter(a => a.companyId === companyId) : all;
   }
 
+  public cacheAttendanceRecords(companyId: string, records: AttendanceRecord[]): void {
+    const otherCompanies = this.getAttendanceRecords().filter(record => record.companyId !== companyId);
+    this.set(STORAGE_KEYS.ATTENDANCE, [...otherCompanies, ...records]);
+  }
+
   public saveAttendanceRecord(record: AttendanceRecord): void {
     const all = this.getAttendanceRecords();
     const idx = all.findIndex(a => a.employeeId === record.employeeId && a.date === record.date);

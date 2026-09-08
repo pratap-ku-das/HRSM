@@ -149,6 +149,18 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { activeEmployees: employees, presentToday: attendance, pendingLeaves, announcements, holidays });
   } catch (e) { next(e); } });
 
+  router.get('/attendance', authenticate, requirePermission('attendance.read.team'), async (req: AuthedRequest, res, next) => { try {
+    const from = req.query.from ? new Date(String(req.query.from)) : undefined;
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        companyId: req.auth!.companyId,
+        ...(from ? { date: { gte: from } } : {}),
+      },
+      orderBy: { date: 'desc' },
+    });
+    return ok(res, records);
+  } catch (e) { next(e); } });
+
   router.get('/me/attendance', authenticate, requirePermission('attendance.read.self'), async (req: AuthedRequest, res, next) => { try {
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
     const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 31 * 86_400_000);
