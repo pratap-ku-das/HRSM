@@ -258,6 +258,12 @@ fun AttendanceScreen(verifyAttendance: ((AttendanceVerificationResult) -> Unit) 
     var verificationInProgress by remember { mutableStateOf(false) }
     var verificationMessage by remember { mutableStateOf("Face and precise location are required before clock-in.") }
     val verificationColor by animateColorAsState(if (proof != null) OrbitMint else OrbitViolet, label = "verificationColor")
+    val today = LocalDate.now().toString()
+    val todayRecord = state.data.orEmpty().firstOrNull { it.date.take(10) == today }
+    val hasClockedIn = todayRecord?.clockInTime != null
+    val hasClockedOut = todayRecord?.clockOutTime != null
+    val canClockIn = !state.loading && !hasClockedIn
+    val canClockOut = !state.loading && hasClockedIn && !hasClockedOut
 
     LaunchedEffect(proof?.verifiedAtMillis) {
         if (proof != null) {
@@ -319,23 +325,23 @@ fun AttendanceScreen(verifyAttendance: ((AttendanceVerificationResult) -> Unit) 
                             }
                         }
                     },
-                    enabled = !verificationInProgress && !state.loading,
+                    enabled = !verificationInProgress && canClockIn,
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = verificationColor),
                 ) {
                     if (verificationInProgress) CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp) else Icon(Icons.Outlined.CenterFocusStrong, null)
                     Spacer(Modifier.width(9.dp))
-                    Text(if (verificationInProgress) "Verifying securely…" else if (proof != null) "Verified — ready to clock in" else "Verify face & location")
+                    Text(if (hasClockedIn) "Clock-in completed for today" else if (verificationInProgress) "Verifying securely…" else if (proof != null) "Verified — ready to clock in" else "Verify face & location")
                 }
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Button(onClick = { confirmation = "CLOCK_IN" }, enabled = proof != null && !state.loading, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = OrbitInk)) {
-                        Icon(Icons.AutoMirrored.Outlined.Login, null); Spacer(Modifier.width(7.dp)); Text("Clock in")
+                    Button(onClick = { confirmation = "CLOCK_IN" }, enabled = proof != null && canClockIn, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = OrbitInk)) {
+                        Icon(Icons.AutoMirrored.Outlined.Login, null); Spacer(Modifier.width(7.dp)); Text(if (hasClockedIn) "Clocked in" else "Clock in")
                     }
-                    OutlinedButton(onClick = { confirmation = "CLOCK_OUT" }, enabled = !state.loading, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, OrbitInk)) {
-                        Icon(Icons.AutoMirrored.Outlined.Logout, null); Spacer(Modifier.width(7.dp)); Text("Clock out")
+                    OutlinedButton(onClick = { confirmation = "CLOCK_OUT" }, enabled = canClockOut, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, OrbitInk)) {
+                        Icon(Icons.AutoMirrored.Outlined.Logout, null); Spacer(Modifier.width(7.dp)); Text(if (hasClockedOut) "Clocked out" else "Clock out")
                     }
                 }
             }
@@ -359,12 +365,12 @@ fun AttendanceScreen(verifyAttendance: ((AttendanceVerificationResult) -> Unit) 
                 Button(onClick = {
                     val verifiedProof = proof
                     confirmation = null
-                    if (action == "CLOCK_IN" && verifiedProof != null) {
+                    if (action == "CLOCK_IN" && verifiedProof != null && canClockIn) {
                         proof = null
                         verificationMessage = "Face and precise location are required before clock-in."
                         vm.punch(action, verifiedProof)
-                    } else if (action == "CLOCK_OUT") vm.punch(action)
-                }, enabled = action == "CLOCK_OUT" || proof != null) { Text("Confirm") }
+                    } else if (action == "CLOCK_OUT" && canClockOut) vm.punch(action)
+                }, enabled = if (action == "CLOCK_IN") proof != null && canClockIn else canClockOut) { Text("Confirm") }
             },
             dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Not now") } },
         )
