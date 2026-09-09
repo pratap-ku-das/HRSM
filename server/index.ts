@@ -15,6 +15,10 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 
+// Railway terminates HTTPS in front of this service. Trust exactly that proxy hop so
+// rate limiting uses the real client IP instead of rejecting X-Forwarded-For.
+app.set('trust proxy', 1);
+
 const employeeToClient = (employee: any) => ({
   id: employee.id,
   companyId: employee.companyId,
