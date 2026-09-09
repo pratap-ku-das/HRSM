@@ -36,12 +36,11 @@ async function renewAccessToken(): Promise<string> {
 }
 
 async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true): Promise<T> {
+  const requestHeaders = new Headers(options?.headers);
+  if (!requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
   const res = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
+    headers: requestHeaders,
   });
 
   if (res.status === 401 && retryAuth && !url.endsWith('/auth/login') && !url.endsWith('/auth/refresh')) {

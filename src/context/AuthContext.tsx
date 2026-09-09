@@ -10,6 +10,7 @@ interface AuthContextType {
   companies: Company[];
   settings: CompanySettings | null;
   isAuthenticated: boolean;
+  isRestoringSession: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   loginAsDemoUser: (userId: string) => void;
   registerCompany: (companyData: Partial<Company>, adminData: Partial<User> & { password?: string }, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
@@ -32,6 +33,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentCompany, setCurrentCompany] = useState<Company | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
 
   const syncCompanyData = async (companyId: string) => {
     const [employees, departments, designations, attendance] = await Promise.allSettled([
@@ -47,6 +49,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshState = async () => {
+    setIsRestoringSession(true);
     storageService.init();
 
     try {
@@ -58,11 +61,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (storedSession && api.hasV1Session()) {
         try {
           const me = (await api.getMeV1()).data;
-          await syncCompanyData(me.company.id);
           setCurrentCompany(me.company);
           setCurrentUser(me.user);
-          const liveSettings = await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id));
-          setSettings(normalizeIndianSettings(liveSettings));
+          setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
+          void syncCompanyData(me.company.id);
+          void api.getSettings(me.company.id)
+            .then(value => setSettings(normalizeIndianSettings(value)))
+            .catch(error => console.warn('Live settings refresh failed:', error));
           return;
         } catch (e) {
           console.error('Session load error', e);
@@ -76,6 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSettings(null);
     } catch (err) {
       console.warn('API refresh error:', err);
+    } finally {
+      setIsRestoringSession(false);
     }
   };
 
@@ -222,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         companies,
         settings,
         isAuthenticated: !!currentUser && !!currentCompany,
+        isRestoringSession,
         login,
         loginAsDemoUser,
         registerCompany,

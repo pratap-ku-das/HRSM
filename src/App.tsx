@@ -30,11 +30,11 @@ import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 
 const MainApp: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isRestoringSession } = useAuth();
   
   // Page mode: 'public_landing' | 'public_login' | 'public_register' | 'authenticated'
   const [pageMode, setPageMode] = useState<'public_landing' | 'public_login' | 'public_register' | 'authenticated'>('authenticated');
-  const [activeView, setActiveView] = useState<string>('dashboard');
+  const [activeView, setActiveView] = useState<string>(() => localStorage.getItem('orbithr_active_view') || 'dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState<boolean>(false);
@@ -52,12 +52,22 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem('orbithr_active_view', activeView);
+  }, [activeView]);
+
   if (window.location.pathname === '/activate') {
     return <ActivateAccountPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
   }
 
   if (window.location.pathname === '/reset-password') {
     return <ResetPasswordPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
+  }
+
+  if (isRestoringSession) {
+    return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <div className="text-center"><div className="mx-auto h-10 w-10 rounded-full border-4 border-brand-500 border-t-transparent animate-spin" /><p className="mt-4 text-sm text-slate-400">Restoring your OrbitHR workspace…</p></div>
+    </main>;
   }
 
   // If user is not authenticated and in app mode, render landing page
