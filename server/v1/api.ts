@@ -53,7 +53,9 @@ export function createV1Router(prisma: PrismaClient) {
   const router = Router();
   router.use((req: AuthedRequest, res, next) => { req.requestId = String(req.header('x-request-id') || crypto.randomUUID()); res.setHeader('x-request-id', req.requestId); next(); });
 
-  const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const recoveryLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: true, legacyHeaders: false });
+  const refreshLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
   const authenticate = async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const raw = req.header('authorization');
@@ -67,7 +69,7 @@ export function createV1Router(prisma: PrismaClient) {
   };
   const requirePermission = (permission: string) => (req: AuthedRequest, res: Response, next: NextFunction) => req.auth?.permissions.includes(permission) ? next() : fail(res, 403, 'FORBIDDEN', 'You do not have permission to perform this action.');
 
-  router.post('/auth/login', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/login', loginLimiter, async (req, res, next) => { try {
     const body = z.object({ email: z.string().email(), password: z.string().min(8), deviceName: z.string().max(120).optional() }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() }, include: { employee: true } });
     if (!user?.passwordHash || !await bcrypt.compare(body.password, user.passwordHash)) return fail(res, 401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
@@ -76,7 +78,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, session);
   } catch (e) { next(e); } });
 
-  router.post('/auth/refresh', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/refresh', refreshLimiter, async (req, res, next) => { try {
     const body = z.object({ refreshToken: z.string().min(32), deviceName: z.string().max(120).optional() }).parse(req.body);
     const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(body.refreshToken) }, include: { user: { include: { employee: true } } } });
     if (!stored || stored.expiresAt <= new Date()) return fail(res, 401, 'REFRESH_INVALID', 'Refresh token is invalid or expired.');
@@ -105,7 +107,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { loggedOutAllDevices: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/activate', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/activate', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ token: z.string().min(32), password: z.string().min(10).max(128) }).parse(req.body);
     const action = await prisma.actionToken.findUnique({ where: { tokenHash: hashToken(body.token) } });
     if (!action || action.type !== 'ACCOUNT_ACTIVATION' || action.usedAt || action.expiresAt <= new Date()) return fail(res, 400, 'ACTIVATION_INVALID', 'Activation link is invalid or expired.');
@@ -117,7 +119,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { activated: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/forgot-password', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/forgot-password', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ email: z.string().email() }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
     if (user) {
@@ -132,7 +134,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { accepted: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/reset-password', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/reset-password', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ token: z.string().min(32), password: z.string().min(10).max(128) }).parse(req.body);
     const action = await prisma.actionToken.findUnique({ where: { tokenHash: hashToken(body.token) } });
     if (!action || action.type !== 'PASSWORD_RESET' || action.usedAt || action.expiresAt <= new Date()) return fail(res, 400, 'RESET_INVALID', 'Reset link is invalid or expired.');

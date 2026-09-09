@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AttendanceRecord, AttendanceStatus, AttendanceSource } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
 import { api } from '../../services/api';
 import { 
   CalendarCheck, Calendar, Users, Filter, Download, Plus, 
-  Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, 
+  Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, RefreshCw,
   MapPin, Shield, Edit3, X, Check, FileText, ChevronLeft, ChevronRight, Terminal
 } from 'lucide-react';
 
@@ -33,30 +33,33 @@ export const AttendancePage: React.FC = () => {
   const [bulkDeptId, setBulkDeptId] = useState<string>('ALL');
   const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('PRESENT');
   const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
+  const [syncError, setSyncError] = useState('');
+
+  const refreshAttendance = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    try {
+      const records = await api.getAttendanceV1();
+      storageService.cacheAttendanceRecords(currentCompany.id, records);
+      setLiveAttendance(records);
+      setSyncError('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Attendance synchronization failed.';
+      setSyncError(message);
+      console.warn('Live attendance refresh failed:', error);
+    }
+  }, [currentCompany?.id]);
 
   useEffect(() => {
     if (!currentCompany?.id) return;
-    let active = true;
-    const refreshAttendance = async () => {
-      try {
-        const records = await api.getAttendanceV1();
-        if (!active) return;
-        storageService.cacheAttendanceRecords(currentCompany.id, records);
-        setLiveAttendance(records);
-      } catch (error) {
-        console.warn('Live attendance refresh failed:', error);
-      }
-    };
     void refreshAttendance();
     const timer = window.setInterval(refreshAttendance, 30_000);
     const onFocus = () => void refreshAttendance();
     window.addEventListener('focus', onFocus);
     return () => {
-      active = false;
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, [currentCompany?.id]);
+  }, [currentCompany?.id, refreshAttendance]);
 
   // Mobile API Payload Simulator state
   const [simEmployeeId, setSimEmployeeId] = useState<string>('');
@@ -296,6 +299,15 @@ export const AttendancePage: React.FC = () => {
           />
 
           <button
+            onClick={() => void refreshAttendance()}
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all flex items-center space-x-1.5"
+            title="Refresh live attendance"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+
+          <button
             onClick={handleExportCSV}
             className="px-3 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all flex items-center space-x-1.5"
             title="Export Monthly Matrix to CSV"
@@ -313,6 +325,10 @@ export const AttendancePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {syncError && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+        Live attendance could not refresh: {syncError}
+      </div>}
 
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-slate-800 pb-3 text-xs font-semibold overflow-x-auto">
