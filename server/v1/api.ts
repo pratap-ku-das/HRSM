@@ -33,6 +33,14 @@ const indiaDate = (instant = new Date()) => {
   const value = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
   return new Date(`${value}T00:00:00.000Z`);
 };
+const indiaDateKey = (instant: Date) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(instant);
+const clientIp = (req: Request) => {
+  const cloudflareIp = req.header('cf-connecting-ip')?.split(',')[0]?.trim();
+  const value = cloudflareIp || req.ip || req.socket.remoteAddress || 'unknown';
+  return value.replace(/^::ffff:/, '');
+};
 const ok = (res: Response, data: unknown, status = 200, meta: Record<string, unknown> = {}) => res.status(status).json({ data, meta: { requestId: (res.req as AuthedRequest).requestId, ...meta } });
 const fail = (res: Response, status: number, code: string, message: string, fieldErrors?: unknown) => res.status(status).json({ error: { code, message, fieldErrors }, meta: { requestId: (res.req as AuthedRequest).requestId } });
 
@@ -172,7 +180,43 @@ export function createV1Router(prisma: PrismaClient) {
       },
       orderBy: { date: 'desc' },
     });
-    return ok(res, records);
+    const linkedEmployees = await prisma.employee.findMany({
+      where: { companyId: req.auth!.companyId, userId: { not: null } },
+      select: { id: true, userId: true },
+    });
+    const employeeByUserId = new Map(linkedEmployees.flatMap(employee => employee.userId ? [[employee.userId, employee.id] as const] : []));
+    const punchLogs = linkedEmployees.length ? await prisma.auditLog.findMany({
+      where: {
+        companyId: req.auth!.companyId,
+        category: 'ATTENDANCE',
+        action: { in: ['CLOCK_IN', 'CLOCK_OUT'] },
+        userId: { in: linkedEmployees.flatMap(employee => employee.userId ? [employee.userId] : []) },
+        ...(from ? { timestamp: { gte: from } } : {}),
+      },
+      orderBy: { timestamp: 'asc' },
+    }) : [];
+    const punchEvidence = new Map<string, { ipAddress: string; locationAccuracyMeters?: number }>();
+    for (const log of punchLogs) {
+      const employeeId = employeeByUserId.get(log.userId);
+      if (!employeeId) continue;
+      const accuracyMatch = log.details.match(/accuracy\s+([\d.]+)m/i);
+      punchEvidence.set(`${employeeId}:${indiaDateKey(log.timestamp)}:${log.action}`, {
+        ipAddress: log.ipAddress,
+        ...(accuracyMatch ? { locationAccuracyMeters: Number(accuracyMatch[1]) } : {}),
+      });
+    }
+    const detailedRecords = records.map(record => {
+      const dateKey = indiaDateKey(record.date);
+      const clockIn = punchEvidence.get(`${record.employeeId}:${dateKey}:CLOCK_IN`);
+      const clockOut = punchEvidence.get(`${record.employeeId}:${dateKey}:CLOCK_OUT`);
+      return {
+        ...record,
+        clockInIpAddress: clockIn?.ipAddress,
+        clockOutIpAddress: clockOut?.ipAddress,
+        locationAccuracyMeters: clockIn?.locationAccuracyMeters,
+      };
+    });
+    return ok(res, detailedRecords);
   } catch (e) { next(e); } });
 
   router.get('/me/attendance', authenticate, requirePermission('attendance.read.self'), async (req: AuthedRequest, res, next) => { try {
@@ -218,7 +262,7 @@ export function createV1Router(prisma: PrismaClient) {
         source: body.biometricVerified ? 'MOBILE_FACE' : 'SYSTEM_AUTO',
       },
     });
-    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API${body.action === 'CLOCK_IN' ? ` after face verification at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).` : '.'}`, ipAddress: req.ip || 'unknown' } });
+    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API${body.action === 'CLOCK_IN' ? ` after face verification at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).` : '.'}`, ipAddress: clientIp(req) } });
     return ok(res, record, existing ? 200 : 201);
   } catch (e) { next(e); } });
 

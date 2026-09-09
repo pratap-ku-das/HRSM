@@ -120,6 +120,9 @@ export interface AttendanceRecord {
   deviceId?: string;
   locationLat?: number;
   locationLng?: number;
+  locationAccuracyMeters?: number;
+  clockInIpAddress?: string;
+  clockOutIpAddress?: string;
   source: AttendanceSource;
   
   // Web HR Admin adjustment fields

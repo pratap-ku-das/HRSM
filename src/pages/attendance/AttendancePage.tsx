@@ -44,6 +44,7 @@ export const AttendancePage: React.FC = () => {
   const [bulkSaving, setBulkSaving] = useState<boolean>(false);
   const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
   const [syncError, setSyncError] = useState('');
+  const [punchDate, setPunchDate] = useState<string>(todayStr);
 
   const refreshAttendance = useCallback(async () => {
     if (!currentCompany?.id) return;
@@ -156,7 +157,26 @@ export const AttendancePage: React.FC = () => {
   const toIndiaTimeInput = (value?: string) => value ? new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(value)) : '';
+  const toIndiaTimeWithSeconds = (value?: string) => value ? new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+  }).format(new Date(value)) : '--';
   const toAttendanceInstant = (date: string, time: string) => time ? new Date(`${date}T${time}:00+05:30`).toISOString() : undefined;
+  const workedDuration = (record: AttendanceRecord) => {
+    if (!record.clockInTime) return '--';
+    const start = new Date(record.clockInTime).getTime();
+    const end = record.clockOutTime ? new Date(record.clockOutTime).getTime() : Date.now();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '--';
+    const minutes = Math.floor((end - start) / 60_000);
+    return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m${record.clockOutTime ? '' : ' live'}`;
+  };
+  const selectedPunches = attendanceRecords
+    .filter(record => record.date === punchDate && (record.clockInTime || record.clockOutTime))
+    .sort((a, b) => String(b.clockInTime || '').localeCompare(String(a.clockInTime || '')));
+  const employeeName = (employeeId: string) => {
+    const employee = employees.find(item => item.id === employeeId);
+    return employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown employee';
+  };
+  const employeeCode = (employeeId: string) => employees.find(item => item.id === employeeId)?.employeeCode || employeeId;
 
   const handleCellClick = (employeeId: string, employeeName: string, date: string) => {
     const record = attendanceRecords.find(a => a.employeeId === employeeId && a.date === date);
@@ -449,6 +469,99 @@ export const AttendancePage: React.FC = () => {
       {/* TAB 1: MONTHLY MATRIX */}
       {activeTab === 'matrix' && (
         <div className="space-y-4">
+          {/* Exact mobile punch evidence */}
+          <section className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950/60">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  Live Punch Details
+                </h2>
+                <p className="mt-0.5 text-[11px] text-slate-400">Exact server time in IST, captured GPS evidence, request IP, device and face-verification status.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2.5 py-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Auto-refresh 30s
+                </span>
+                <input
+                  type="date"
+                  value={punchDate}
+                  max={todayStr}
+                  onChange={(event) => setPunchDate(event.target.value)}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-emerald-500"
+                  aria-label="Punch details date"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1120px] text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-950/40 text-[10px] text-slate-400 uppercase tracking-wide border-b border-slate-800">
+                    <th className="py-2.5 px-4">Employee</th>
+                    <th className="py-2.5 px-3">Clock in (IST)</th>
+                    <th className="py-2.5 px-3">Clock out (IST)</th>
+                    <th className="py-2.5 px-3">Worked</th>
+                    <th className="py-2.5 px-3">Verification</th>
+                    <th className="py-2.5 px-3">Location</th>
+                    <th className="py-2.5 px-3">IP address</th>
+                    <th className="py-2.5 px-3">Device / source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {selectedPunches.map(record => {
+                    const hasLocation = record.locationLat !== undefined && record.locationLng !== undefined;
+                    const mapUrl = hasLocation ? `https://www.google.com/maps?q=${record.locationLat},${record.locationLng}` : '';
+                    return (
+                      <tr key={record.id} className="hover:bg-slate-800/35 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-white">{employeeName(record.employeeId)}</div>
+                          <div className="font-mono text-[10px] text-slate-500">{employeeCode(record.employeeId)}</div>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-emerald-300 whitespace-nowrap">{toIndiaTimeWithSeconds(record.clockInTime)}</td>
+                        <td className="py-3 px-3 font-mono text-slate-200 whitespace-nowrap">
+                          {record.clockOutTime ? toIndiaTimeWithSeconds(record.clockOutTime) : <span className="text-amber-300">Still clocked in</span>}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-white whitespace-nowrap">{workedDuration(record)}</td>
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold ${record.faceAuthVerified ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
+                            <Shield className="w-3 h-3" /> {record.faceAuthVerified ? 'Face verified' : 'Not face verified'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 min-w-[210px]">
+                          {hasLocation ? (
+                            <a href={mapUrl} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-1.5 text-cyan-300 hover:text-cyan-200">
+                              <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                              <span>
+                                <span className="font-mono block">{record.locationLat!.toFixed(6)}, {record.locationLng!.toFixed(6)}</span>
+                                <span className="text-[10px] text-slate-500 group-hover:text-slate-400">{record.locationAccuracyMeters ? `Accuracy ±${Math.round(record.locationAccuracyMeters)}m · ` : ''}Open map</span>
+                              </span>
+                            </a>
+                          ) : <span className="text-slate-500">Not captured</span>}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[10px] text-slate-300 min-w-[150px]">
+                          <div>IN: {record.clockInIpAddress || 'Not recorded'}</div>
+                          <div className="mt-1 text-slate-500">OUT: {record.clockOutIpAddress || 'Not recorded'}</div>
+                        </td>
+                        <td className="py-3 px-3 min-w-[150px]">
+                          <div className="font-semibold text-purple-300 text-[10px]">{record.source.replaceAll('_', ' ')}</div>
+                          <div className="font-mono text-[9px] text-slate-500 truncate max-w-[170px]" title={record.deviceId || ''}>{record.deviceId || 'No device ID'}</div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {selectedPunches.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-8 px-4 text-center text-slate-500">
+                        No employee punches were recorded on {punchDate}.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           {/* Status Legend */}
           <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-2">Legend:</span>
@@ -729,6 +842,27 @@ export const AttendancePage: React.FC = () => {
             <p className="text-xs text-slate-400 mt-0.5">
               Employee: <strong className="text-white">{selectedRecord.employeeName}</strong> • Date: <strong className="text-brand-300 font-mono">{selectedRecord.date}</strong>
             </p>
+
+            {selectedRecord.currentRecord && (
+              <div className="mt-4 p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Captured punch evidence</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                  <div><span className="block text-slate-500">Clock in (IST)</span><strong className="font-mono text-emerald-300">{toIndiaTimeWithSeconds(selectedRecord.currentRecord.clockInTime)}</strong></div>
+                  <div><span className="block text-slate-500">Clock out (IST)</span><strong className="font-mono text-white">{toIndiaTimeWithSeconds(selectedRecord.currentRecord.clockOutTime)}</strong></div>
+                  <div><span className="block text-slate-500">Worked duration</span><strong className="font-mono text-white">{workedDuration(selectedRecord.currentRecord)}</strong></div>
+                  <div><span className="block text-slate-500">Face verification</span><strong className={selectedRecord.currentRecord.faceAuthVerified ? 'text-emerald-300' : 'text-slate-400'}>{selectedRecord.currentRecord.faceAuthVerified ? 'Verified' : 'Not verified'}</strong></div>
+                  <div className="col-span-2">
+                    <span className="block text-slate-500">Location</span>
+                    {selectedRecord.currentRecord.locationLat !== undefined && selectedRecord.currentRecord.locationLng !== undefined
+                      ? <a className="font-mono text-cyan-300 hover:text-cyan-200" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${selectedRecord.currentRecord.locationLat},${selectedRecord.currentRecord.locationLng}`}>{selectedRecord.currentRecord.locationLat.toFixed(6)}, {selectedRecord.currentRecord.locationLng.toFixed(6)}{selectedRecord.currentRecord.locationAccuracyMeters ? ` (±${Math.round(selectedRecord.currentRecord.locationAccuracyMeters)}m)` : ''} · Open map</a>
+                      : <strong className="text-slate-500">Not captured</strong>}
+                  </div>
+                  <div><span className="block text-slate-500">Clock-in IP</span><strong className="font-mono text-white break-all">{selectedRecord.currentRecord.clockInIpAddress || 'Not recorded'}</strong></div>
+                  <div><span className="block text-slate-500">Clock-out IP</span><strong className="font-mono text-white break-all">{selectedRecord.currentRecord.clockOutIpAddress || 'Not recorded'}</strong></div>
+                  <div className="col-span-2"><span className="block text-slate-500">Device / source</span><strong className="font-mono text-purple-300 break-all">{selectedRecord.currentRecord.deviceId || 'No device ID'} · {selectedRecord.currentRecord.source}</strong></div>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleSaveAdjustment} className="mt-4 space-y-4">
               {adjustmentFormError && (
