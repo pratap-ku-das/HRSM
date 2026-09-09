@@ -160,6 +160,7 @@ export const AttendancePage: React.FC = () => {
   const toIndiaTimeWithSeconds = (value?: string) => value ? new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
   }).format(new Date(value)) : '--';
+  const isFiniteCoordinate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
   const toAttendanceInstant = (date: string, time: string) => time ? new Date(`${date}T${time}:00+05:30`).toISOString() : undefined;
   const workedDuration = (record: AttendanceRecord) => {
     if (!record.clockInTime) return '--';
@@ -510,7 +511,7 @@ export const AttendancePage: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
                   {selectedPunches.map(record => {
-                    const hasLocation = record.locationLat !== undefined && record.locationLng !== undefined;
+                    const hasLocation = isFiniteCoordinate(record.locationLat) && isFiniteCoordinate(record.locationLng);
                     const mapUrl = hasLocation ? `https://www.google.com/maps?q=${record.locationLat},${record.locationLng}` : '';
                     return (
                       <tr key={record.id} className="hover:bg-slate-800/35 transition-colors">
@@ -853,7 +854,7 @@ export const AttendancePage: React.FC = () => {
                   <div><span className="block text-slate-500">Face verification</span><strong className={selectedRecord.currentRecord.faceAuthVerified ? 'text-emerald-300' : 'text-slate-400'}>{selectedRecord.currentRecord.faceAuthVerified ? 'Verified' : 'Not verified'}</strong></div>
                   <div className="col-span-2">
                     <span className="block text-slate-500">Location</span>
-                    {selectedRecord.currentRecord.locationLat !== undefined && selectedRecord.currentRecord.locationLng !== undefined
+                    {isFiniteCoordinate(selectedRecord.currentRecord.locationLat) && isFiniteCoordinate(selectedRecord.currentRecord.locationLng)
                       ? <a className="font-mono text-cyan-300 hover:text-cyan-200" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${selectedRecord.currentRecord.locationLat},${selectedRecord.currentRecord.locationLng}`}>{selectedRecord.currentRecord.locationLat.toFixed(6)}, {selectedRecord.currentRecord.locationLng.toFixed(6)}{selectedRecord.currentRecord.locationAccuracyMeters ? ` (±${Math.round(selectedRecord.currentRecord.locationAccuracyMeters)}m)` : ''} · Open map</a>
                       : <strong className="text-slate-500">Not captured</strong>}
                   </div>
