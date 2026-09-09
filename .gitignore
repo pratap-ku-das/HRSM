@@ -16,6 +16,7 @@ node_modules
 .toolchains/
 android-app/local.properties
 android-app/.gradle/
+android-app/gradle-user-home/
 android-app/app/build/
 dist
 dist-ssr

@@ -12,12 +12,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.*
 import com.orbithr.app.SessionState
+import com.orbithr.app.core.model.AttendanceVerificationResult
 import com.orbithr.app.core.model.MeDto
 
-@Composable fun RootApp(state: SessionState, error: String?, login: (String, String) -> Unit, logout: () -> Unit) = when (state) {
+@Composable fun RootApp(state: SessionState, error: String?, login: (String, String) -> Unit, logout: () -> Unit, verifyAttendance: ((AttendanceVerificationResult) -> Unit) -> Unit) = when (state) {
     SessionState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(); Text("Securely connecting...", Modifier.padding(top = 72.dp)) }
     SessionState.SignedOut -> LoginScreen(error, login)
-    is SessionState.SignedIn -> SignedInApp(state.me, logout)
+    is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance)
 }
 
 @Composable private fun LoginScreen(error: String?, login: (String, String) -> Unit) {
@@ -34,12 +35,12 @@ import com.orbithr.app.core.model.MeDto
 }
 
 private data class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
-@Composable private fun SignedInApp(me: MeDto, logout: () -> Unit) {
+@Composable private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: ((AttendanceVerificationResult) -> Unit) -> Unit) {
     val nav = rememberNavController(); val destinations = listOf(Destination("home", "Home", Icons.Outlined.Home), Destination("attendance", "Attendance", Icons.Outlined.Schedule), Destination("leave", "Leave", Icons.Outlined.EventAvailable), Destination("pay", "Pay", Icons.Outlined.ReceiptLong), Destination("more", "More", Icons.Outlined.MoreHoriz))
     Scaffold(bottomBar = { NavigationBar { val entry by nav.currentBackStackEntryAsState(); destinations.forEach { NavigationBarItem(selected = entry?.destination?.route == it.route, onClick = { nav.navigate(it.route) { popUpTo("home") { saveState = true }; launchSingleTop = true; restoreState = true } }, icon = { Icon(it.icon, it.label) }, label = { Text(it.label) }) } } }) { padding ->
         NavHost(nav, "home", Modifier.padding(padding)) {
             composable("home") { HomeScreen(me) }
-            composable("attendance") { AttendanceScreen() }
+            composable("attendance") { AttendanceScreen(verifyAttendance) }
             composable("leave") { LeaveScreen() }
             composable("pay") { PayslipScreen() }
             composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }) }

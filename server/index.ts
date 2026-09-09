@@ -8,11 +8,13 @@ import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
+import { normalizeDatabaseUrl } from './databaseUrl.js';
 
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
+const prisma = new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);
 const PORT = process.env.PORT || 3001;
 
 // Railway terminates HTTPS in front of this service. Trust exactly that proxy hop so

@@ -183,16 +183,42 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.post('/me/attendance/punch', authenticate, requirePermission('attendance.punch'), async (req: AuthedRequest, res, next) => { try {
-    const body = z.object({ action: z.enum(['CLOCK_IN', 'CLOCK_OUT']), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), deviceId: z.string().max(200).optional() }).parse(req.body);
+    const body = z.object({
+      action: z.enum(['CLOCK_IN', 'CLOCK_OUT']),
+      latitude: z.number().min(-90).max(90).optional(),
+      longitude: z.number().min(-180).max(180).optional(),
+      locationAccuracyMeters: z.number().positive().max(200).optional(),
+      deviceId: z.string().max(200).optional(),
+      biometricVerified: z.boolean().default(false),
+    }).parse(req.body);
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
+    if (body.action === 'CLOCK_IN' && !body.biometricVerified) return fail(res, 422, 'FACE_VERIFICATION_REQUIRED', 'Verify your enrolled face before clocking in.');
+    if (body.action === 'CLOCK_IN' && (body.latitude === undefined || body.longitude === undefined || body.locationAccuracyMeters === undefined)) return fail(res, 422, 'LOCATION_REQUIRED', 'Precise current location is required before clocking in.');
     const now = new Date(); const date = indiaDate(now);
     const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } } });
     if (body.action === 'CLOCK_IN' && existing?.clockInTime) return fail(res, 409, 'ALREADY_CLOCKED_IN', 'You have already clocked in today.');
     if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) return fail(res, 409, 'CLOCK_IN_REQUIRED', 'Clock in before clocking out.');
     if (body.action === 'CLOCK_OUT' && existing?.clockOutTime) return fail(res, 409, 'ALREADY_CLOCKED_OUT', 'You have already clocked out today.');
-    const data = body.action === 'CLOCK_IN' ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, source: 'SYSTEM_AUTO' as const } : { clockOutTime: now };
-    const record = await prisma.attendanceRecord.upsert({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } }, update: data, create: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, date, status: 'PRESENT', clockInTime: now, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, source: 'SYSTEM_AUTO' } });
-    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API.`, ipAddress: req.ip || 'unknown' } });
+    const data = body.action === 'CLOCK_IN'
+      ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, faceAuthVerified: true, source: 'MOBILE_FACE' as const }
+      : { clockOutTime: now };
+    const record = await prisma.attendanceRecord.upsert({
+      where: { employeeId_date: { employeeId: req.auth!.employeeId, date } },
+      update: data,
+      create: {
+        companyId: req.auth!.companyId,
+        employeeId: req.auth!.employeeId,
+        date,
+        status: 'PRESENT',
+        clockInTime: now,
+        locationLat: body.latitude,
+        locationLng: body.longitude,
+        deviceId: body.deviceId,
+        faceAuthVerified: body.biometricVerified,
+        source: body.biometricVerified ? 'MOBILE_FACE' : 'SYSTEM_AUTO',
+      },
+    });
+    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API${body.action === 'CLOCK_IN' ? ` after face verification at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).` : '.'}`, ipAddress: req.ip || 'unknown' } });
     return ok(res, record, existing ? 200 : 201);
   } catch (e) { next(e); } });
 

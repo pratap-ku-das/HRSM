@@ -17,6 +17,7 @@ import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 
 private val attendanceTimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -114,21 +115,68 @@ fun HomeScreen(me: MeDto, vm: HomeViewModel = hiltViewModel()) {
 }
 
 @Composable
-fun AttendanceScreen(vm: AttendanceViewModel = hiltViewModel()) {
+fun AttendanceScreen(verifyAttendance: ((AttendanceVerificationResult) -> Unit) -> Unit, vm: AttendanceViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
     var confirmation by remember { mutableStateOf<String?>(null) }
+    var proof by remember { mutableStateOf<AttendanceVerificationProof?>(null) }
+    var verificationInProgress by remember { mutableStateOf(false) }
+    var verificationMessage by remember { mutableStateOf("Face and precise location verification is required before clock-in.") }
+
+    LaunchedEffect(proof?.verifiedAtMillis) {
+        if (proof != null) {
+            delay(60_000)
+            proof = null
+            verificationMessage = "Verification expired. Verify again before clock-in."
+        }
+    }
+
     Page("Attendance", action = { IconButton(onClick = vm::refresh) { Icon(Icons.Outlined.Refresh, "Refresh") } }) {
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(if (proof != null) Icons.Outlined.VerifiedUser else Icons.Outlined.Face, null, tint = if (proof != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(verificationMessage, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                }
+                OutlinedButton(
+                    onClick = {
+                        verificationInProgress = true
+                        verificationMessage = "Waiting for face verification and current location..."
+                        verifyAttendance { result ->
+                            verificationInProgress = false
+                            when (result) {
+                                is AttendanceVerificationResult.Verified -> {
+                                    proof = result.proof
+                                    verificationMessage = "Face and location verified. Clock-in is enabled for 60 seconds."
+                                }
+                                is AttendanceVerificationResult.Failed -> {
+                                    proof = null
+                                    verificationMessage = result.message
+                                }
+                            }
+                        }
+                    },
+                    enabled = !verificationInProgress && !state.loading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (verificationInProgress) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Outlined.Face, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (verificationInProgress) "Verifying..." else "Verify face & location")
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { confirmation = "CLOCK_IN" }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Login, null); Spacer(Modifier.width(6.dp)); Text("Clock in") }
-            OutlinedButton(onClick = { confirmation = "CLOCK_OUT" }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Logout, null); Spacer(Modifier.width(6.dp)); Text("Clock out") }
+            Button(onClick = { confirmation = "CLOCK_IN" }, enabled = proof != null && !state.loading, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Login, null); Spacer(Modifier.width(6.dp)); Text("Clock in") }
+            OutlinedButton(onClick = { confirmation = "CLOCK_OUT" }, enabled = !state.loading, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Logout, null); Spacer(Modifier.width(6.dp)); Text("Clock out") }
         }
         Spacer(Modifier.height(12.dp))
         StateBody(state, vm::refresh) { records ->
             if (records.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No attendance records yet") }
             else LazyColumn { items(records, key = { it.id }) { record -> OrbitListItem(
                 headline = { Text(record.date.substringBefore('T'), fontWeight = FontWeight.SemiBold) },
-                supporting = { Text("${record.clockInTime.asLocalAttendanceTime()} to ${record.clockOutTime.asLocalAttendanceTime()}") },
+                supporting = { Text("${record.clockInTime.asLocalAttendanceTime()} to ${record.clockOutTime.asLocalAttendanceTime()}${if (record.faceAuthVerified) " • Face + location" else ""}") },
                 leading = { Icon(Icons.Outlined.Schedule, null) }, trailing = { Text(record.status) },
             ) } }
         }
@@ -136,8 +184,16 @@ fun AttendanceScreen(vm: AttendanceViewModel = hiltViewModel()) {
     confirmation?.let { action -> AlertDialog(
         onDismissRequest = { confirmation = null },
         title = { Text("Confirm attendance") },
-        text = { Text("Use the server time to ${action.lowercase().replace('_', ' ')} now?") },
-        confirmButton = { Button(onClick = { confirmation = null; vm.punch(action) }) { Text("Confirm") } },
+        text = { Text(if (action == "CLOCK_IN") "Your verified face, location and the server time will be recorded now." else "Use the server time to clock out now?") },
+        confirmButton = { Button(onClick = {
+            val verifiedProof = proof
+            confirmation = null
+            if (action == "CLOCK_IN" && verifiedProof != null) {
+                proof = null
+                verificationMessage = "Face and precise location verification is required before clock-in."
+                vm.punch(action, verifiedProof)
+            } else if (action == "CLOCK_OUT") vm.punch(action)
+        }, enabled = action == "CLOCK_OUT" || proof != null) { Text("Confirm") } },
         dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Cancel") } },
     ) }
 }

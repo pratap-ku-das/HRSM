@@ -15,7 +15,14 @@ import javax.inject.Singleton
     suspend fun logout() { val refresh = tokens.refresh(); if (refresh != null) runCatching { api.logout(RefreshRequest(refresh, Build.MODEL)) }; tokens.clear() }
     suspend fun dashboard() = api.dashboard().data
     suspend fun attendance() = api.attendance().data
-    suspend fun punch(action: String) = api.punch(PunchRequest(action, deviceId = Build.MODEL)).data
+    suspend fun punch(action: String, proof: AttendanceVerificationProof? = null) = api.punch(PunchRequest(
+        action = action,
+        latitude = proof?.latitude,
+        longitude = proof?.longitude,
+        locationAccuracyMeters = proof?.accuracyMeters,
+        deviceId = proof?.deviceId ?: Build.MODEL,
+        biometricVerified = proof != null,
+    )).data
     suspend fun leaves() = api.leaves().data
     suspend fun applyLeave(request: ApplyLeaveRequest) = api.applyLeave(request).data
     suspend fun payslips() = api.payslips().data

@@ -442,7 +442,7 @@ export const AttendancePage: React.FC = () => {
           }`}
         >
           <Smartphone className="w-4 h-4" />
-          <span>⚡ Phase 6 Mobile Face-Auth Schema Inspector</span>
+          <span>Mobile Face & Location Verification</span>
         </button>
       </div>
 
@@ -616,17 +616,16 @@ export const AttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: PHASE 6 MOBILE FACE-AUTH SCHEMA BLUEPRINT */}
+      {/* TAB 3: MOBILE FACE AND LOCATION VERIFICATION */}
       {activeTab === 'mobile_blueprint' && (
         <div className="space-y-6">
           <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950 border border-purple-500/30 space-y-3">
             <div className="flex items-center space-x-2 text-purple-300 font-bold text-sm">
               <Smartphone className="w-5 h-5" />
-              <span>Phase 6 Mobile Face-Authentication Attendance Blueprint</span>
+              <span>Mobile Face & Location Attendance</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              As per design requirements, **Clock In / Clock Out user actions are not implemented in the current web application**. 
-              However, our full database schema and API routing have been strictly architected so that the future React Native / iOS / Android biometric face-authentication mobile app connects with 100% backward compatibility.
+              The Android clock-in flow now requires a clear camera-captured face, enrolled device biometric verification, and a fresh precise location. The backend uses server time, rejects unverified clock-ins, and synchronizes successful records to this attendance matrix.
             </p>
           </div>
 
@@ -637,7 +636,7 @@ export const AttendancePage: React.FC = () => {
                 <span>1. Mobile Client Capture</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                Employee opens mobile app → On-device face detection captures facial embeddings vector + GPS coordinates + hardware device UUID.
+                Employee captures one clear, front-facing face. On-device detection checks face position and open eyes before Android requests the enrolled device biometric.
               </p>
             </div>
 
@@ -646,7 +645,7 @@ export const AttendancePage: React.FC = () => {
                 <span>2. Multi-Tenant API Verify</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                API verifies employee facial vector match, validates geofence boundary against company office perimeter, and tags record.
+                After biometric success, Android captures a fresh GPS fix and sends its coordinates, accuracy, and hashed device ID with the authenticated clock-in request.
               </p>
             </div>
 
@@ -655,7 +654,7 @@ export const AttendancePage: React.FC = () => {
                 <span>3. Real-Time HR Sync</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                The attendance record status automatically updates in the HRMS Web Matrix, calculates late arrival penalty, and updates payroll ledger.
+                The API records authoritative server time, marks the source as MOBILE_FACE, writes the audit trail, and makes the record available to the HR dashboard.
               </p>
             </div>
           </div>
