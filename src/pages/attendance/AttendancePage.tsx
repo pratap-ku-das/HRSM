@@ -26,12 +26,22 @@ export const AttendancePage: React.FC = () => {
 
   const [adjustmentStatus, setAdjustmentStatus] = useState<AttendanceStatus>('PRESENT');
   const [adjustmentReason, setAdjustmentReason] = useState<string>('');
+  const [adjustmentClockIn, setAdjustmentClockIn] = useState<string>('09:00');
+  const [adjustmentClockOut, setAdjustmentClockOut] = useState<string>('18:00');
+  const [adjustmentFormError, setAdjustmentFormError] = useState<string>('');
+  const [adjustmentSaving, setAdjustmentSaving] = useState<boolean>(false);
 
   // Bulk mark modal state
   const [isBulkModalOpen, setIsBulkModalOpen] = useState<boolean>(false);
-  const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [bulkDeptId, setBulkDeptId] = useState<string>('ALL');
+  const [bulkEmployeeId, setBulkEmployeeId] = useState<string>('');
+  const [bulkStartDate, setBulkStartDate] = useState<string>(todayStr);
+  const [bulkEndDate, setBulkEndDate] = useState<string>(todayStr);
   const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('PRESENT');
+  const [bulkClockIn, setBulkClockIn] = useState<string>('09:00');
+  const [bulkClockOut, setBulkClockOut] = useState<string>('18:00');
+  const [bulkReason, setBulkReason] = useState<string>('Administrative bulk regularization');
+  const [bulkFormError, setBulkFormError] = useState<string>('');
+  const [bulkSaving, setBulkSaving] = useState<boolean>(false);
   const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
   const [syncError, setSyncError] = useState('');
 
@@ -142,6 +152,12 @@ export const AttendancePage: React.FC = () => {
     }
   };
 
+  const usesClockTimes = (status: AttendanceStatus) => ['PRESENT', 'LATE', 'HALF_DAY'].includes(status);
+  const toIndiaTimeInput = (value?: string) => value ? new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(value)) : '';
+  const toAttendanceInstant = (date: string, time: string) => time ? new Date(`${date}T${time}:00+05:30`).toISOString() : undefined;
+
   const handleCellClick = (employeeId: string, employeeName: string, date: string) => {
     const record = attendanceRecords.find(a => a.employeeId === employeeId && a.date === date);
     setSelectedRecord({
@@ -152,11 +168,21 @@ export const AttendancePage: React.FC = () => {
     });
     setAdjustmentStatus(record ? record.status : 'PRESENT');
     setAdjustmentReason(record?.correctionNote || '');
+    setAdjustmentClockIn(toIndiaTimeInput(record?.clockInTime) || '09:00');
+    setAdjustmentClockOut(toIndiaTimeInput(record?.clockOutTime) || '18:00');
+    setAdjustmentFormError('');
   };
 
-  const handleSaveAdjustment = (e: React.FormEvent) => {
+  const handleSaveAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecord) return;
+    if (usesClockTimes(adjustmentStatus) && (!adjustmentClockIn || !adjustmentClockOut || adjustmentClockOut <= adjustmentClockIn)) {
+      setAdjustmentFormError('Clock-out time must be after clock-in time.');
+      return;
+    }
+
+    const clockInTime = usesClockTimes(adjustmentStatus) ? toAttendanceInstant(selectedRecord.date, adjustmentClockIn) : undefined;
+    const clockOutTime = usesClockTimes(adjustmentStatus) ? toAttendanceInstant(selectedRecord.date, adjustmentClockOut) : undefined;
 
     const newRecord: AttendanceRecord = {
       id: selectedRecord.currentRecord ? selectedRecord.currentRecord.id : `att-${selectedRecord.employeeId}-${selectedRecord.date}`,
@@ -164,6 +190,8 @@ export const AttendancePage: React.FC = () => {
       employeeId: selectedRecord.employeeId,
       date: selectedRecord.date,
       status: adjustmentStatus,
+      clockInTime,
+      clockOutTime,
       source: 'WEB_ADMIN',
       correctionNote: adjustmentReason || 'Administrative adjustment',
       correctedBy: currentUser?.fullName || 'Admin',
@@ -171,7 +199,21 @@ export const AttendancePage: React.FC = () => {
       updatedAt: new Date().toISOString(),
     };
 
-    storageService.saveAttendanceRecord(newRecord);
+    setAdjustmentSaving(true);
+    const persisted = await storageService.saveAttendanceRecord(newRecord);
+    setAdjustmentSaving(false);
+    if (!persisted) {
+      setAdjustmentFormError('The adjustment could not be saved to the live database. Please try again.');
+      await refreshAttendance();
+      return;
+    }
+    setAdjustmentFormError('');
+    setSyncError('');
+    setLiveAttendance(previous => {
+      const records = previous || storageService.getAttendanceRecords(currentCompany?.id);
+      const remaining = records.filter(record => !(record.employeeId === newRecord.employeeId && record.date === newRecord.date));
+      return [...remaining, newRecord];
+    });
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -180,7 +222,7 @@ export const AttendancePage: React.FC = () => {
       userRole: currentUser?.role || 'ADMIN',
       action: 'UPDATE_ATTENDANCE',
       category: 'ATTENDANCE',
-      details: `Adjusted attendance for ${selectedRecord.employeeName} on ${selectedRecord.date} to ${adjustmentStatus}. Reason: ${adjustmentReason || 'Admin adjustment'}`,
+      details: `Adjusted attendance for ${selectedRecord.employeeName} on ${selectedRecord.date} to ${adjustmentStatus}${usesClockTimes(adjustmentStatus) ? ` (${adjustmentClockIn} - ${adjustmentClockOut})` : ''}. Reason: ${adjustmentReason || 'Admin adjustment'}`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -188,27 +230,58 @@ export const AttendancePage: React.FC = () => {
     setSelectedRecord(null);
   };
 
-  const handleBulkMark = (e: React.FormEvent) => {
+  const handleBulkMark = async (e: React.FormEvent) => {
     e.preventDefault();
-    const departmentEmployees = bulkDeptId === 'ALL'
-      ? employees
-      : employees.filter(e => e.departmentId === bulkDeptId);
-    const targetEmployees = departmentEmployees.filter(emp => emp.dateOfJoining <= bulkDate && bulkDate <= todayStr);
+    const employee = employees.find(item => item.id === bulkEmployeeId);
+    if (!employee || bulkStartDate > bulkEndDate) {
+      setBulkFormError('Select an employee and a valid date range.');
+      return;
+    }
+    if (usesClockTimes(bulkStatus) && (!bulkClockIn || !bulkClockOut || bulkClockOut <= bulkClockIn)) {
+      setBulkFormError('Clock-out time must be after clock-in time.');
+      return;
+    }
+    const dates: string[] = [];
+    const end = new Date(`${bulkEndDate}T00:00:00Z`);
+    for (let cursor = new Date(`${bulkStartDate}T00:00:00Z`); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      if (date >= employee.dateOfJoining && date <= todayStr) dates.push(date);
+    }
+    if (dates.length === 0) {
+      setBulkFormError('The selected range has no valid attendance dates after the employee joining date.');
+      return;
+    }
 
-    const newRecords: AttendanceRecord[] = targetEmployees.map(emp => ({
-      id: `att-${emp.id}-${bulkDate}`,
+    const newRecords: AttendanceRecord[] = dates.map(date => ({
+      id: attendanceRecords.find(record => record.employeeId === employee.id && record.date === date)?.id || `att-${employee.id}-${date}`,
       companyId: currentCompany?.id || '',
-      employeeId: emp.id,
-      date: bulkDate,
+      employeeId: employee.id,
+      date,
       status: bulkStatus,
+      clockInTime: usesClockTimes(bulkStatus) ? toAttendanceInstant(date, bulkClockIn) : undefined,
+      clockOutTime: usesClockTimes(bulkStatus) ? toAttendanceInstant(date, bulkClockOut) : undefined,
       source: 'WEB_ADMIN',
-      correctionNote: `Bulk marked for department: ${bulkDeptId}`,
+      correctionNote: bulkReason,
       correctedBy: currentUser?.fullName || 'Admin',
-      createdAt: new Date().toISOString(),
+      createdAt: attendanceRecords.find(record => record.employeeId === employee.id && record.date === date)?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }));
 
-    storageService.bulkMarkAttendance(newRecords);
+    setBulkSaving(true);
+    const persisted = await storageService.bulkMarkAttendance(newRecords);
+    setBulkSaving(false);
+    if (!persisted) {
+      setBulkFormError('The bulk adjustment could not be saved to the live database. Please try again.');
+      await refreshAttendance();
+      return;
+    }
+    setBulkFormError('');
+    setSyncError('');
+    setLiveAttendance(previous => {
+      const records = previous || storageService.getAttendanceRecords(currentCompany?.id);
+      const datesUpdated = new Set(newRecords.map(record => record.date));
+      return [...records.filter(record => record.employeeId !== employee.id || !datesUpdated.has(record.date)), ...newRecords];
+    });
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -217,7 +290,7 @@ export const AttendancePage: React.FC = () => {
       userRole: currentUser?.role || 'ADMIN',
       action: 'BULK_ATTENDANCE',
       category: 'ATTENDANCE',
-      details: `Bulk marked ${targetEmployees.length} employees on ${bulkDate} as ${bulkStatus}.`,
+      details: `Bulk adjusted ${employee.firstName} ${employee.lastName} from ${bulkStartDate} to ${bulkEndDate} as ${bulkStatus} (${newRecords.length} records).`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -317,11 +390,15 @@ export const AttendancePage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setIsBulkModalOpen(true)}
+            onClick={() => {
+              setBulkEmployeeId(current => current || employees[0]?.id || '');
+              setBulkFormError('');
+              setIsBulkModalOpen(true);
+            }}
             className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 shadow-md shadow-brand-500/20 transition-all flex items-center space-x-1.5"
           >
             <Plus className="w-4 h-4" />
-            <span>Bulk Mark Attendance</span>
+            <span>Bulk Adjust Employee</span>
           </button>
         </div>
       </div>
@@ -461,6 +538,9 @@ export const AttendancePage: React.FC = () => {
                           const isWeekend = d.dayOfWeek === 0 || d.dayOfWeek === 6;
                           const status = getDisplayStatus(emp.dateOfJoining, d.dateStr, d.dayOfWeek, record);
                           const isLocked = status === 'NOT_JOINED' || status === 'FUTURE';
+                          const timeSummary = record && (record.clockInTime || record.clockOutTime)
+                            ? `${record.clockInTime ? toIndiaTimeInput(record.clockInTime) : '--:--'} - ${record.clockOutTime ? toIndiaTimeInput(record.clockOutTime) : '--:--'}`
+                            : '';
 
                           return (
                             <td
@@ -472,7 +552,7 @@ export const AttendancePage: React.FC = () => {
                             >
                               <div
                                 className={`w-7 h-7 mx-auto rounded-lg border flex items-center justify-center font-mono font-bold text-[10px] transition-transform hover:scale-110 ${getStatusBadgeStyle(status)}`}
-                                title={status === 'NOT_JOINED' ? `${emp.firstName} had not joined yet` : status === 'FUTURE' ? 'Future date' : `${emp.firstName} on ${d.dateStr}: ${status.replace('_', ' ')}`}
+                                title={status === 'NOT_JOINED' ? `${emp.firstName} had not joined yet` : status === 'FUTURE' ? 'Future date' : `${emp.firstName} on ${d.dateStr}: ${status.replace('_', ' ')}${timeSummary ? ` (${timeSummary})` : ''}`}
                               >
                                 {getStatusAbbr(status)}
                               </div>
@@ -645,13 +725,18 @@ export const AttendancePage: React.FC = () => {
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setSelectedRecord(null)} />
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
             <h3 className="text-base font-bold text-white">Adjust Attendance Record</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Employee: <strong className="text-white">{selectedRecord.employeeName}</strong> • Date: <strong className="text-brand-300 font-mono">{selectedRecord.date}</strong>
             </p>
 
             <form onSubmit={handleSaveAdjustment} className="mt-4 space-y-4">
+              {adjustmentFormError && (
+                <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">
+                  {adjustmentFormError}
+                </div>
+              )}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Status</label>
                 <select
@@ -667,6 +752,31 @@ export const AttendancePage: React.FC = () => {
                   <option value="ABSENT">Absent (Unexcused)</option>
                 </select>
               </div>
+
+              {usesClockTimes(adjustmentStatus) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-in Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={adjustmentClockIn}
+                      onChange={(e) => setAdjustmentClockIn(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-out Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={adjustmentClockOut}
+                      onChange={(e) => setAdjustmentClockOut(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Correction / Regularization Reason *</label>
@@ -694,9 +804,10 @@ export const AttendancePage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-bold"
+                  disabled={adjustmentSaving}
+                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 disabled:cursor-wait text-white rounded-xl font-bold"
                 >
-                  Save & Log Adjustment
+                  {adjustmentSaving ? 'Saving...' : 'Save & Log Adjustment'}
                 </button>
               </div>
             </form>
@@ -704,39 +815,61 @@ export const AttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* Bulk Mark Modal */}
+      {/* Bulk employee date-range adjustment modal */}
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsBulkModalOpen(false)} />
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
-            <h3 className="text-base font-bold text-white">Bulk Mark Daily Attendance</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Mark batch status for an entire division or company.</p>
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
+            <h3 className="text-base font-bold text-white">Bulk Adjust Employee Attendance</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Apply clock times and status to one employee across a date range.</p>
 
             <form onSubmit={handleBulkMark} className="mt-4 space-y-4">
+              {bulkFormError && (
+                <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">
+                  {bulkFormError}
+                </div>
+              )}
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Date</label>
-                <input
-                  type="date"
-                  required
-                  max={todayStr}
-                  value={bulkDate}
-                  onChange={(e) => setBulkDate(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Department</label>
+                <label className="block text-slate-300 font-medium mb-1">Employee *</label>
                 <select
-                  value={bulkDeptId}
-                  onChange={(e) => setBulkDeptId(e.target.value)}
+                  required
+                  value={bulkEmployeeId}
+                  onChange={(e) => setBulkEmployeeId(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                 >
-                  <option value="ALL">All Departments ({employees.length} Employees)</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
+                  <option value="" disabled>Select an employee</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.firstName} {employee.lastName} ({employee.employeeCode})
+                    </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">From Date *</label>
+                  <input
+                    type="date"
+                    required
+                    max={todayStr}
+                    value={bulkStartDate}
+                    onChange={(e) => setBulkStartDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">To Date *</label>
+                  <input
+                    type="date"
+                    required
+                    min={bulkStartDate}
+                    max={todayStr}
+                    value={bulkEndDate}
+                    onChange={(e) => setBulkEndDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                  />
+                </div>
               </div>
 
               <div>
@@ -747,10 +880,53 @@ export const AttendancePage: React.FC = () => {
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                 >
                   <option value="PRESENT">Present (Full Day)</option>
+                  <option value="LATE">Late Arrival</option>
                   <option value="HOLIDAY">Official Public Holiday</option>
                   <option value="HALF_DAY">Half Day</option>
+                  <option value="LEAVE">Approved Leave</option>
                   <option value="ABSENT">Absent</option>
                 </select>
+              </div>
+
+              {usesClockTimes(bulkStatus) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-in Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={bulkClockIn}
+                      onChange={(e) => setBulkClockIn(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-out Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={bulkClockOut}
+                      onChange={(e) => setBulkClockOut(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Adjustment Reason *</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={bulkReason}
+                  onChange={(e) => setBulkReason(e.target.value)}
+                  placeholder="Reason for applying this attendance range..."
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                Existing records in this range will be updated. Future dates and dates before joining are excluded.
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">
@@ -763,9 +939,10 @@ export const AttendancePage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-bold"
+                  disabled={bulkSaving}
+                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 disabled:cursor-wait text-white rounded-xl font-bold"
                 >
-                  Apply to Group
+                  {bulkSaving ? 'Applying...' : 'Apply Date Range'}
                 </button>
               </div>
             </form>

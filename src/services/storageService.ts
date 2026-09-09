@@ -262,7 +262,7 @@ class StorageService {
     this.set(STORAGE_KEYS.ATTENDANCE, [...otherCompanies, ...records]);
   }
 
-  public saveAttendanceRecord(record: AttendanceRecord): void {
+  public saveAttendanceRecord(record: AttendanceRecord): Promise<boolean> {
     const all = this.getAttendanceRecords();
     const idx = all.findIndex(a => a.employeeId === record.employeeId && a.date === record.date);
     if (idx >= 0) {
@@ -272,10 +272,15 @@ class StorageService {
     }
     this.set(STORAGE_KEYS.ATTENDANCE, all);
 
-    api.saveAttendanceRecord(record).catch(err => console.warn('API saveAttendanceRecord sync:', err.message));
+    return api.saveAttendanceRecord(record)
+      .then(() => true)
+      .catch(err => {
+        console.warn('API saveAttendanceRecord sync:', err.message);
+        return false;
+      });
   }
 
-  public bulkMarkAttendance(records: AttendanceRecord[]): void {
+  public bulkMarkAttendance(records: AttendanceRecord[]): Promise<boolean> {
     const all = this.getAttendanceRecords();
     records.forEach(rec => {
       const idx = all.findIndex(a => a.employeeId === rec.employeeId && a.date === rec.date);
@@ -287,7 +292,12 @@ class StorageService {
     });
     this.set(STORAGE_KEYS.ATTENDANCE, all);
 
-    api.bulkMarkAttendance(records).catch(err => console.warn('API bulkMarkAttendance sync:', err.message));
+    return api.bulkMarkAttendance(records)
+      .then(() => true)
+      .catch(err => {
+        console.warn('API bulkMarkAttendance sync:', err.message);
+        return false;
+      });
   }
 
   // Leave Management

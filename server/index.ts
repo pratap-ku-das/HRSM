@@ -490,9 +490,12 @@ app.get('/api/attendance', async (req, res) => {
 
 app.post('/api/attendance', async (req, res) => {
   try {
-    const { companyId, employeeId, date, status, correctionNote, correctedBy } = req.body;
+    const { companyId, employeeId, date, status, clockInTime, clockOutTime, correctionNote, correctedBy } = req.body;
 
     const dateObj = new Date(date);
+    const clockIn = clockInTime ? new Date(clockInTime) : null;
+    const clockOut = clockOutTime ? new Date(clockOutTime) : null;
+    if (clockIn && clockOut && clockOut <= clockIn) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
     const record = await prisma.attendanceRecord.upsert({
       where: {
         employeeId_date: {
@@ -502,6 +505,8 @@ app.post('/api/attendance', async (req, res) => {
       },
       update: {
         status,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
         correctionNote,
         correctedBy,
         source: 'WEB_ADMIN',
@@ -511,6 +516,8 @@ app.post('/api/attendance', async (req, res) => {
         employeeId,
         date: dateObj,
         status,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
         correctionNote,
         correctedBy,
         source: 'WEB_ADMIN',
@@ -527,8 +534,14 @@ app.post('/api/attendance/bulk', async (req, res) => {
   try {
     const { records } = req.body;
     if (!Array.isArray(records)) return res.status(400).json({ error: 'records array required' });
+    const hasInvalidTimes = records.some((record: any) => {
+      const clockIn = record.clockInTime ? new Date(record.clockInTime) : null;
+      const clockOut = record.clockOutTime ? new Date(record.clockOutTime) : null;
+      return clockIn && clockOut && clockOut <= clockIn;
+    });
+    if (hasInvalidTimes) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
 
-    const results = await Promise.all(
+    const results = await prisma.$transaction(
       records.map((r: any) =>
         prisma.attendanceRecord.upsert({
           where: {
@@ -539,16 +552,22 @@ app.post('/api/attendance/bulk', async (req, res) => {
           },
           update: {
             status: r.status,
+            clockInTime: r.clockInTime ? new Date(r.clockInTime) : null,
+            clockOutTime: r.clockOutTime ? new Date(r.clockOutTime) : null,
             correctionNote: r.correctionNote,
             correctedBy: r.correctedBy,
+            source: 'WEB_ADMIN',
           },
           create: {
             companyId: r.companyId,
             employeeId: r.employeeId,
             date: new Date(r.date),
             status: r.status,
+            clockInTime: r.clockInTime ? new Date(r.clockInTime) : null,
+            clockOutTime: r.clockOutTime ? new Date(r.clockOutTime) : null,
             correctionNote: r.correctionNote,
             correctedBy: r.correctedBy,
+            source: 'WEB_ADMIN',
           },
         })
       )
