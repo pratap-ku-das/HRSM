@@ -12,6 +12,8 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationCompat
 import androidx.fragment.app.FragmentActivity
@@ -20,9 +22,6 @@ import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.orbithr.app.core.model.AttendanceVerificationProof
 import com.orbithr.app.core.model.AttendanceVerificationResult
 import com.orbithr.app.ui.OrbitTheme
@@ -33,38 +32,13 @@ import java.security.MessageDigest
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
     private var pendingVerification: ((AttendanceVerificationResult) -> Unit)? = null
+    private var showLiveCamera by mutableStateOf(false)
 
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
         if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true && grants[Manifest.permission.CAMERA] == true) captureFace()
         else finishVerification(AttendanceVerificationResult.Failed("Camera and precise location permissions are required. Clock-in remains disabled."))
-    }
-
-    private val faceCaptureLauncher = registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        if (bitmap == null) {
-            finishVerification(AttendanceVerificationResult.Failed("Face capture was cancelled. Clock-in remains disabled."))
-            return@registerForActivityResult
-        }
-        val options = FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .build()
-        val detector = FaceDetection.getClient(options)
-        detector.process(InputImage.fromBitmap(bitmap, 0))
-            .addOnSuccessListener { faces ->
-                detector.close()
-                val face = faces.singleOrNull()
-                val eyesOpen = (face?.leftEyeOpenProbability ?: 0f) >= 0.55f && (face?.rightEyeOpenProbability ?: 0f) >= 0.55f
-                val facingCamera = face != null && kotlin.math.abs(face.headEulerAngleY) <= 20f && kotlin.math.abs(face.headEulerAngleZ) <= 20f
-                if (face == null || !eyesOpen || !facingCamera) {
-                    finishVerification(AttendanceVerificationResult.Failed("Show one clear, front-facing face with both eyes open and try again."))
-                } else authenticateFace()
-            }
-            .addOnFailureListener { error ->
-                detector.close()
-                finishVerification(AttendanceVerificationResult.Failed("Face detection failed: ${error.message ?: "unknown error"}"))
-            }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +50,10 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val error by vm.error.collectAsState()
                 RootApp(state, error, vm::login, vm::logout, ::verifyFaceAndLocation)
+                if (showLiveCamera) LiveFaceCamera(
+                    onVerified = { showLiveCamera = false; authenticateFace() },
+                    onCancel = { finishVerification(AttendanceVerificationResult.Failed("Live face verification was cancelled.")) },
+                )
             }
         }
     }
@@ -105,7 +83,7 @@ class MainActivity : FragmentActivity() {
         captureFace()
     }
 
-    private fun captureFace() = faceCaptureLauncher.launch(null)
+    private fun captureFace() { showLiveCamera = true }
 
     private fun authenticateFace() {
         val authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -183,6 +161,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun finishVerification(result: AttendanceVerificationResult) {
+        showLiveCamera = false
         val callback = pendingVerification
         pendingVerification = null
         callback?.invoke(result)

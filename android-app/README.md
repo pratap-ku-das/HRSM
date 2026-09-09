@@ -39,7 +39,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. A relea
 - Room cache schema and WorkManager sync foundation
 - Permission-driven employee/manager navigation
 
-Connected workflows are login/session restoration, dashboard, server-time attendance punch/history, leave list/application, payslips, expenses, profile, employee directory, and employee onboarding. Android clock-in is gated by a camera-captured, front-facing face check, an enrolled system biometric on a face-capable device, and a fresh precise GPS fix (200 metre maximum reported accuracy); the proof expires after 60 seconds and the backend rejects unverified clock-in requests. Unsupported file upload, notification registration, assets, goals, and document APIs are explicitly unavailable rather than backed by mock data.
+Connected workflows are login/session restoration, dashboard, server-time attendance punch/history, leave list/application, payslips, expenses, profile, employee directory, and employee onboarding. Android clock-in uses an in-app CameraX preview with continuous face detection and a blink liveness challenge, followed by an enrolled system biometric on a face-capable device and a fresh precise GPS fix (200 metre maximum reported accuracy); the proof expires after 60 seconds and the backend rejects unverified clock-in requests. Unsupported file upload, notification registration, assets, goals, and document APIs are explicitly unavailable rather than backed by mock data.
 
 ## Google Play preparation
 
