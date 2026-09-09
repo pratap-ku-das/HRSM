@@ -48,3 +48,20 @@ ORBIT_API_BASE_URL=https://hr.balajione.dev/api/v1/
 Build the signed APK with the live API URL and place it at
 `public/downloads/OrbitHR.apk`. The application serves it directly from
 `https://hr.balajione.dev/downloads/orbithr-android.apk`.
+
+### Automatic Android publishing
+
+`.github/workflows/android-release.yml` rebuilds and publishes the APK whenever
+files under `android-app/` change on `main`. Each CI build receives an increasing
+version code, replaces `public/downloads/OrbitHR.apk`, and pushes that artifact so
+Railway redeploys the same permanent download URL.
+
+Configure these GitHub Actions repository secrets before running the workflow:
+
+- `ANDROID_KEYSTORE_BASE64`: base64-encoded release keystore
+- `ANDROID_KEYSTORE_PASSWORD`: keystore password
+- `ANDROID_KEY_ALIAS`: release key alias
+- `ANDROID_KEY_PASSWORD`: release key password
+
+Use the same release key permanently. Changing it prevents Android from installing
+future builds as updates over an already installed version.
