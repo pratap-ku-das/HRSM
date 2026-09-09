@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AttendanceRecord, AttendanceStatus, AttendanceSource } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { api } from '../../services/api';
 import { 
   CalendarCheck, Calendar, Users, Filter, Download, Plus, 
-  Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, 
+  Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, RefreshCw,
   MapPin, Shield, Edit3, X, Check, FileText, ChevronLeft, ChevronRight, Terminal
 } from 'lucide-react';
 
@@ -25,12 +26,51 @@ export const AttendancePage: React.FC = () => {
 
   const [adjustmentStatus, setAdjustmentStatus] = useState<AttendanceStatus>('PRESENT');
   const [adjustmentReason, setAdjustmentReason] = useState<string>('');
+  const [adjustmentClockIn, setAdjustmentClockIn] = useState<string>('09:00');
+  const [adjustmentClockOut, setAdjustmentClockOut] = useState<string>('18:00');
+  const [adjustmentFormError, setAdjustmentFormError] = useState<string>('');
+  const [adjustmentSaving, setAdjustmentSaving] = useState<boolean>(false);
 
   // Bulk mark modal state
   const [isBulkModalOpen, setIsBulkModalOpen] = useState<boolean>(false);
-  const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [bulkDeptId, setBulkDeptId] = useState<string>('ALL');
+  const [bulkEmployeeId, setBulkEmployeeId] = useState<string>('');
+  const [bulkStartDate, setBulkStartDate] = useState<string>(todayStr);
+  const [bulkEndDate, setBulkEndDate] = useState<string>(todayStr);
   const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('PRESENT');
+  const [bulkClockIn, setBulkClockIn] = useState<string>('09:00');
+  const [bulkClockOut, setBulkClockOut] = useState<string>('18:00');
+  const [bulkReason, setBulkReason] = useState<string>('Administrative bulk regularization');
+  const [bulkFormError, setBulkFormError] = useState<string>('');
+  const [bulkSaving, setBulkSaving] = useState<boolean>(false);
+  const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
+  const [syncError, setSyncError] = useState('');
+  const [punchDate, setPunchDate] = useState<string>(todayStr);
+
+  const refreshAttendance = useCallback(async () => {
+    if (!currentCompany?.id) return;
+    try {
+      const records = await api.getAttendanceV1();
+      storageService.cacheAttendanceRecords(currentCompany.id, records);
+      setLiveAttendance(records);
+      setSyncError('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Attendance synchronization failed.';
+      setSyncError(message);
+      console.warn('Live attendance refresh failed:', error);
+    }
+  }, [currentCompany?.id]);
+
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    void refreshAttendance();
+    const timer = window.setInterval(refreshAttendance, 30_000);
+    const onFocus = () => void refreshAttendance();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [currentCompany?.id, refreshAttendance]);
 
   // Mobile API Payload Simulator state
   const [simEmployeeId, setSimEmployeeId] = useState<string>('');
@@ -39,7 +79,9 @@ export const AttendancePage: React.FC = () => {
 
   const employees = storageService.getEmployees(currentCompany?.id);
   const departments = storageService.getDepartments(currentCompany?.id);
-  const attendanceRecords = storageService.getAttendanceRecords(currentCompany?.id);
+  const attendanceRecords = liveAttendance !== null
+    ? liveAttendance
+    : storageService.getAttendanceRecords(currentCompany?.id);
 
   type DisplayStatus = AttendanceStatus | 'NOT_JOINED' | 'FUTURE' | 'NO_RECORD';
 
@@ -111,6 +153,32 @@ export const AttendancePage: React.FC = () => {
     }
   };
 
+  const usesClockTimes = (status: AttendanceStatus) => ['PRESENT', 'LATE', 'HALF_DAY'].includes(status);
+  const toIndiaTimeInput = (value?: string) => value ? new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(value)) : '';
+  const toIndiaTimeWithSeconds = (value?: string) => value ? new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+  }).format(new Date(value)) : '--';
+  const isFiniteCoordinate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+  const toAttendanceInstant = (date: string, time: string) => time ? new Date(`${date}T${time}:00+05:30`).toISOString() : undefined;
+  const workedDuration = (record: AttendanceRecord) => {
+    if (!record.clockInTime) return '--';
+    const start = new Date(record.clockInTime).getTime();
+    const end = record.clockOutTime ? new Date(record.clockOutTime).getTime() : Date.now();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '--';
+    const minutes = Math.floor((end - start) / 60_000);
+    return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m${record.clockOutTime ? '' : ' live'}`;
+  };
+  const selectedPunches = attendanceRecords
+    .filter(record => record.date === punchDate && (record.clockInTime || record.clockOutTime))
+    .sort((a, b) => String(b.clockInTime || '').localeCompare(String(a.clockInTime || '')));
+  const employeeName = (employeeId: string) => {
+    const employee = employees.find(item => item.id === employeeId);
+    return employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown employee';
+  };
+  const employeeCode = (employeeId: string) => employees.find(item => item.id === employeeId)?.employeeCode || employeeId;
+
   const handleCellClick = (employeeId: string, employeeName: string, date: string) => {
     const record = attendanceRecords.find(a => a.employeeId === employeeId && a.date === date);
     setSelectedRecord({
@@ -121,11 +189,21 @@ export const AttendancePage: React.FC = () => {
     });
     setAdjustmentStatus(record ? record.status : 'PRESENT');
     setAdjustmentReason(record?.correctionNote || '');
+    setAdjustmentClockIn(toIndiaTimeInput(record?.clockInTime) || '09:00');
+    setAdjustmentClockOut(toIndiaTimeInput(record?.clockOutTime) || '18:00');
+    setAdjustmentFormError('');
   };
 
-  const handleSaveAdjustment = (e: React.FormEvent) => {
+  const handleSaveAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecord) return;
+    if (usesClockTimes(adjustmentStatus) && (!adjustmentClockIn || !adjustmentClockOut || adjustmentClockOut <= adjustmentClockIn)) {
+      setAdjustmentFormError('Clock-out time must be after clock-in time.');
+      return;
+    }
+
+    const clockInTime = usesClockTimes(adjustmentStatus) ? toAttendanceInstant(selectedRecord.date, adjustmentClockIn) : undefined;
+    const clockOutTime = usesClockTimes(adjustmentStatus) ? toAttendanceInstant(selectedRecord.date, adjustmentClockOut) : undefined;
 
     const newRecord: AttendanceRecord = {
       id: selectedRecord.currentRecord ? selectedRecord.currentRecord.id : `att-${selectedRecord.employeeId}-${selectedRecord.date}`,
@@ -133,6 +211,8 @@ export const AttendancePage: React.FC = () => {
       employeeId: selectedRecord.employeeId,
       date: selectedRecord.date,
       status: adjustmentStatus,
+      clockInTime,
+      clockOutTime,
       source: 'WEB_ADMIN',
       correctionNote: adjustmentReason || 'Administrative adjustment',
       correctedBy: currentUser?.fullName || 'Admin',
@@ -140,7 +220,21 @@ export const AttendancePage: React.FC = () => {
       updatedAt: new Date().toISOString(),
     };
 
-    storageService.saveAttendanceRecord(newRecord);
+    setAdjustmentSaving(true);
+    const persisted = await storageService.saveAttendanceRecord(newRecord);
+    setAdjustmentSaving(false);
+    if (!persisted) {
+      setAdjustmentFormError('The adjustment could not be saved to the live database. Please try again.');
+      await refreshAttendance();
+      return;
+    }
+    setAdjustmentFormError('');
+    setSyncError('');
+    setLiveAttendance(previous => {
+      const records = previous || storageService.getAttendanceRecords(currentCompany?.id);
+      const remaining = records.filter(record => !(record.employeeId === newRecord.employeeId && record.date === newRecord.date));
+      return [...remaining, newRecord];
+    });
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -149,7 +243,7 @@ export const AttendancePage: React.FC = () => {
       userRole: currentUser?.role || 'ADMIN',
       action: 'UPDATE_ATTENDANCE',
       category: 'ATTENDANCE',
-      details: `Adjusted attendance for ${selectedRecord.employeeName} on ${selectedRecord.date} to ${adjustmentStatus}. Reason: ${adjustmentReason || 'Admin adjustment'}`,
+      details: `Adjusted attendance for ${selectedRecord.employeeName} on ${selectedRecord.date} to ${adjustmentStatus}${usesClockTimes(adjustmentStatus) ? ` (${adjustmentClockIn} - ${adjustmentClockOut})` : ''}. Reason: ${adjustmentReason || 'Admin adjustment'}`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -157,27 +251,58 @@ export const AttendancePage: React.FC = () => {
     setSelectedRecord(null);
   };
 
-  const handleBulkMark = (e: React.FormEvent) => {
+  const handleBulkMark = async (e: React.FormEvent) => {
     e.preventDefault();
-    const departmentEmployees = bulkDeptId === 'ALL'
-      ? employees
-      : employees.filter(e => e.departmentId === bulkDeptId);
-    const targetEmployees = departmentEmployees.filter(emp => emp.dateOfJoining <= bulkDate && bulkDate <= todayStr);
+    const employee = employees.find(item => item.id === bulkEmployeeId);
+    if (!employee || bulkStartDate > bulkEndDate) {
+      setBulkFormError('Select an employee and a valid date range.');
+      return;
+    }
+    if (usesClockTimes(bulkStatus) && (!bulkClockIn || !bulkClockOut || bulkClockOut <= bulkClockIn)) {
+      setBulkFormError('Clock-out time must be after clock-in time.');
+      return;
+    }
+    const dates: string[] = [];
+    const end = new Date(`${bulkEndDate}T00:00:00Z`);
+    for (let cursor = new Date(`${bulkStartDate}T00:00:00Z`); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      const date = cursor.toISOString().slice(0, 10);
+      if (date >= employee.dateOfJoining && date <= todayStr) dates.push(date);
+    }
+    if (dates.length === 0) {
+      setBulkFormError('The selected range has no valid attendance dates after the employee joining date.');
+      return;
+    }
 
-    const newRecords: AttendanceRecord[] = targetEmployees.map(emp => ({
-      id: `att-${emp.id}-${bulkDate}`,
+    const newRecords: AttendanceRecord[] = dates.map(date => ({
+      id: attendanceRecords.find(record => record.employeeId === employee.id && record.date === date)?.id || `att-${employee.id}-${date}`,
       companyId: currentCompany?.id || '',
-      employeeId: emp.id,
-      date: bulkDate,
+      employeeId: employee.id,
+      date,
       status: bulkStatus,
+      clockInTime: usesClockTimes(bulkStatus) ? toAttendanceInstant(date, bulkClockIn) : undefined,
+      clockOutTime: usesClockTimes(bulkStatus) ? toAttendanceInstant(date, bulkClockOut) : undefined,
       source: 'WEB_ADMIN',
-      correctionNote: `Bulk marked for department: ${bulkDeptId}`,
+      correctionNote: bulkReason,
       correctedBy: currentUser?.fullName || 'Admin',
-      createdAt: new Date().toISOString(),
+      createdAt: attendanceRecords.find(record => record.employeeId === employee.id && record.date === date)?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }));
 
-    storageService.bulkMarkAttendance(newRecords);
+    setBulkSaving(true);
+    const persisted = await storageService.bulkMarkAttendance(newRecords);
+    setBulkSaving(false);
+    if (!persisted) {
+      setBulkFormError('The bulk adjustment could not be saved to the live database. Please try again.');
+      await refreshAttendance();
+      return;
+    }
+    setBulkFormError('');
+    setSyncError('');
+    setLiveAttendance(previous => {
+      const records = previous || storageService.getAttendanceRecords(currentCompany?.id);
+      const datesUpdated = new Set(newRecords.map(record => record.date));
+      return [...records.filter(record => record.employeeId !== employee.id || !datesUpdated.has(record.date)), ...newRecords];
+    });
 
     storageService.logAudit({
       companyId: currentCompany?.id || '',
@@ -186,7 +311,7 @@ export const AttendancePage: React.FC = () => {
       userRole: currentUser?.role || 'ADMIN',
       action: 'BULK_ATTENDANCE',
       category: 'ATTENDANCE',
-      details: `Bulk marked ${targetEmployees.length} employees on ${bulkDate} as ${bulkStatus}.`,
+      details: `Bulk adjusted ${employee.firstName} ${employee.lastName} from ${bulkStartDate} to ${bulkEndDate} as ${bulkStatus} (${newRecords.length} records).`,
       timestamp: new Date().toISOString(),
       ipAddress: '127.0.0.1',
     });
@@ -268,6 +393,15 @@ export const AttendancePage: React.FC = () => {
           />
 
           <button
+            onClick={() => void refreshAttendance()}
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all flex items-center space-x-1.5"
+            title="Refresh live attendance"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+
+          <button
             onClick={handleExportCSV}
             className="px-3 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all flex items-center space-x-1.5"
             title="Export Monthly Matrix to CSV"
@@ -277,14 +411,22 @@ export const AttendancePage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setIsBulkModalOpen(true)}
+            onClick={() => {
+              setBulkEmployeeId(current => current || employees[0]?.id || '');
+              setBulkFormError('');
+              setIsBulkModalOpen(true);
+            }}
             className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 shadow-md shadow-brand-500/20 transition-all flex items-center space-x-1.5"
           >
             <Plus className="w-4 h-4" />
-            <span>Bulk Mark Attendance</span>
+            <span>Bulk Adjust Employee</span>
           </button>
         </div>
       </div>
+
+      {syncError && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+        Live attendance could not refresh: {syncError}
+      </div>}
 
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-slate-800 pb-3 text-xs font-semibold overflow-x-auto">
@@ -321,13 +463,106 @@ export const AttendancePage: React.FC = () => {
           }`}
         >
           <Smartphone className="w-4 h-4" />
-          <span>⚡ Phase 6 Mobile Face-Auth Schema Inspector</span>
+          <span>Mobile Face & Location Verification</span>
         </button>
       </div>
 
       {/* TAB 1: MONTHLY MATRIX */}
       {activeTab === 'matrix' && (
         <div className="space-y-4">
+          {/* Exact mobile punch evidence */}
+          <section className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950/60">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  Live Punch Details
+                </h2>
+                <p className="mt-0.5 text-[11px] text-slate-400">Exact server time in IST, captured GPS evidence, request IP, device and face-verification status.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2.5 py-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Auto-refresh 30s
+                </span>
+                <input
+                  type="date"
+                  value={punchDate}
+                  max={todayStr}
+                  onChange={(event) => setPunchDate(event.target.value)}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-emerald-500"
+                  aria-label="Punch details date"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1120px] text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-950/40 text-[10px] text-slate-400 uppercase tracking-wide border-b border-slate-800">
+                    <th className="py-2.5 px-4">Employee</th>
+                    <th className="py-2.5 px-3">Clock in (IST)</th>
+                    <th className="py-2.5 px-3">Clock out (IST)</th>
+                    <th className="py-2.5 px-3">Worked</th>
+                    <th className="py-2.5 px-3">Verification</th>
+                    <th className="py-2.5 px-3">Location</th>
+                    <th className="py-2.5 px-3">IP address</th>
+                    <th className="py-2.5 px-3">Device / source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {selectedPunches.map(record => {
+                    const hasLocation = isFiniteCoordinate(record.locationLat) && isFiniteCoordinate(record.locationLng);
+                    const mapUrl = hasLocation ? `https://www.google.com/maps?q=${record.locationLat},${record.locationLng}` : '';
+                    return (
+                      <tr key={record.id} className="hover:bg-slate-800/35 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-white">{employeeName(record.employeeId)}</div>
+                          <div className="font-mono text-[10px] text-slate-500">{employeeCode(record.employeeId)}</div>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-emerald-300 whitespace-nowrap">{toIndiaTimeWithSeconds(record.clockInTime)}</td>
+                        <td className="py-3 px-3 font-mono text-slate-200 whitespace-nowrap">
+                          {record.clockOutTime ? toIndiaTimeWithSeconds(record.clockOutTime) : <span className="text-amber-300">Still clocked in</span>}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-white whitespace-nowrap">{workedDuration(record)}</td>
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold ${record.faceAuthVerified ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
+                            <Shield className="w-3 h-3" /> {record.faceAuthVerified ? 'Face verified' : 'Not face verified'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 min-w-[210px]">
+                          {hasLocation ? (
+                            <a href={mapUrl} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-1.5 text-cyan-300 hover:text-cyan-200">
+                              <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                              <span>
+                                <span className="font-mono block">{record.locationLat!.toFixed(6)}, {record.locationLng!.toFixed(6)}</span>
+                                <span className="text-[10px] text-slate-500 group-hover:text-slate-400">{record.locationAccuracyMeters ? `Accuracy ±${Math.round(record.locationAccuracyMeters)}m · ` : ''}Open map</span>
+                              </span>
+                            </a>
+                          ) : <span className="text-slate-500">Not captured</span>}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[10px] text-slate-300 min-w-[150px]">
+                          <div>IN: {record.clockInIpAddress || 'Not recorded'}</div>
+                          <div className="mt-1 text-slate-500">OUT: {record.clockOutIpAddress || 'Not recorded'}</div>
+                        </td>
+                        <td className="py-3 px-3 min-w-[150px]">
+                          <div className="font-semibold text-purple-300 text-[10px]">{record.source.replaceAll('_', ' ')}</div>
+                          <div className="font-mono text-[9px] text-slate-500 truncate max-w-[170px]" title={record.deviceId || ''}>{record.deviceId || 'No device ID'}</div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {selectedPunches.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-8 px-4 text-center text-slate-500">
+                        No employee punches were recorded on {punchDate}.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           {/* Status Legend */}
           <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-2">Legend:</span>
@@ -417,6 +652,9 @@ export const AttendancePage: React.FC = () => {
                           const isWeekend = d.dayOfWeek === 0 || d.dayOfWeek === 6;
                           const status = getDisplayStatus(emp.dateOfJoining, d.dateStr, d.dayOfWeek, record);
                           const isLocked = status === 'NOT_JOINED' || status === 'FUTURE';
+                          const timeSummary = record && (record.clockInTime || record.clockOutTime)
+                            ? `${record.clockInTime ? toIndiaTimeInput(record.clockInTime) : '--:--'} - ${record.clockOutTime ? toIndiaTimeInput(record.clockOutTime) : '--:--'}`
+                            : '';
 
                           return (
                             <td
@@ -428,7 +666,7 @@ export const AttendancePage: React.FC = () => {
                             >
                               <div
                                 className={`w-7 h-7 mx-auto rounded-lg border flex items-center justify-center font-mono font-bold text-[10px] transition-transform hover:scale-110 ${getStatusBadgeStyle(status)}`}
-                                title={status === 'NOT_JOINED' ? `${emp.firstName} had not joined yet` : status === 'FUTURE' ? 'Future date' : `${emp.firstName} on ${d.dateStr}: ${status.replace('_', ' ')}`}
+                                title={status === 'NOT_JOINED' ? `${emp.firstName} had not joined yet` : status === 'FUTURE' ? 'Future date' : `${emp.firstName} on ${d.dateStr}: ${status.replace('_', ' ')}${timeSummary ? ` (${timeSummary})` : ''}`}
                               >
                                 {getStatusAbbr(status)}
                               </div>
@@ -492,17 +730,16 @@ export const AttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: PHASE 6 MOBILE FACE-AUTH SCHEMA BLUEPRINT */}
+      {/* TAB 3: MOBILE FACE AND LOCATION VERIFICATION */}
       {activeTab === 'mobile_blueprint' && (
         <div className="space-y-6">
           <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-950 via-purple-950/20 to-slate-950 border border-purple-500/30 space-y-3">
             <div className="flex items-center space-x-2 text-purple-300 font-bold text-sm">
               <Smartphone className="w-5 h-5" />
-              <span>Phase 6 Mobile Face-Authentication Attendance Blueprint</span>
+              <span>Mobile Face & Location Attendance</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              As per design requirements, **Clock In / Clock Out user actions are not implemented in the current web application**. 
-              However, our full database schema and API routing have been strictly architected so that the future React Native / iOS / Android biometric face-authentication mobile app connects with 100% backward compatibility.
+              The Android clock-in flow now requires a clear camera-captured face, enrolled device biometric verification, and a fresh precise location. The backend uses server time, rejects unverified clock-ins, and synchronizes successful records to this attendance matrix.
             </p>
           </div>
 
@@ -513,7 +750,7 @@ export const AttendancePage: React.FC = () => {
                 <span>1. Mobile Client Capture</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                Employee opens mobile app → On-device face detection captures facial embeddings vector + GPS coordinates + hardware device UUID.
+                Employee captures one clear, front-facing face. On-device detection checks face position and open eyes before Android requests the enrolled device biometric.
               </p>
             </div>
 
@@ -522,7 +759,7 @@ export const AttendancePage: React.FC = () => {
                 <span>2. Multi-Tenant API Verify</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                API verifies employee facial vector match, validates geofence boundary against company office perimeter, and tags record.
+                After biometric success, Android captures a fresh GPS fix and sends its coordinates, accuracy, and hashed device ID with the authenticated clock-in request.
               </p>
             </div>
 
@@ -531,7 +768,7 @@ export const AttendancePage: React.FC = () => {
                 <span>3. Real-Time HR Sync</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                The attendance record status automatically updates in the HRMS Web Matrix, calculates late arrival penalty, and updates payroll ledger.
+                The API records authoritative server time, marks the source as MOBILE_FACE, writes the audit trail, and makes the record available to the HR dashboard.
               </p>
             </div>
           </div>
@@ -601,13 +838,39 @@ export const AttendancePage: React.FC = () => {
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setSelectedRecord(null)} />
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
             <h3 className="text-base font-bold text-white">Adjust Attendance Record</h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Employee: <strong className="text-white">{selectedRecord.employeeName}</strong> • Date: <strong className="text-brand-300 font-mono">{selectedRecord.date}</strong>
             </p>
 
+            {selectedRecord.currentRecord && (
+              <div className="mt-4 p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Captured punch evidence</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                  <div><span className="block text-slate-500">Clock in (IST)</span><strong className="font-mono text-emerald-300">{toIndiaTimeWithSeconds(selectedRecord.currentRecord.clockInTime)}</strong></div>
+                  <div><span className="block text-slate-500">Clock out (IST)</span><strong className="font-mono text-white">{toIndiaTimeWithSeconds(selectedRecord.currentRecord.clockOutTime)}</strong></div>
+                  <div><span className="block text-slate-500">Worked duration</span><strong className="font-mono text-white">{workedDuration(selectedRecord.currentRecord)}</strong></div>
+                  <div><span className="block text-slate-500">Face verification</span><strong className={selectedRecord.currentRecord.faceAuthVerified ? 'text-emerald-300' : 'text-slate-400'}>{selectedRecord.currentRecord.faceAuthVerified ? 'Verified' : 'Not verified'}</strong></div>
+                  <div className="col-span-2">
+                    <span className="block text-slate-500">Location</span>
+                    {isFiniteCoordinate(selectedRecord.currentRecord.locationLat) && isFiniteCoordinate(selectedRecord.currentRecord.locationLng)
+                      ? <a className="font-mono text-cyan-300 hover:text-cyan-200" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${selectedRecord.currentRecord.locationLat},${selectedRecord.currentRecord.locationLng}`}>{selectedRecord.currentRecord.locationLat.toFixed(6)}, {selectedRecord.currentRecord.locationLng.toFixed(6)}{selectedRecord.currentRecord.locationAccuracyMeters ? ` (±${Math.round(selectedRecord.currentRecord.locationAccuracyMeters)}m)` : ''} · Open map</a>
+                      : <strong className="text-slate-500">Not captured</strong>}
+                  </div>
+                  <div><span className="block text-slate-500">Clock-in IP</span><strong className="font-mono text-white break-all">{selectedRecord.currentRecord.clockInIpAddress || 'Not recorded'}</strong></div>
+                  <div><span className="block text-slate-500">Clock-out IP</span><strong className="font-mono text-white break-all">{selectedRecord.currentRecord.clockOutIpAddress || 'Not recorded'}</strong></div>
+                  <div className="col-span-2"><span className="block text-slate-500">Device / source</span><strong className="font-mono text-purple-300 break-all">{selectedRecord.currentRecord.deviceId || 'No device ID'} · {selectedRecord.currentRecord.source}</strong></div>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSaveAdjustment} className="mt-4 space-y-4">
+              {adjustmentFormError && (
+                <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">
+                  {adjustmentFormError}
+                </div>
+              )}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Status</label>
                 <select
@@ -623,6 +886,31 @@ export const AttendancePage: React.FC = () => {
                   <option value="ABSENT">Absent (Unexcused)</option>
                 </select>
               </div>
+
+              {usesClockTimes(adjustmentStatus) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-in Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={adjustmentClockIn}
+                      onChange={(e) => setAdjustmentClockIn(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-out Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={adjustmentClockOut}
+                      onChange={(e) => setAdjustmentClockOut(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Correction / Regularization Reason *</label>
@@ -650,9 +938,10 @@ export const AttendancePage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-bold"
+                  disabled={adjustmentSaving}
+                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 disabled:cursor-wait text-white rounded-xl font-bold"
                 >
-                  Save & Log Adjustment
+                  {adjustmentSaving ? 'Saving...' : 'Save & Log Adjustment'}
                 </button>
               </div>
             </form>
@@ -660,39 +949,61 @@ export const AttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* Bulk Mark Modal */}
+      {/* Bulk employee date-range adjustment modal */}
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setIsBulkModalOpen(false)} />
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
-            <h3 className="text-base font-bold text-white">Bulk Mark Daily Attendance</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Mark batch status for an entire division or company.</p>
+          <div className="relative w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl z-10 animate-slide-up text-xs">
+            <h3 className="text-base font-bold text-white">Bulk Adjust Employee Attendance</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Apply clock times and status to one employee across a date range.</p>
 
             <form onSubmit={handleBulkMark} className="mt-4 space-y-4">
+              {bulkFormError && (
+                <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">
+                  {bulkFormError}
+                </div>
+              )}
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Date</label>
-                <input
-                  type="date"
-                  required
-                  max={todayStr}
-                  value={bulkDate}
-                  onChange={(e) => setBulkDate(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Department</label>
+                <label className="block text-slate-300 font-medium mb-1">Employee *</label>
                 <select
-                  value={bulkDeptId}
-                  onChange={(e) => setBulkDeptId(e.target.value)}
+                  required
+                  value={bulkEmployeeId}
+                  onChange={(e) => setBulkEmployeeId(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                 >
-                  <option value="ALL">All Departments ({employees.length} Employees)</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
+                  <option value="" disabled>Select an employee</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.firstName} {employee.lastName} ({employee.employeeCode})
+                    </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">From Date *</label>
+                  <input
+                    type="date"
+                    required
+                    max={todayStr}
+                    value={bulkStartDate}
+                    onChange={(e) => setBulkStartDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">To Date *</label>
+                  <input
+                    type="date"
+                    required
+                    min={bulkStartDate}
+                    max={todayStr}
+                    value={bulkEndDate}
+                    onChange={(e) => setBulkEndDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                  />
+                </div>
               </div>
 
               <div>
@@ -703,10 +1014,53 @@ export const AttendancePage: React.FC = () => {
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                 >
                   <option value="PRESENT">Present (Full Day)</option>
+                  <option value="LATE">Late Arrival</option>
                   <option value="HOLIDAY">Official Public Holiday</option>
                   <option value="HALF_DAY">Half Day</option>
+                  <option value="LEAVE">Approved Leave</option>
                   <option value="ABSENT">Absent</option>
                 </select>
+              </div>
+
+              {usesClockTimes(bulkStatus) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-in Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={bulkClockIn}
+                      onChange={(e) => setBulkClockIn(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Clock-out Time *</label>
+                    <input
+                      type="time"
+                      required
+                      value={bulkClockOut}
+                      onChange={(e) => setBulkClockOut(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Adjustment Reason *</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={bulkReason}
+                  onChange={(e) => setBulkReason(e.target.value)}
+                  placeholder="Reason for applying this attendance range..."
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                Existing records in this range will be updated. Future dates and dates before joining are excluded.
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">
@@ -719,9 +1073,10 @@ export const AttendancePage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-bold"
+                  disabled={bulkSaving}
+                  className="px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 disabled:cursor-wait text-white rounded-xl font-bold"
                 >
-                  Apply to Group
+                  {bulkSaving ? 'Applying...' : 'Apply Date Range'}
                 </button>
               </div>
             </form>

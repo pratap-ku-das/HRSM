@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z, ZodError } from 'zod';
-import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './email.js';
+import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail, deliverPasswordResetEmail } from './email.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; tokenVersion: number };
 type AuthedRequest = Request & { auth?: AuthUser; requestId?: string };
@@ -29,6 +29,18 @@ const secret = () => {
   return value;
 };
 const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+const indiaDate = (instant = new Date()) => {
+  const value = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
+  return new Date(`${value}T00:00:00.000Z`);
+};
+const indiaDateKey = (instant: Date) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(instant);
+const clientIp = (req: Request) => {
+  const cloudflareIp = req.header('cf-connecting-ip')?.split(',')[0]?.trim();
+  const value = cloudflareIp || req.ip || req.socket.remoteAddress || 'unknown';
+  return value.replace(/^::ffff:/, '');
+};
 const ok = (res: Response, data: unknown, status = 200, meta: Record<string, unknown> = {}) => res.status(status).json({ data, meta: { requestId: (res.req as AuthedRequest).requestId, ...meta } });
 const fail = (res: Response, status: number, code: string, message: string, fieldErrors?: unknown) => res.status(status).json({ error: { code, message, fieldErrors }, meta: { requestId: (res.req as AuthedRequest).requestId } });
 
@@ -49,7 +61,9 @@ export function createV1Router(prisma: PrismaClient) {
   const router = Router();
   router.use((req: AuthedRequest, res, next) => { req.requestId = String(req.header('x-request-id') || crypto.randomUUID()); res.setHeader('x-request-id', req.requestId); next(); });
 
-  const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const recoveryLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: true, legacyHeaders: false });
+  const refreshLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
   const authenticate = async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const raw = req.header('authorization');
@@ -63,7 +77,7 @@ export function createV1Router(prisma: PrismaClient) {
   };
   const requirePermission = (permission: string) => (req: AuthedRequest, res: Response, next: NextFunction) => req.auth?.permissions.includes(permission) ? next() : fail(res, 403, 'FORBIDDEN', 'You do not have permission to perform this action.');
 
-  router.post('/auth/login', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/login', loginLimiter, async (req, res, next) => { try {
     const body = z.object({ email: z.string().email(), password: z.string().min(8), deviceName: z.string().max(120).optional() }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() }, include: { employee: true } });
     if (!user?.passwordHash || !await bcrypt.compare(body.password, user.passwordHash)) return fail(res, 401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
@@ -72,7 +86,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, session);
   } catch (e) { next(e); } });
 
-  router.post('/auth/refresh', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/refresh', refreshLimiter, async (req, res, next) => { try {
     const body = z.object({ refreshToken: z.string().min(32), deviceName: z.string().max(120).optional() }).parse(req.body);
     const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(body.refreshToken) }, include: { user: { include: { employee: true } } } });
     if (!stored || stored.expiresAt <= new Date()) return fail(res, 401, 'REFRESH_INVALID', 'Refresh token is invalid or expired.');
@@ -101,7 +115,7 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { loggedOutAllDevices: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/activate', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/activate', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ token: z.string().min(32), password: z.string().min(10).max(128) }).parse(req.body);
     const action = await prisma.actionToken.findUnique({ where: { tokenHash: hashToken(body.token) } });
     if (!action || action.type !== 'ACCOUNT_ACTIVATION' || action.usedAt || action.expiresAt <= new Date()) return fail(res, 400, 'ACTIVATION_INVALID', 'Activation link is invalid or expired.');
@@ -113,14 +127,22 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { activated: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/forgot-password', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/forgot-password', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ email: z.string().email() }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } });
-    if (user) { const token = createOpaqueToken(); await prisma.actionToken.create({ data: { userId: user.id, type: 'PASSWORD_RESET', tokenHash: token.hash, expiresAt: new Date(Date.now() + 60 * 60_000) } }); }
+    if (user) {
+      const token = createOpaqueToken();
+      const [, , delivery] = await prisma.$transaction([
+        prisma.actionToken.updateMany({ where: { userId: user.id, type: 'PASSWORD_RESET', usedAt: null }, data: { usedAt: new Date() } }),
+        prisma.actionToken.create({ data: { userId: user.id, type: 'PASSWORD_RESET', tokenHash: token.hash, expiresAt: new Date(Date.now() + 60 * 60_000) } }),
+        prisma.emailDelivery.create({ data: { companyId: user.companyId, userId: user.id, idempotencyKey: `password-reset:${user.id}:${token.hash}`, messageType: 'PASSWORD_RESET', recipient: user.email } }),
+      ]);
+      void deliverPasswordResetEmail(prisma, delivery.id, token.token);
+    }
     return ok(res, { accepted: true });
   } catch (e) { next(e); } });
 
-  router.post('/auth/reset-password', authLimiter, async (req, res, next) => { try {
+  router.post('/auth/reset-password', recoveryLimiter, async (req, res, next) => { try {
     const body = z.object({ token: z.string().min(32), password: z.string().min(10).max(128) }).parse(req.body);
     const action = await prisma.actionToken.findUnique({ where: { tokenHash: hashToken(body.token) } });
     if (!action || action.type !== 'PASSWORD_RESET' || action.usedAt || action.expiresAt <= new Date()) return fail(res, 400, 'RESET_INVALID', 'Reset link is invalid or expired.');
@@ -138,7 +160,7 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.get('/dashboard', authenticate, async (req: AuthedRequest, res, next) => { try {
-    const cid = req.auth!.companyId; const today = new Date(new Date().toISOString().slice(0, 10));
+    const cid = req.auth!.companyId; const today = indiaDate();
     const [employees, attendance, pendingLeaves, announcements, holidays] = await prisma.$transaction([
       prisma.employee.count({ where: { companyId: cid, status: { in: ['ACTIVE', 'ON_PROBATION', 'ON_LEAVE'] } } }),
       prisma.attendanceRecord.count({ where: { companyId: cid, date: today, status: { in: ['PRESENT', 'LATE', 'HALF_DAY'] } } }),
@@ -149,6 +171,54 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, { activeEmployees: employees, presentToday: attendance, pendingLeaves, announcements, holidays });
   } catch (e) { next(e); } });
 
+  router.get('/attendance', authenticate, requirePermission('attendance.read.team'), async (req: AuthedRequest, res, next) => { try {
+    const from = req.query.from ? new Date(String(req.query.from)) : undefined;
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        companyId: req.auth!.companyId,
+        ...(from ? { date: { gte: from } } : {}),
+      },
+      orderBy: { date: 'desc' },
+    });
+    const linkedEmployees = await prisma.employee.findMany({
+      where: { companyId: req.auth!.companyId, userId: { not: null } },
+      select: { id: true, userId: true },
+    });
+    const employeeByUserId = new Map(linkedEmployees.flatMap(employee => employee.userId ? [[employee.userId, employee.id] as const] : []));
+    const punchLogs = linkedEmployees.length ? await prisma.auditLog.findMany({
+      where: {
+        companyId: req.auth!.companyId,
+        category: 'ATTENDANCE',
+        action: { in: ['CLOCK_IN', 'CLOCK_OUT'] },
+        userId: { in: linkedEmployees.flatMap(employee => employee.userId ? [employee.userId] : []) },
+        ...(from ? { timestamp: { gte: from } } : {}),
+      },
+      orderBy: { timestamp: 'asc' },
+    }) : [];
+    const punchEvidence = new Map<string, { ipAddress: string; locationAccuracyMeters?: number }>();
+    for (const log of punchLogs) {
+      const employeeId = employeeByUserId.get(log.userId);
+      if (!employeeId) continue;
+      const accuracyMatch = log.details.match(/accuracy\s+([\d.]+)m/i);
+      punchEvidence.set(`${employeeId}:${indiaDateKey(log.timestamp)}:${log.action}`, {
+        ipAddress: log.ipAddress,
+        ...(accuracyMatch ? { locationAccuracyMeters: Number(accuracyMatch[1]) } : {}),
+      });
+    }
+    const detailedRecords = records.map(record => {
+      const dateKey = indiaDateKey(record.date);
+      const clockIn = punchEvidence.get(`${record.employeeId}:${dateKey}:CLOCK_IN`);
+      const clockOut = punchEvidence.get(`${record.employeeId}:${dateKey}:CLOCK_OUT`);
+      return {
+        ...record,
+        clockInIpAddress: clockIn?.ipAddress,
+        clockOutIpAddress: clockOut?.ipAddress,
+        locationAccuracyMeters: clockIn?.locationAccuracyMeters,
+      };
+    });
+    return ok(res, detailedRecords);
+  } catch (e) { next(e); } });
+
   router.get('/me/attendance', authenticate, requirePermission('attendance.read.self'), async (req: AuthedRequest, res, next) => { try {
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
     const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 31 * 86_400_000);
@@ -157,16 +227,42 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.post('/me/attendance/punch', authenticate, requirePermission('attendance.punch'), async (req: AuthedRequest, res, next) => { try {
-    const body = z.object({ action: z.enum(['CLOCK_IN', 'CLOCK_OUT']), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional(), deviceId: z.string().max(200).optional() }).parse(req.body);
+    const body = z.object({
+      action: z.enum(['CLOCK_IN', 'CLOCK_OUT']),
+      latitude: z.number().min(-90).max(90).optional(),
+      longitude: z.number().min(-180).max(180).optional(),
+      locationAccuracyMeters: z.number().positive().max(200).optional(),
+      deviceId: z.string().max(200).optional(),
+      biometricVerified: z.boolean().default(false),
+    }).parse(req.body);
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
-    const now = new Date(); const date = new Date(now.toISOString().slice(0, 10));
+    if (body.action === 'CLOCK_IN' && !body.biometricVerified) return fail(res, 422, 'FACE_VERIFICATION_REQUIRED', 'Verify your enrolled face before clocking in.');
+    if (body.action === 'CLOCK_IN' && (body.latitude === undefined || body.longitude === undefined || body.locationAccuracyMeters === undefined)) return fail(res, 422, 'LOCATION_REQUIRED', 'Precise current location is required before clocking in.');
+    const now = new Date(); const date = indiaDate(now);
     const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } } });
     if (body.action === 'CLOCK_IN' && existing?.clockInTime) return fail(res, 409, 'ALREADY_CLOCKED_IN', 'You have already clocked in today.');
     if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) return fail(res, 409, 'CLOCK_IN_REQUIRED', 'Clock in before clocking out.');
     if (body.action === 'CLOCK_OUT' && existing?.clockOutTime) return fail(res, 409, 'ALREADY_CLOCKED_OUT', 'You have already clocked out today.');
-    const data = body.action === 'CLOCK_IN' ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, source: 'SYSTEM_AUTO' as const } : { clockOutTime: now };
-    const record = await prisma.attendanceRecord.upsert({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } }, update: data, create: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, date, status: 'PRESENT', clockInTime: now, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, source: 'SYSTEM_AUTO' } });
-    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API.`, ipAddress: req.ip || 'unknown' } });
+    const data = body.action === 'CLOCK_IN'
+      ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, faceAuthVerified: true, source: 'MOBILE_FACE' as const }
+      : { clockOutTime: now };
+    const record = await prisma.attendanceRecord.upsert({
+      where: { employeeId_date: { employeeId: req.auth!.employeeId, date } },
+      update: data,
+      create: {
+        companyId: req.auth!.companyId,
+        employeeId: req.auth!.employeeId,
+        date,
+        status: 'PRESENT',
+        clockInTime: now,
+        locationLat: body.latitude,
+        locationLng: body.longitude,
+        deviceId: body.deviceId,
+        faceAuthVerified: body.biometricVerified,
+        source: body.biometricVerified ? 'MOBILE_FACE' : 'SYSTEM_AUTO',
+      },
+    });
+    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API${body.action === 'CLOCK_IN' ? ` after face verification at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).` : '.'}`, ipAddress: clientIp(req) } });
     return ok(res, record, existing ? 200 : 201);
   } catch (e) { next(e); } });
 
@@ -214,6 +310,20 @@ export function createV1Router(prisma: PrismaClient) {
     const search = String(req.query.search || '').trim(); const where = { companyId: req.auth!.companyId, ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' as const } }, { lastName: { contains: search, mode: 'insensitive' as const } }, { employeeCode: { contains: search, mode: 'insensitive' as const } }] } : {}) };
     const [items, total] = await prisma.$transaction([prisma.employee.findMany({ where, include: { department: true, designation: true }, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }), prisma.employee.count({ where })]);
     return ok(res, items, 200, { page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
+  } catch (e) { next(e); } });
+
+  router.get('/departments', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
+    return ok(res, await prisma.department.findMany({
+      where: { companyId: req.auth!.companyId },
+      orderBy: { name: 'asc' },
+    }));
+  } catch (e) { next(e); } });
+
+  router.get('/designations', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
+    return ok(res, await prisma.designation.findMany({
+      where: { companyId: req.auth!.companyId },
+      orderBy: { title: 'asc' },
+    }));
   } catch (e) { next(e); } });
 
   router.post('/employees/onboard', authenticate, requirePermission('employee.manage'), async (req: AuthedRequest, res, next) => { try {

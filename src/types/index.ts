@@ -118,8 +118,11 @@ export interface AttendanceRecord {
   faceAuthVerified?: boolean;
   faceConfidenceScore?: number;
   deviceId?: string;
-  locationLat?: number;
-  locationLng?: number;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  locationAccuracyMeters?: number | null;
+  clockInIpAddress?: string | null;
+  clockOutIpAddress?: string | null;
   source: AttendanceSource;
   
   // Web HR Admin adjustment fields

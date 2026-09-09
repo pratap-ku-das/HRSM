@@ -4,15 +4,22 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
+import { normalizeDatabaseUrl } from './databaseUrl.js';
 
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
+const prisma = new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);
 const PORT = process.env.PORT || 3001;
+
+// Railway terminates HTTPS in front of this service. Trust exactly that proxy hop so
+// rate limiting uses the real client IP instead of rejecting X-Forwarded-For.
+app.set('trust proxy', 1);
 
 const employeeToClient = (employee: any) => ({
   id: employee.id,
@@ -59,7 +66,7 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/v1', createV1Router(prisma));
 app.get('/downloads/orbithr-android.apk', (_req, res) => {
-  res.download(path.resolve('android-app/app/build/outputs/apk/debug/app-debug.apk'), 'OrbitHR.apk');
+  res.download(path.resolve('public/downloads/OrbitHR.apk'), 'OrbitHR.apk');
 });
 
 // Healthcheck
@@ -485,9 +492,12 @@ app.get('/api/attendance', async (req, res) => {
 
 app.post('/api/attendance', async (req, res) => {
   try {
-    const { companyId, employeeId, date, status, correctionNote, correctedBy } = req.body;
+    const { companyId, employeeId, date, status, clockInTime, clockOutTime, correctionNote, correctedBy } = req.body;
 
     const dateObj = new Date(date);
+    const clockIn = clockInTime ? new Date(clockInTime) : null;
+    const clockOut = clockOutTime ? new Date(clockOutTime) : null;
+    if (clockIn && clockOut && clockOut <= clockIn) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
     const record = await prisma.attendanceRecord.upsert({
       where: {
         employeeId_date: {
@@ -497,6 +507,8 @@ app.post('/api/attendance', async (req, res) => {
       },
       update: {
         status,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
         correctionNote,
         correctedBy,
         source: 'WEB_ADMIN',
@@ -506,6 +518,8 @@ app.post('/api/attendance', async (req, res) => {
         employeeId,
         date: dateObj,
         status,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
         correctionNote,
         correctedBy,
         source: 'WEB_ADMIN',
@@ -522,8 +536,14 @@ app.post('/api/attendance/bulk', async (req, res) => {
   try {
     const { records } = req.body;
     if (!Array.isArray(records)) return res.status(400).json({ error: 'records array required' });
+    const hasInvalidTimes = records.some((record: any) => {
+      const clockIn = record.clockInTime ? new Date(record.clockInTime) : null;
+      const clockOut = record.clockOutTime ? new Date(record.clockOutTime) : null;
+      return clockIn && clockOut && clockOut <= clockIn;
+    });
+    if (hasInvalidTimes) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
 
-    const results = await Promise.all(
+    const results = await prisma.$transaction(
       records.map((r: any) =>
         prisma.attendanceRecord.upsert({
           where: {
@@ -534,16 +554,22 @@ app.post('/api/attendance/bulk', async (req, res) => {
           },
           update: {
             status: r.status,
+            clockInTime: r.clockInTime ? new Date(r.clockInTime) : null,
+            clockOutTime: r.clockOutTime ? new Date(r.clockOutTime) : null,
             correctionNote: r.correctionNote,
             correctedBy: r.correctedBy,
+            source: 'WEB_ADMIN',
           },
           create: {
             companyId: r.companyId,
             employeeId: r.employeeId,
             date: new Date(r.date),
             status: r.status,
+            clockInTime: r.clockInTime ? new Date(r.clockInTime) : null,
+            clockOutTime: r.clockOutTime ? new Date(r.clockOutTime) : null,
             correctionNote: r.correctionNote,
             correctedBy: r.correctedBy,
+            source: 'WEB_ADMIN',
           },
         })
       )
@@ -1211,10 +1237,8 @@ app.post('/api/audit-logs', async (req, res) => {
 app.get('/api/settings/:companyId', async (req, res) => {
   try {
     const { companyId } = req.params;
-    const settings = await prisma.companySettings.update({
-      where: { companyId },
-      data: { currency: 'INR', currencySymbol: '₹', timezone: 'Asia/Kolkata (IST - UTC+5:30)' },
-    });
+    const settings = await prisma.companySettings.findUnique({ where: { companyId } });
+    if (!settings) return res.status(404).json({ error: 'Company settings not found' });
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -1236,8 +1260,8 @@ app.put('/api/settings/:companyId', async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.resolve('dist');
+const distPath = path.resolve('dist');
+if (existsSync(path.join(distPath, 'index.html'))) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();

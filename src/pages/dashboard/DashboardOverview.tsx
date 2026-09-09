@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { api } from '../../services/api';
+import { AttendanceRecord } from '../../types';
 import { useToast } from '../../context/ToastContext';
 import { 
   Users, UserCheck, UserX, Clock, CalendarDays, GitBranch, 
@@ -26,10 +28,37 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const currencySymbol = settings?.currencySymbol || '₹';
   const toast = useToast();
   const [chartRange, setChartRange] = useState<'7d' | '14d' | '30d'>('14d');
+  const [liveAttendance, setLiveAttendance] = useState<AttendanceRecord[] | null>(null);
+
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    let active = true;
+    const refreshAttendance = async () => {
+      try {
+        const records = await api.getAttendanceV1();
+        if (!active) return;
+        storageService.cacheAttendanceRecords(currentCompany.id, records);
+        setLiveAttendance(records);
+      } catch (error) {
+        console.warn('Live attendance refresh failed:', error);
+      }
+    };
+    void refreshAttendance();
+    const timer = window.setInterval(refreshAttendance, 30_000);
+    const onFocus = () => void refreshAttendance();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [currentCompany?.id]);
 
   const employees = storageService.getEmployees(currentCompany?.id);
   const departments = storageService.getDepartments(currentCompany?.id);
-  const attendanceRecords = storageService.getAttendanceRecords(currentCompany?.id);
+  const attendanceRecords = liveAttendance !== null
+    ? liveAttendance
+    : storageService.getAttendanceRecords(currentCompany?.id);
   const leaveRequests = storageService.getLeaveRequests(currentCompany?.id);
   const holidays = storageService.getHolidays(currentCompany?.id);
   const announcements = storageService.getAnnouncements(currentCompany?.id);

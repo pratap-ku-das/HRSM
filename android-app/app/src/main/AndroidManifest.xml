@@ -2,7 +2,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <application android:name=".OrbitHrApp" android:allowBackup="false" android:label="OrbitHR" android:theme="@style/Theme.OrbitHR" android:networkSecurityConfig="@xml/network_security_config" android:usesCleartextTraffic="false">
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.biometrics.face" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <application android:name=".OrbitHrApp" android:allowBackup="false" android:label="OrbitHR" android:icon="@drawable/ic_orbithr_launcher" android:roundIcon="@drawable/ic_orbithr_launcher" android:theme="@style/Theme.OrbitHR" android:networkSecurityConfig="@xml/network_security_config" android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

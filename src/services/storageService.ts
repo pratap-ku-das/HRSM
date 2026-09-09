@@ -157,6 +157,11 @@ class StorageService {
     return companyId ? all.filter(e => e.companyId === companyId) : all;
   }
 
+  public cacheEmployees(companyId: string, employees: Employee[]): void {
+    const otherCompanies = this.getEmployees().filter(employee => employee.companyId !== companyId);
+    this.set(STORAGE_KEYS.EMPLOYEES, [...otherCompanies, ...employees]);
+  }
+
   public saveEmployee(emp: Employee, syncToApi = true): void {
     const all = this.getEmployees();
     const idx = all.findIndex(e => e.id === emp.id);
@@ -194,6 +199,11 @@ class StorageService {
     return companyId ? all.filter(d => d.companyId === companyId) : all;
   }
 
+  public cacheDepartments(companyId: string, departments: Department[]): void {
+    const otherCompanies = this.getDepartments().filter(department => department.companyId !== companyId);
+    this.set(STORAGE_KEYS.DEPARTMENTS, [...otherCompanies, ...departments]);
+  }
+
   public saveDepartment(dept: Department): void {
     const all = this.getDepartments();
     const idx = all.findIndex(d => d.id === dept.id);
@@ -216,6 +226,11 @@ class StorageService {
   public getDesignations(companyId?: string): Designation[] {
     const all = this.get<Designation[]>(STORAGE_KEYS.DESIGNATIONS, []);
     return companyId ? all.filter(d => d.companyId === companyId) : all;
+  }
+
+  public cacheDesignations(companyId: string, designations: Designation[]): void {
+    const otherCompanies = this.getDesignations().filter(designation => designation.companyId !== companyId);
+    this.set(STORAGE_KEYS.DESIGNATIONS, [...otherCompanies, ...designations]);
   }
 
   public saveDesignation(desig: Designation): void {
@@ -242,7 +257,12 @@ class StorageService {
     return companyId ? all.filter(a => a.companyId === companyId) : all;
   }
 
-  public saveAttendanceRecord(record: AttendanceRecord): void {
+  public cacheAttendanceRecords(companyId: string, records: AttendanceRecord[]): void {
+    const otherCompanies = this.getAttendanceRecords().filter(record => record.companyId !== companyId);
+    this.set(STORAGE_KEYS.ATTENDANCE, [...otherCompanies, ...records]);
+  }
+
+  public saveAttendanceRecord(record: AttendanceRecord): Promise<boolean> {
     const all = this.getAttendanceRecords();
     const idx = all.findIndex(a => a.employeeId === record.employeeId && a.date === record.date);
     if (idx >= 0) {
@@ -252,10 +272,15 @@ class StorageService {
     }
     this.set(STORAGE_KEYS.ATTENDANCE, all);
 
-    api.saveAttendanceRecord(record).catch(err => console.warn('API saveAttendanceRecord sync:', err.message));
+    return api.saveAttendanceRecord(record)
+      .then(() => true)
+      .catch(err => {
+        console.warn('API saveAttendanceRecord sync:', err.message);
+        return false;
+      });
   }
 
-  public bulkMarkAttendance(records: AttendanceRecord[]): void {
+  public bulkMarkAttendance(records: AttendanceRecord[]): Promise<boolean> {
     const all = this.getAttendanceRecords();
     records.forEach(rec => {
       const idx = all.findIndex(a => a.employeeId === rec.employeeId && a.date === rec.date);
@@ -267,7 +292,12 @@ class StorageService {
     });
     this.set(STORAGE_KEYS.ATTENDANCE, all);
 
-    api.bulkMarkAttendance(records).catch(err => console.warn('API bulkMarkAttendance sync:', err.message));
+    return api.bulkMarkAttendance(records)
+      .then(() => true)
+      .catch(err => {
+        console.warn('API bulkMarkAttendance sync:', err.message);
+        return false;
+      });
   }
 
   // Leave Management

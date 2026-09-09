@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createOpaqueToken, createTemporaryPassword, onboardingEmail } from './email.js';
+import { createOpaqueToken, createTemporaryPassword, onboardingEmail, passwordResetEmail } from './email.js';
 
 describe('onboarding email', () => {
   it('contains activation, Android download, fallback, expiry and escaped employee data', () => {
@@ -19,5 +19,12 @@ describe('onboarding email', () => {
   it('creates a strong random temporary password', () => {
     const first = createTemporaryPassword(); const second = createTemporaryPassword();
     expect(first).toHaveLength(16); expect(first).not.toBe(second);
+  });
+  it('creates a safe password reset message with the one-time link and expiry', () => {
+    const message = passwordResetEmail({ userName: '<User>', companyName: 'Orbit & Co', resetUrl: 'https://web.test/reset-password?token=secret', supportEmail: 'hr@example.com', expiresMinutes: 60 });
+    expect(message.html).toContain('&lt;User&gt;');
+    expect(message.html).toContain('Choose a New Password');
+    expect(message.text).toContain('https://web.test/reset-password?token=secret');
+    expect(message.text).toContain('expires in 60 minutes');
   });
 });

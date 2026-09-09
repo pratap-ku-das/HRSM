@@ -10,6 +10,7 @@ interface AuthContextType {
   companies: Company[];
   settings: CompanySettings | null;
   isAuthenticated: boolean;
+  isRestoringSession: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   loginAsDemoUser: (userId: string) => void;
   registerCompany: (companyData: Partial<Company>, adminData: Partial<User> & { password?: string }, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
@@ -32,8 +33,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentCompany, setCurrentCompany] = useState<Company | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  const syncCompanyData = async (companyId: string) => {
+    const [employees, departments, designations, attendance] = await Promise.allSettled([
+      api.getEmployeesV1(),
+      api.getDepartmentsV1(),
+      api.getDesignationsV1(),
+      api.getAttendanceV1(),
+    ]);
+    if (employees.status === 'fulfilled') storageService.cacheEmployees(companyId, employees.value);
+    if (departments.status === 'fulfilled') storageService.cacheDepartments(companyId, departments.value);
+    if (designations.status === 'fulfilled') storageService.cacheDesignations(companyId, designations.value);
+    if (attendance.status === 'fulfilled') storageService.cacheAttendanceRecords(companyId, attendance.value);
+  };
 
   const refreshState = async () => {
+    setIsRestoringSession(true);
     storageService.init();
 
     try {
@@ -42,39 +58,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCompanies(liveCompanies);
 
       const storedSession = localStorage.getItem('hrms_active_session_v2');
-      if (storedSession) {
+      if (storedSession && api.hasV1Session()) {
         try {
-          const session = JSON.parse(storedSession);
-          const comp = liveCompanies.find(c => c.id === session.companyId);
-          if (comp) {
-            const users = storageService.getUsersByCompany(comp.id);
-            const user = users.find(u => u.id === session.userId) || users[0] || null;
-            setCurrentCompany(comp);
-            setCurrentUser(user);
-            const liveSettings = await api.getSettings(comp.id).catch(() => storageService.getSettings(comp.id));
-            setSettings(normalizeIndianSettings(liveSettings));
-            return;
-          }
+          const me = (await api.getMeV1()).data;
+          setCurrentCompany(me.company);
+          setCurrentUser(me.user);
+          setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
+          void syncCompanyData(me.company.id);
+          void api.getSettings(me.company.id)
+            .then(value => setSettings(normalizeIndianSettings(value)))
+            .catch(error => console.warn('Live settings refresh failed:', error));
+          return;
         } catch (e) {
           console.error('Session load error', e);
+          api.clearV1Session();
+          localStorage.removeItem('hrms_active_session_v2');
         }
       }
 
-      if (liveCompanies.length > 0) {
-        const firstComp = liveCompanies[0];
-        const users = storageService.getUsersByCompany(firstComp.id);
-        const user = users[0] || null;
-        setCurrentCompany(firstComp);
-        setCurrentUser(user);
-        const liveSettings = await api.getSettings(firstComp.id).catch(() => storageService.getSettings(firstComp.id));
-        setSettings(normalizeIndianSettings(liveSettings));
-      } else {
-        setCurrentCompany(null);
-        setCurrentUser(null);
-        setSettings(null);
-      }
+      setCurrentCompany(null);
+      setCurrentUser(null);
+      setSettings(null);
     } catch (err) {
       console.warn('API refresh error:', err);
+    } finally {
+      setIsRestoringSession(false);
     }
   };
 
@@ -86,19 +94,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await api.loginV1(email, password);
       const me = (await api.getMeV1()).data;
-      const result = { user: me.user, company: me.company, settings: await api.getSettings(me.company.id).catch(() => storageService.getSettings(me.company.id)) };
+      setCurrentUser(me.user);
+      setCurrentCompany(me.company);
+      setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
+      localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: me.user.id, companyId: me.company.id }));
 
-      if (result && result.user && result.company) {
-        setCurrentUser(result.user);
-        setCurrentCompany(result.company);
-        setSettings(normalizeIndianSettings(result.settings));
-        localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: result.user.id, companyId: result.company.id }));
-        return true;
-      }
+      // Optional workspace data must not turn a successful authentication into a login failure.
+      void syncCompanyData(me.company.id);
+      void api.getSettings(me.company.id)
+        .then(value => setSettings(normalizeIndianSettings(value)))
+        .catch(error => console.warn('Live settings refresh failed:', error));
+      return true;
     } catch (err) {
       console.warn('Login error:', err);
+      api.clearV1Session();
+      localStorage.removeItem('hrms_active_session_v2');
+      throw err;
     }
-    return false;
   };
 
   const loginAsDemoUser = (userId: string) => {
@@ -217,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         companies,
         settings,
         isAuthenticated: !!currentUser && !!currentCompany,
+        isRestoringSession,
         login,
         loginAsDemoUser,
         registerCompany,

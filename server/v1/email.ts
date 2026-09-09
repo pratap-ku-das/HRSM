@@ -48,6 +48,27 @@ export function onboardingEmail(input: {
   return { html, text };
 }
 
+export function passwordResetEmail(input: {
+  userName: string; companyName: string; resetUrl: string; supportEmail: string; expiresMinutes: number;
+}) {
+  const name = escapeHtml(input.userName);
+  const company = escapeHtml(input.companyName);
+  const support = escapeHtml(input.supportEmail);
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#172033">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" width="100%" style="max-width:620px;background:#fff;border:1px solid #dce3ee;border-radius:8px;overflow:hidden">
+  <tr><td style="background:#111827;padding:24px 32px;color:#fff"><strong style="font-size:24px">OrbitHR</strong><div style="color:#a7f3d0;margin-top:4px">Secure account recovery</div></td></tr>
+  <tr><td style="padding:32px"><h1 style="font-size:24px;margin:0 0 16px">Reset your password</h1>
+  <p>Hello ${name},</p><p>We received a password reset request for your ${company} OrbitHR account.</p>
+  <p style="margin:28px 0"><a href="${input.resetUrl}" style="background:#4f46e5;color:#fff;text-decoration:none;padding:13px 20px;border-radius:6px;font-weight:bold">Choose a New Password</a></p>
+  <p>This secure link expires in ${input.expiresMinutes} minutes and can be used only once.</p>
+  <p>If you did not request this reset, you can safely ignore this email. Your current password remains unchanged.</p>
+  <hr style="border:0;border-top:1px solid #e5e7eb;margin:28px 0"><p style="font-size:13px;color:#64748b">Need help? Contact <a href="mailto:${support}">${support}</a>.</p>
+  </td></tr></table></td></tr></table></body></html>`;
+  const text = `Reset your OrbitHR password\n\nHello ${input.userName},\nOpen this secure link to choose a new password: ${input.resetUrl}\nThe link expires in ${input.expiresMinutes} minutes and can be used only once.\nIf you did not request this, ignore this email.\nSupport: ${input.supportEmail}`;
+  return { html, text };
+}
+
 export async function deliverOnboardingEmail(prisma: PrismaClient, deliveryId: string, activationToken: string, temporaryPassword: string) {
   const delivery = await prisma.emailDelivery.findUnique({ where: { id: deliveryId } });
   if (!delivery || delivery.status === 'SENT') return delivery;
@@ -70,6 +91,40 @@ export async function deliverOnboardingEmail(prisma: PrismaClient, deliveryId: s
     const response = await resend.emails.send({
       from: process.env.EMAIL_FROM || `${process.env.RESEND_FROM_NAME || 'OrbitHR'} <${process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev'}>`,
       to: [delivery.recipient], subject: `Welcome to ${user.company.name} on OrbitHR`, ...content,
+    });
+    if (response.error) throw new Error(response.error.message);
+    return prisma.emailDelivery.update({ where: { id: delivery.id }, data: {
+      status: 'SENT', providerId: response.data?.id, sentAt: new Date(), attemptCount: { increment: 1 }, lastError: null, nextAttemptAt: null,
+    }});
+  } catch (error) {
+    const attempts = delivery.attemptCount + 1;
+    await prisma.emailDelivery.update({ where: { id: delivery.id }, data: {
+      status: 'FAILED', attemptCount: attempts, lastError: error instanceof Error ? error.message.slice(0, 500) : 'Email failed',
+      nextAttemptAt: new Date(Date.now() + Math.min(60, 2 ** attempts) * 60_000),
+    }});
+    return null;
+  }
+}
+
+export async function deliverPasswordResetEmail(prisma: PrismaClient, deliveryId: string, resetToken: string) {
+  const delivery = await prisma.emailDelivery.findUnique({ where: { id: deliveryId } });
+  if (!delivery || delivery.status === 'SENT') return delivery;
+  const user = delivery.userId ? await prisma.user.findUnique({ where: { id: delivery.userId }, include: { company: true } }) : null;
+  if (!user) throw new Error('Password reset user not found');
+  const webUrl = (process.env.APP_URL || process.env.WEB_APP_URL || 'http://localhost:5173').replace(/\/$/, '');
+  const content = passwordResetEmail({
+    userName: user.fullName,
+    companyName: user.company.name,
+    resetUrl: `${webUrl}/reset-password?token=${encodeURIComponent(resetToken)}`,
+    supportEmail: process.env.HR_SUPPORT_EMAIL || user.company.email,
+    expiresMinutes: 60,
+  });
+  try {
+    if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not configured');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const response = await resend.emails.send({
+      from: process.env.EMAIL_FROM || `${process.env.RESEND_FROM_NAME || 'OrbitHR'} <${process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev'}>`,
+      to: [delivery.recipient], subject: 'Reset your OrbitHR password', ...content,
     });
     if (response.error) throw new Error(response.error.message);
     return prisma.emailDelivery.update({ where: { id: delivery.id }, data: {

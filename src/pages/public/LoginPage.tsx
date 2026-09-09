@@ -7,6 +7,7 @@ import {
 import { BrandCredit } from '../../components/BrandCredit';
 import { ProductLogo } from '../../components/ProductLogo';
 import { AuthShowcase } from '../../components/AuthShowcase';
+import { api } from '../../services/api';
 
 interface LoginPageProps {
   onNavigateToRegister: () => void;
@@ -29,6 +30,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [showForgotModal, setShowForgotModal] = useState<boolean>(false);
   const [forgotEmail, setForgotEmail] = useState<string>('');
   const [forgotSent, setForgotSent] = useState<boolean>(false);
+  const [forgotSubmitting, setForgotSubmitting] = useState<boolean>(false);
+  const [forgotError, setForgotError] = useState<string>('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -206,12 +209,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             ) : (
               <form
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
-                  setForgotSent(true);
+                  setForgotError('');
+                  setForgotSubmitting(true);
+                  try {
+                    await api.forgotPassword(forgotEmail);
+                    setForgotSent(true);
+                  } catch (error) {
+                    setForgotError(error instanceof Error ? error.message : 'Unable to request a reset link.');
+                  } finally {
+                    setForgotSubmitting(false);
+                  }
                 }}
                 className="mt-4 space-y-4"
               >
+                {forgotError && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-300">{forgotError}</div>}
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Your Registered Work Email</label>
                   <input
@@ -233,9 +246,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-semibold shadow"
+                    disabled={forgotSubmitting}
+                    className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-semibold shadow disabled:opacity-50"
                   >
-                    Send Reset Link
+                    {forgotSubmitting ? 'Sending…' : 'Send Reset Link'}
                   </button>
                 </div>
               </form>

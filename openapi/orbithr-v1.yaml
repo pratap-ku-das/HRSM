@@ -106,11 +106,16 @@ paths:
                 action: {type: string, enum: [CLOCK_IN, CLOCK_OUT]}
                 latitude: {type: number, minimum: -90, maximum: 90}
                 longitude: {type: number, minimum: -180, maximum: 180}
+                locationAccuracyMeters: {type: number, exclusiveMinimum: 0, maximum: 200}
                 deviceId: {type: string}
+                biometricVerified:
+                  type: boolean
+                  description: Must be true for CLOCK_IN after Android system biometric verification. CLOCK_IN also requires latitude, longitude, and locationAccuracyMeters.
       responses:
         '200': {description: Existing attendance updated}
         '201': {description: Attendance created}
         '409': {$ref: '#/components/responses/ErrorResponse'}
+        '422': {$ref: '#/components/responses/ErrorResponse'}
   /me/leaves:
     get:
       operationId: getMyLeaves
