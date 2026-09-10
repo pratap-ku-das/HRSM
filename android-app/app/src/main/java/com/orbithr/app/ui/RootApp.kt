@@ -37,7 +37,7 @@ fun RootApp(
     error: String?,
     login: (String, String) -> Unit,
     logout: () -> Unit,
-    verifyAttendance: ((AttendanceVerificationResult) -> Unit) -> Unit,
+    verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit,
 ) = when (state) {
     SessionState.Loading -> OrbitSplash()
     SessionState.SignedOut -> LoginScreen(error, login)
@@ -166,7 +166,7 @@ private fun RowScope.LoginTrustChip(icon: ImageVector, label: String) {
 private data class Destination(val route: String, val label: String, val icon: ImageVector, val activeIcon: ImageVector)
 
 @Composable
-private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: ((AttendanceVerificationResult) -> Unit) -> Unit) {
+private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit) {
     val nav = rememberNavController()
     val destinations = listOf(
         Destination("home", "Home", Icons.Outlined.Home, Icons.Outlined.Home),

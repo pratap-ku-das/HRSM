@@ -101,21 +101,55 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action]
+              required: [action, latitude, longitude, locationAccuracyMeters, deviceId, faceVerificationToken]
               properties:
                 action: {type: string, enum: [CLOCK_IN, CLOCK_OUT]}
                 latitude: {type: number, minimum: -90, maximum: 90}
                 longitude: {type: number, minimum: -180, maximum: 180}
                 locationAccuracyMeters: {type: number, exclusiveMinimum: 0, maximum: 200}
                 deviceId: {type: string}
-                biometricVerified:
-                  type: boolean
-                  description: Must be true for CLOCK_IN after Android system biometric verification. CLOCK_IN also requires latitude, longitude, and locationAccuracyMeters.
+                faceVerificationToken:
+                  type: string
+                  description: Single-use server token bound to this employee, device, action, and a 60-second expiry.
       responses:
         '200': {description: Existing attendance updated}
         '201': {description: Attendance created}
         '409': {$ref: '#/components/responses/ErrorResponse'}
         '422': {$ref: '#/components/responses/ErrorResponse'}
+  /me/face/challenge:
+    post:
+      operationId: createFaceVerificationChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, deviceId]
+              properties:
+                action: {type: string, enum: [CLOCK_IN, CLOCK_OUT]}
+                deviceId: {type: string, minLength: 16}
+      responses:
+        '201': {description: Two-minute face verification challenge created}
+        '428': {$ref: '#/components/responses/ErrorResponse'}
+  /me/face/verify:
+    post:
+      operationId: verifyEmployeeFace
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [selfie, challengeId, deviceId, livenessVerified]
+              properties:
+                selfie: {type: string, format: binary}
+                challengeId: {type: string, format: uuid}
+                deviceId: {type: string}
+                livenessVerified: {type: boolean}
+      responses:
+        '200': {description: Employee matched and single-use attendance token issued}
+        '401': {$ref: '#/components/responses/ErrorResponse'}
   /me/leaves:
     get:
       operationId: getMyLeaves
@@ -155,6 +189,36 @@ paths:
         - {in: header, name: Idempotency-Key, required: true, schema: {type: string}}
       responses:
         '201': {description: Employee and portal user created; onboarding email queued}
+  /employees/{id}/face-enrollment:
+    get:
+      operationId: getEmployeeFaceEnrollment
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: HR/Admin-visible enrollment status; no biometric image returned}
+    post:
+      operationId: enrollEmployeeFace
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [face, consentAcknowledged]
+              properties:
+                face: {type: string, format: binary}
+                consentAcknowledged: {type: boolean}
+      responses:
+        '200': {description: Existing enrollment replaced}
+        '201': {description: Employee face enrolled}
+    delete:
+      operationId: revokeEmployeeFaceEnrollment
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Enrollment revoked and pending sessions invalidated}
   /employees/{id}/resend-onboarding:
     post:
       operationId: resendOnboarding

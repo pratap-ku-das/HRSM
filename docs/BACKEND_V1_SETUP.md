@@ -17,6 +17,11 @@ npx prisma generate
 
 The migration adds user verification/token versioning, rotating refresh tokens, activation/reset tokens, tracked email delivery/retry state, and idempotency records.
 
+The employee face migration adds HR/Admin-controlled enrollment plus short-lived,
+employee/device/action-bound verification sessions. Configure AWS Rekognition using the
+variables in `.env.example`; without them, enrollment and attendance verification fail
+closed with `FACE_PROVIDER_NOT_CONFIGURED`.
+
 ## Local run
 
 ```shell
@@ -54,4 +59,6 @@ Set `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_FROM_NAME` in server-only
 - Password-reset token creation exists, but password-reset email delivery needs a dedicated template/queue connection.
 - Email retry timestamps are stored, but no scheduled backend worker consumes them yet.
 - Secure file upload/download, FCM device registration, leave balances, manager approval APIs, and payslip PDF streaming remain to be implemented.
-- Advanced biometric attendance is intentionally not advertised or implemented.
+- AWS Rekognition performs employee-specific matching. The Android blink sequence is a
+  basic liveness gate; organizations requiring presentation-attack certification should
+  add a dedicated managed face-liveness provider before treating it as high-assurance access control.

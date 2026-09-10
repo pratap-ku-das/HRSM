@@ -5,8 +5,8 @@ import { storageService } from '../../services/storageService';
 import { api } from '../../services/api';
 import { 
   CalendarCheck, Calendar, Users, Filter, Download, Plus, 
-  Clock, CheckCircle2, AlertCircle, Sparkles, Smartphone, RefreshCw,
-  MapPin, Shield, Edit3, X, Check, FileText, ChevronLeft, ChevronRight, Terminal
+  Clock, AlertCircle, Smartphone, RefreshCw,
+  MapPin, Shield, Edit3, X, Check, FileText, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 export const AttendancePage: React.FC = () => {
@@ -71,11 +71,6 @@ export const AttendancePage: React.FC = () => {
       window.removeEventListener('focus', onFocus);
     };
   }, [currentCompany?.id, refreshAttendance]);
-
-  // Mobile API Payload Simulator state
-  const [simEmployeeId, setSimEmployeeId] = useState<string>('');
-  const [simConfidence, setSimConfidence] = useState<number>(98.4);
-  const [simResponse, setSimResponse] = useState<any | null>(null);
 
   const employees = storageService.getEmployees(currentCompany?.id);
   const departments = storageService.getDepartments(currentCompany?.id);
@@ -338,36 +333,6 @@ export const AttendancePage: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleSimulateMobileAuth = () => {
-    const empId = simEmployeeId || (employees[0]?.id || 'emp-1');
-    const emp = employees.find(e => e.id === empId);
-
-    const payload = {
-      status: 'SUCCESS',
-      statusCode: 200,
-      timestamp: new Date().toISOString(),
-      verifiedRecord: {
-        companyId: currentCompany?.id,
-        employeeId: empId,
-        employeeName: `${emp?.firstName} ${emp?.lastName}`,
-        date: new Date().toISOString().split('T')[0],
-        clockInTime: '09:02:14',
-        faceAuthVerified: true,
-        confidenceScore: simConfidence,
-        deviceId: 'MOBILE-DEVICE-IOS-IPHONE15PRO-9842',
-        location: {
-          latitude: 37.7749,
-          longitude: -122.4194,
-          geofenceStatus: 'INSIDE_OFFICE_PERIMETER (Radius 50m)',
-        },
-        source: 'MOBILE_FACE',
-      },
-      auditNotice: 'This endpoint is pre-architected in Phase 4 schema and awaits Phase 6 client app deployment.',
-    };
-
-    setSimResponse(payload);
   };
 
   return (
@@ -739,7 +704,7 @@ export const AttendancePage: React.FC = () => {
               <span>Mobile Face & Location Attendance</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              The Android clock-in flow now requires a clear camera-captured face, enrolled device biometric verification, and a fresh precise location. The backend uses server time, rejects unverified clock-ins, and synchronizes successful records to this attendance matrix.
+              Every Android clock-in and clock-out requires a live camera capture that matches the employee's HR/Admin-approved face, plus a fresh precise location. The backend issues a one-time proof, uses server time, and rejects missing, wrong, expired, or reused face verification.
             </p>
           </div>
 
@@ -750,7 +715,7 @@ export const AttendancePage: React.FC = () => {
                 <span>1. Mobile Client Capture</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                Employee captures one clear, front-facing face. On-device detection checks face position and open eyes before Android requests the enrolled device biometric.
+                Employee captures one clear, front-facing face. On-device detection requires one centered face and a live blink before securely capturing the verification image.
               </p>
             </div>
 
@@ -759,7 +724,7 @@ export const AttendancePage: React.FC = () => {
                 <span>2. Multi-Tenant API Verify</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                After biometric success, Android captures a fresh GPS fix and sends its coordinates, accuracy, and hashed device ID with the authenticated clock-in request.
+                The server compares that capture only with the logged-in employee's HR/Admin enrollment. A wrong face cannot receive the action- and device-bound proof token.
               </p>
             </div>
 
@@ -768,68 +733,14 @@ export const AttendancePage: React.FC = () => {
                 <span>3. Real-Time HR Sync</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                The API records authoritative server time, marks the source as MOBILE_FACE, writes the audit trail, and makes the record available to the HR dashboard.
+                After a successful face match and GPS check, the API consumes the one-time proof, records authoritative server time, and synchronizes the audit evidence to this dashboard.
               </p>
             </div>
           </div>
 
-          {/* Interactive Payload Simulator */}
-          <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-                  <Terminal className="w-4 h-4 text-purple-400" />
-                  <span>Interactive Biometric API Payload Simulator</span>
-                </h3>
-                <p className="text-slate-400 text-[11px]">Simulate a mobile face verification request to inspect schema alignment.</p>
-              </div>
-
-              <button
-                onClick={handleSimulateMobileAuth}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-bold flex items-center space-x-1.5 shadow"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Simulate Verification Payload</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Employee</label>
-                <select
-                  value={simEmployeeId}
-                  onChange={(e) => setSimEmployeeId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-brand-500"
-                >
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.firstName} {e.lastName} ({e.employeeCode})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Facial Match Confidence Score</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={simConfidence}
-                  onChange={(e) => setSimConfidence(Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-brand-500"
-                />
-              </div>
-            </div>
-
-            {simResponse && (
-              <div className="mt-4 p-4 rounded-2xl bg-slate-950 border border-purple-500/30 space-y-2 animate-fade-in font-mono text-[11px]">
-                <div className="text-purple-300 font-bold flex items-center space-x-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Simulated HTTP 200 Response Payload</span>
-                </div>
-                <pre className="text-emerald-300 overflow-x-auto p-3 bg-slate-900 rounded-xl border border-slate-800">
-                  {JSON.stringify(simResponse, null, 2)}
-                </pre>
-              </div>
-            )}
+          <div className="p-5 rounded-3xl bg-emerald-500/5 border border-emerald-500/20 text-xs flex items-start gap-3">
+            <Shield className="w-5 h-5 text-emerald-300 shrink-0" />
+            <div><strong className="text-emerald-200">Server-enforced identity matching is active.</strong><p className="text-slate-400 mt-1">Manage each employee's approved face from Employee Directory → View Profile. The former client-trusted simulator endpoint has been permanently retired.</p></div>
           </div>
         </div>
       )}

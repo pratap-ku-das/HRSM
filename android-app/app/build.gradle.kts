@@ -15,8 +15,8 @@ android {
         applicationId = "com.orbithr.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 5
-        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.0"
+        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 6
+        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${providers.gradleProperty("ORBIT_API_BASE_URL").orElse("http://10.0.2.2:3001/api/v1/").get()}\"")
     }
@@ -62,7 +62,6 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.biometric)
     implementation(libs.play.services.location)
     implementation(libs.mlkit.face.detection)
     implementation(libs.androidx.camera.camera2)

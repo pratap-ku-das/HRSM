@@ -17,6 +17,11 @@ RESEND_API_KEY=<new Resend key>
 EMAIL_FROM=OrbitHR <onboarding@mail.balajione.dev>
 ANDROID_APP_DOWNLOAD_URL=<public release APK URL>
 HR_SUPPORT_EMAIL=hr@balajione.dev
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=<restricted IAM access key>
+AWS_SECRET_ACCESS_KEY=<restricted IAM secret>
+REKOGNITION_COLLECTION_ID=orbithr-production
+FACE_MATCH_THRESHOLD=95
 ```
 
 Railway supplies `PORT`; do not define it manually. `railway.json` builds the web client,
@@ -27,6 +32,12 @@ SPA fallback required for `/activate?token=...`.
 Use Supabase's IPv4-compatible pooler URL for `DATABASE_URL`. Transaction mode on port
 `6543` should include `?pgbouncer=true&connection_limit=1`. Database schema changes are
 deployed separately with `npm run db:push`; they are not performed on every container restart.
+
+The IAM identity used for employee-specific face attendance needs only Rekognition
+`CreateCollection`, `DescribeCollection`, `IndexFaces`, `SearchFacesByImage`, and
+`DeleteFaces`. Do not use an AWS root access key. HR/Admin enrollment photos and live
+selfies are processed in memory; OrbitHR stores only the provider face ID, match score,
+short-lived verification state, and audit evidence.
 
 ## DNS
 

@@ -1,8 +1,9 @@
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
@@ -15,7 +16,23 @@ dotenv.config();
 const app = express();
 const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const prisma = new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT || 3001);
+
+type AttendanceAdminRequest = Request & { attendanceAdmin?: { id: string; companyId: string; role: string } };
+const requireAttendanceAdmin = async (req: AttendanceAdminRequest, res: Response, next: NextFunction) => {
+  try {
+    const raw = req.header('authorization');
+    const secret = process.env.JWT_ACCESS_SECRET;
+    if (!raw?.startsWith('Bearer ') || !secret || secret.length < 32) return res.status(401).json({ error: 'A valid administrator session is required.' });
+    const payload = jwt.verify(raw.slice(7), secret, { issuer: process.env.JWT_ISSUER || 'orbithr-api', audience: 'orbithr-clients' }) as jwt.JwtPayload;
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.tokenVersion !== payload.tokenVersion || !['SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_MANAGER'].includes(user.role)) return res.status(403).json({ error: 'Only HR or an administrator may adjust attendance.' });
+    req.attendanceAdmin = { id: user.id, companyId: user.companyId, role: user.role };
+    next();
+  } catch {
+    return res.status(401).json({ error: 'The administrator session is invalid or expired.' });
+  }
+};
 
 // Railway terminates HTTPS in front of this service. Trust exactly that proxy hop so
 // rate limiting uses the real client IP instead of rejecting X-Forwarded-For.
@@ -490,9 +507,12 @@ app.get('/api/attendance', async (req, res) => {
   }
 });
 
-app.post('/api/attendance', async (req, res) => {
+app.post('/api/attendance', requireAttendanceAdmin, async (req: AttendanceAdminRequest, res) => {
   try {
     const { companyId, employeeId, date, status, clockInTime, clockOutTime, correctionNote, correctedBy } = req.body;
+    if (companyId !== req.attendanceAdmin!.companyId) return res.status(403).json({ error: 'Cross-company attendance changes are forbidden.' });
+    const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId: req.attendanceAdmin!.companyId }, select: { id: true } });
+    if (!employee) return res.status(404).json({ error: 'Employee was not found in this company.' });
 
     const dateObj = new Date(date);
     const clockIn = clockInTime ? new Date(clockInTime) : null;
@@ -532,10 +552,14 @@ app.post('/api/attendance', async (req, res) => {
   }
 });
 
-app.post('/api/attendance/bulk', async (req, res) => {
+app.post('/api/attendance/bulk', requireAttendanceAdmin, async (req: AttendanceAdminRequest, res) => {
   try {
     const { records } = req.body;
-    if (!Array.isArray(records)) return res.status(400).json({ error: 'records array required' });
+    if (!Array.isArray(records) || records.length < 1 || records.length > 366) return res.status(400).json({ error: 'Between 1 and 366 records are required.' });
+    if (records.some((record: any) => record.companyId !== req.attendanceAdmin!.companyId)) return res.status(403).json({ error: 'Cross-company attendance changes are forbidden.' });
+    const employeeIds = [...new Set(records.map((record: any) => String(record.employeeId)))];
+    const employeeCount = await prisma.employee.count({ where: { companyId: req.attendanceAdmin!.companyId, id: { in: employeeIds } } });
+    if (employeeCount !== employeeIds.length) return res.status(404).json({ error: 'One or more employees were not found in this company.' });
     const hasInvalidTimes = records.some((record: any) => {
       const clockIn = record.clockInTime ? new Date(record.clockInTime) : null;
       const clockOut = record.clockOutTime ? new Date(record.clockOutTime) : null;
@@ -581,52 +605,10 @@ app.post('/api/attendance/bulk', async (req, res) => {
   }
 });
 
-// Phase 6 Mobile Face-Auth Verification Endpoint
-app.post('/api/attendance/mobile-verify', async (req, res) => {
-  try {
-    const { companyId, employeeId, faceConfidenceScore, deviceId, locationLat, locationLng } = req.body;
-    const today = new Date();
-
-    const record = await prisma.attendanceRecord.upsert({
-      where: {
-        employeeId_date: {
-          employeeId,
-          date: new Date(today.toISOString().split('T')[0]),
-        },
-      },
-      update: {
-        status: 'PRESENT',
-        faceAuthVerified: true,
-        faceConfidenceScore: Number(faceConfidenceScore) || 98.5,
-        deviceId,
-        locationLat: Number(locationLat),
-        locationLng: Number(locationLng),
-        clockInTime: today,
-        source: 'MOBILE_FACE',
-      },
-      create: {
-        companyId,
-        employeeId,
-        date: new Date(today.toISOString().split('T')[0]),
-        status: 'PRESENT',
-        faceAuthVerified: true,
-        faceConfidenceScore: Number(faceConfidenceScore) || 98.5,
-        deviceId,
-        locationLat: Number(locationLat),
-        locationLng: Number(locationLng),
-        clockInTime: today,
-        source: 'MOBILE_FACE',
-      },
-    });
-
-    res.json({
-      success: true,
-      message: 'Mobile face authentication verified successfully.',
-      record,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+// Retired insecure prototype. Attendance must use the authenticated v1 challenge,
+// employee face match and single-use proof-token flow.
+app.post('/api/attendance/mobile-verify', (_req, res) => {
+  res.status(410).json({ error: 'This endpoint has been retired. Use /api/v1/me/face/challenge, /api/v1/me/face/verify and /api/v1/me/attendance/punch.' });
 });
 
 // --------------------------------------------------------

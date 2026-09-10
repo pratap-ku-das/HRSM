@@ -4,16 +4,18 @@ import { PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import { z, ZodError } from 'zod';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail, deliverPasswordResetEmail } from './email.js';
+import { deleteEmployeeFace, enrollEmployeeFace, FaceRecognitionError, verifyEmployeeFace } from './faceRecognition.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; tokenVersion: number };
 type AuthedRequest = Request & { auth?: AuthUser; requestId?: string };
 
 const rolePermissions: Record<UserRole, string[]> = {
-  SUPER_ADMIN: [],
-  COMPANY_ADMIN: ['company.manage', 'employee.read.all', 'employee.manage', 'attendance.read.team', 'attendance.manage', 'leave.review', 'leave.policy.manage', 'expense.review', 'payroll.manage', 'recruitment.manage', 'audit.read'],
-  HR_MANAGER: ['employee.read.all', 'employee.manage', 'attendance.read.team', 'attendance.manage', 'leave.review', 'expense.review', 'recruitment.manage'],
+  SUPER_ADMIN: ['face.enroll'],
+  COMPANY_ADMIN: ['company.manage', 'employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'leave.policy.manage', 'expense.review', 'payroll.manage', 'recruitment.manage', 'audit.read'],
+  HR_MANAGER: ['employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'expense.review', 'recruitment.manage'],
   DEPT_HEAD: ['employee.read.team', 'attendance.read.team', 'leave.review', 'expense.review', 'goal.manage.team'],
   EMPLOYEE: ['employee.read.self', 'attendance.read.self', 'attendance.punch', 'leave.apply', 'expense.submit', 'payslip.read.self'],
 };
@@ -50,7 +52,7 @@ function signAccess(user: AuthUser) {
   });
 }
 
-async function issueSession(prisma: PrismaClient, user: { id: string; companyId: string; role: UserRole; tokenVersion: number; employee?: { id: string } | null }, deviceName?: string, familyId = crypto.randomUUID()) {
+async function issueSession(prisma: PrismaClient, user: { id: string; companyId: string; role: UserRole; tokenVersion: number; employee?: { id: string } | null }, deviceName?: string, familyId: string = crypto.randomUUID()) {
   const opaque = createOpaqueToken();
   await prisma.refreshToken.create({ data: { userId: user.id, tokenHash: opaque.hash, familyId, deviceName, expiresAt: new Date(Date.now() + refreshDays * 86_400_000) } });
   const auth: AuthUser = { id: user.id, companyId: user.companyId, role: user.role, employeeId: user.employee?.id, permissions: rolePermissions[user.role], tokenVersion: user.tokenVersion };
@@ -59,6 +61,11 @@ async function issueSession(prisma: PrismaClient, user: { id: string; companyId:
 
 export function createV1Router(prisma: PrismaClient) {
   const router = Router();
+  const faceUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 8 },
+    fileFilter: (_req, file, callback) => callback(null, ['image/jpeg', 'image/png'].includes(file.mimetype)),
+  });
   router.use((req: AuthedRequest, res, next) => { req.requestId = String(req.header('x-request-id') || crypto.randomUUID()); res.setHeader('x-request-id', req.requestId); next(); });
 
   const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
@@ -226,44 +233,108 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, records);
   } catch (e) { next(e); } });
 
+  router.post('/me/face/challenge', authenticate, requirePermission('attendance.punch'), async (req: AuthedRequest, res, next) => { try {
+    const body = z.object({ action: z.enum(['CLOCK_IN', 'CLOCK_OUT']), deviceId: z.string().trim().min(16).max(200) }).parse(req.body);
+    if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
+    const enrollment = await prisma.faceEnrollment.findFirst({ where: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, status: 'ACTIVE' } });
+    if (!enrollment) return fail(res, 428, 'FACE_NOT_ENROLLED', 'HR or an administrator must enroll your face before mobile attendance can be used.');
+    await prisma.faceVerificationSession.updateMany({
+      where: { employeeId: req.auth!.employeeId, status: { in: ['CHALLENGE', 'VERIFIED'] } },
+      data: { status: 'REJECTED' },
+    });
+    const session = await prisma.faceVerificationSession.create({ data: {
+      companyId: req.auth!.companyId,
+      employeeId: req.auth!.employeeId,
+      action: body.action,
+      deviceId: body.deviceId,
+      expiresAt: new Date(Date.now() + 2 * 60_000),
+      ipAddress: clientIp(req),
+    } });
+    return ok(res, { challengeId: session.id, expiresInSeconds: 120 }, 201);
+  } catch (e) { next(e); } });
+
+  router.post('/me/face/verify', authenticate, requirePermission('attendance.punch'), faceUpload.single('selfie'), async (req: AuthedRequest, res, next) => { try {
+    const body = z.object({
+      challengeId: z.string().uuid(),
+      deviceId: z.string().trim().min(16).max(200),
+      livenessVerified: z.enum(['true']),
+    }).parse(req.body);
+    if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
+    if (!req.file) return fail(res, 400, 'FACE_IMAGE_REQUIRED', 'A fresh camera-captured JPEG or PNG face image is required.');
+    const now = new Date();
+    const session = await prisma.faceVerificationSession.findFirst({ where: {
+      id: body.challengeId,
+      companyId: req.auth!.companyId,
+      employeeId: req.auth!.employeeId,
+      deviceId: body.deviceId,
+      status: 'CHALLENGE',
+    } });
+    if (!session || session.expiresAt <= now) {
+      if (session) await prisma.faceVerificationSession.update({ where: { id: session.id }, data: { status: 'EXPIRED' } });
+      return fail(res, 410, 'FACE_CHALLENGE_EXPIRED', 'Face verification expired. Start again.');
+    }
+    const enrollment = await prisma.faceEnrollment.findFirst({ where: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, status: 'ACTIVE' } });
+    if (!enrollment) return fail(res, 428, 'FACE_NOT_ENROLLED', 'HR or an administrator must enroll your face first.');
+    const result = await verifyEmployeeFace(enrollment.providerFaceId, req.file.buffer);
+    if (!result.matched) {
+      const attempts = session.attemptCount + 1;
+      await prisma.faceVerificationSession.update({ where: { id: session.id }, data: { attemptCount: attempts, status: attempts >= 3 ? 'REJECTED' : 'CHALLENGE' } });
+      await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: 'FACE_MISMATCH', category: 'ATTENDANCE_SECURITY', details: `Employee-specific face verification rejected for ${session.action}.`, ipAddress: clientIp(req) } });
+      return fail(res, 401, 'FACE_MISMATCH', attempts >= 3 ? 'Face does not match the enrolled employee. This verification has been locked.' : 'Face does not match the enrolled employee. Try again in good lighting.');
+    }
+    const proof = createOpaqueToken();
+    await prisma.faceVerificationSession.update({ where: { id: session.id }, data: {
+      status: 'VERIFIED',
+      proofTokenHash: proof.hash,
+      similarity: result.similarity,
+      verifiedAt: now,
+      expiresAt: new Date(Date.now() + 60_000),
+      attemptCount: { increment: 1 },
+    } });
+    return ok(res, { faceVerificationToken: proof.token, similarity: result.similarity, expiresInSeconds: 60 });
+  } catch (e) { next(e); } });
+
   router.post('/me/attendance/punch', authenticate, requirePermission('attendance.punch'), async (req: AuthedRequest, res, next) => { try {
     const body = z.object({
       action: z.enum(['CLOCK_IN', 'CLOCK_OUT']),
-      latitude: z.number().min(-90).max(90).optional(),
-      longitude: z.number().min(-180).max(180).optional(),
-      locationAccuracyMeters: z.number().positive().max(200).optional(),
-      deviceId: z.string().max(200).optional(),
-      biometricVerified: z.boolean().default(false),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      locationAccuracyMeters: z.number().positive().max(200),
+      deviceId: z.string().trim().min(16).max(200),
+      faceVerificationToken: z.string().min(32).max(500),
     }).parse(req.body);
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked to this account.');
-    if (body.action === 'CLOCK_IN' && !body.biometricVerified) return fail(res, 422, 'FACE_VERIFICATION_REQUIRED', 'Verify your enrolled face before clocking in.');
-    if (body.action === 'CLOCK_IN' && (body.latitude === undefined || body.longitude === undefined || body.locationAccuracyMeters === undefined)) return fail(res, 422, 'LOCATION_REQUIRED', 'Precise current location is required before clocking in.');
-    const now = new Date(); const date = indiaDate(now);
-    const existing = await prisma.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId, date } } });
-    if (body.action === 'CLOCK_IN' && existing?.clockInTime) return fail(res, 409, 'ALREADY_CLOCKED_IN', 'You have already clocked in today.');
-    if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) return fail(res, 409, 'CLOCK_IN_REQUIRED', 'Clock in before clocking out.');
-    if (body.action === 'CLOCK_OUT' && existing?.clockOutTime) return fail(res, 409, 'ALREADY_CLOCKED_OUT', 'You have already clocked out today.');
-    const data = body.action === 'CLOCK_IN'
-      ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, faceAuthVerified: true, source: 'MOBILE_FACE' as const }
-      : { clockOutTime: now };
-    const record = await prisma.attendanceRecord.upsert({
-      where: { employeeId_date: { employeeId: req.auth!.employeeId, date } },
-      update: data,
-      create: {
+    const now = new Date(); const date = indiaDate(now); const proofHash = hashToken(body.faceVerificationToken);
+    const result = await prisma.$transaction(async tx => {
+      const verification = await tx.faceVerificationSession.findFirst({ where: {
         companyId: req.auth!.companyId,
         employeeId: req.auth!.employeeId,
-        date,
-        status: 'PRESENT',
-        clockInTime: now,
-        locationLat: body.latitude,
-        locationLng: body.longitude,
+        action: body.action,
         deviceId: body.deviceId,
-        faceAuthVerified: body.biometricVerified,
-        source: body.biometricVerified ? 'MOBILE_FACE' : 'SYSTEM_AUTO',
-      },
+        proofTokenHash: proofHash,
+        status: 'VERIFIED',
+        consumedAt: null,
+        expiresAt: { gt: now },
+      } });
+      if (!verification) throw Object.assign(new Error('Complete a fresh employee face match before recording attendance.'), { status: 401, code: 'FACE_VERIFICATION_REQUIRED' });
+      const consumed = await tx.faceVerificationSession.updateMany({ where: { id: verification.id, status: 'VERIFIED', consumedAt: null }, data: { status: 'CONSUMED', consumedAt: now } });
+      if (consumed.count !== 1) throw Object.assign(new Error('Face verification was already used. Verify again.'), { status: 409, code: 'FACE_PROOF_ALREADY_USED' });
+      const existing = await tx.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId!, date } } });
+      if (body.action === 'CLOCK_IN' && existing?.clockInTime) throw Object.assign(new Error('You have already clocked in today.'), { status: 409, code: 'ALREADY_CLOCKED_IN' });
+      if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) throw Object.assign(new Error('Clock in before clocking out.'), { status: 409, code: 'CLOCK_IN_REQUIRED' });
+      if (body.action === 'CLOCK_OUT' && existing?.clockOutTime) throw Object.assign(new Error('You have already clocked out today.'), { status: 409, code: 'ALREADY_CLOCKED_OUT' });
+      const data = body.action === 'CLOCK_IN'
+        ? { clockInTime: now, status: 'PRESENT' as const, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, faceAuthVerified: true, faceConfidenceScore: verification.similarity, source: 'MOBILE_FACE' as const }
+        : { clockOutTime: now };
+      const record = await tx.attendanceRecord.upsert({
+        where: { employeeId_date: { employeeId: req.auth!.employeeId!, date } },
+        update: data,
+        create: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId!, date, status: 'PRESENT', clockInTime: now, locationLat: body.latitude, locationLng: body.longitude, deviceId: body.deviceId, faceAuthVerified: true, faceConfidenceScore: verification.similarity, source: 'MOBILE_FACE' },
+      });
+      await tx.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded after server face match (${verification.similarity?.toFixed(2) || 'verified'}%) at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).`, ipAddress: clientIp(req) } });
+      return { record, existed: Boolean(existing) };
     });
-    await prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: body.action, category: 'ATTENDANCE', details: `${body.action} recorded by authenticated mobile API${body.action === 'CLOCK_IN' ? ` after face verification at ${body.latitude}, ${body.longitude} (accuracy ${body.locationAccuracyMeters}m).` : '.'}`, ipAddress: clientIp(req) } });
-    return ok(res, record, existing ? 200 : 201);
+    return ok(res, result.record, result.existed ? 200 : 201);
   } catch (e) { next(e); } });
 
   router.get('/me/leaves', authenticate, requirePermission('leave.apply'), async (req: AuthedRequest, res, next) => { try {
@@ -312,6 +383,62 @@ export function createV1Router(prisma: PrismaClient) {
     return ok(res, items, 200, { page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
   } catch (e) { next(e); } });
 
+  router.get('/employees/:id/face-enrollment', authenticate, requirePermission('face.enroll'), async (req: AuthedRequest, res, next) => { try {
+    const employee = await prisma.employee.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId } });
+    if (!employee) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found in this company.');
+    const enrollment = await prisma.faceEnrollment.findFirst({
+      where: { employeeId: employee.id, companyId: req.auth!.companyId, status: 'ACTIVE' },
+      include: { enrolledBy: { select: { fullName: true, role: true } } },
+    });
+    return ok(res, enrollment ? {
+      enrolled: true,
+      enrolledAt: enrollment.enrolledAt,
+      enrolledBy: enrollment.enrolledBy.fullName,
+      enrolledByRole: enrollment.enrolledBy.role,
+      provider: enrollment.provider,
+    } : { enrolled: false });
+  } catch (e) { next(e); } });
+
+  router.post('/employees/:id/face-enrollment', authenticate, requirePermission('face.enroll'), faceUpload.single('face'), async (req: AuthedRequest, res, next) => { try {
+    const consent = z.object({ consentAcknowledged: z.enum(['true']) }).parse(req.body);
+    if (!consent.consentAcknowledged || !req.file) return fail(res, 400, 'FACE_IMAGE_REQUIRED', 'Select one clear employee face photo and confirm consent.');
+    const employee = await prisma.employee.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId } });
+    if (!employee) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found in this company.');
+    const previous = await prisma.faceEnrollment.findUnique({ where: { employeeId: employee.id } });
+    const newFaceId = await enrollEmployeeFace(employee.id, req.file.buffer);
+    try {
+      const enrollment = await prisma.$transaction(async tx => {
+        const saved = await tx.faceEnrollment.upsert({
+          where: { employeeId: employee.id },
+          create: { companyId: req.auth!.companyId, employeeId: employee.id, providerFaceId: newFaceId, enrolledById: req.auth!.id },
+          update: { providerFaceId: newFaceId, provider: 'AWS_REKOGNITION', status: 'ACTIVE', enrolledById: req.auth!.id, enrolledAt: new Date() },
+        });
+        await tx.faceVerificationSession.updateMany({ where: { employeeId: employee.id, status: { in: ['CHALLENGE', 'VERIFIED'] } }, data: { status: 'REJECTED' } });
+        await tx.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: previous ? 'REPLACE_EMPLOYEE_FACE' : 'ENROLL_EMPLOYEE_FACE', category: 'BIOMETRIC_SECURITY', details: `${employee.employeeCode} face template ${previous ? 'replaced' : 'enrolled'} by authorized ${req.auth!.role}. Raw photo was not retained.`, ipAddress: clientIp(req) } });
+        return saved;
+      });
+      if (previous?.providerFaceId && previous.providerFaceId !== newFaceId) void deleteEmployeeFace(previous.providerFaceId).catch(error => console.error('Old face cleanup failed:', error));
+      return ok(res, { enrolled: true, enrolledAt: enrollment.enrolledAt }, previous ? 200 : 201);
+    } catch (error) {
+      void deleteEmployeeFace(newFaceId).catch(cleanupError => console.error('New face cleanup failed:', cleanupError));
+      throw error;
+    }
+  } catch (e) { next(e); } });
+
+  router.delete('/employees/:id/face-enrollment', authenticate, requirePermission('face.enroll'), async (req: AuthedRequest, res, next) => { try {
+    const employee = await prisma.employee.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId } });
+    if (!employee) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found in this company.');
+    const enrollment = await prisma.faceEnrollment.findUnique({ where: { employeeId: employee.id } });
+    if (!enrollment || enrollment.status !== 'ACTIVE') return ok(res, { enrolled: false });
+    await deleteEmployeeFace(enrollment.providerFaceId);
+    await prisma.$transaction([
+      prisma.faceEnrollment.update({ where: { id: enrollment.id }, data: { status: 'REVOKED' } }),
+      prisma.faceVerificationSession.updateMany({ where: { employeeId: employee.id, status: { in: ['CHALLENGE', 'VERIFIED'] } }, data: { status: 'REJECTED' } }),
+      prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: 'REVOKE_EMPLOYEE_FACE', category: 'BIOMETRIC_SECURITY', details: `${employee.employeeCode} face enrollment revoked by authorized ${req.auth!.role}.`, ipAddress: clientIp(req) } }),
+    ]);
+    return ok(res, { enrolled: false });
+  } catch (e) { next(e); } });
+
   router.get('/departments', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
     return ok(res, await prisma.department.findMany({
       where: { companyId: req.auth!.companyId },
@@ -349,7 +476,7 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.post('/employees/:id/resend-onboarding', authenticate, requirePermission('employee.manage'), async (req: AuthedRequest, res, next) => { try {
-    const employee = await prisma.employee.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId }, include: { user: true } });
+    const employee = await prisma.employee.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId }, include: { user: true } });
     if (!employee?.user) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee portal account was not found.');
     const token = createOpaqueToken(); const temporaryPassword = createTemporaryPassword(); const key = `resend:${employee.id}:${req.header('idempotency-key') || crypto.randomUUID()}`;
     const existing = await prisma.emailDelivery.findUnique({ where: { idempotencyKey: key } }); if (existing) return ok(res, { id: existing.id, status: existing.status });
@@ -364,6 +491,8 @@ export function createV1Router(prisma: PrismaClient) {
 
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ZodError) return fail(res, 400, 'VALIDATION_ERROR', 'Request validation failed.', error.flatten().fieldErrors);
+    if (error instanceof FaceRecognitionError) return fail(res, error.status, error.code, error.message);
+    if (error instanceof multer.MulterError) return fail(res, 400, 'FACE_UPLOAD_INVALID', error.code === 'LIMIT_FILE_SIZE' ? 'Face photo must be smaller than 5 MB.' : 'Face photo upload is invalid.');
     const typed = error as { status?: number; code?: string; message?: string };
     console.error(`[${(res.req as AuthedRequest).requestId}]`, typed.message || error);
     return fail(res, typed.status || 500, typed.code || 'INTERNAL_ERROR', typed.status ? typed.message || 'Request failed.' : 'An unexpected error occurred.');

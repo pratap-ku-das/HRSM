@@ -7,6 +7,7 @@ import {
   Building2, Laptop, Heart, CheckCircle2, Shield, 
   MapPin, Edit3, Trash2
 } from 'lucide-react';
+import { FaceEnrollmentPanel } from './FaceEnrollmentPanel';
 
 interface EmployeeProfileDrawerProps {
   employee: Employee | null;
@@ -135,6 +136,8 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                 <span>Joined on {new Date(employee.dateOfJoining).toLocaleDateString('en-IN', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
               </div>
             </div>
+
+            <FaceEnrollmentPanel employee={employee} />
 
             {/* Compensation & Salary Breakdown */}
             <div className="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/60 space-y-3">

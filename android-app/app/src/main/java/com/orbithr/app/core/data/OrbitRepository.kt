@@ -5,7 +5,11 @@ import com.orbithr.app.core.auth.TokenStore
 import com.orbithr.app.core.model.*
 import com.orbithr.app.core.network.OrbitApi
 import retrofit2.HttpException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,13 +19,25 @@ import javax.inject.Singleton
     suspend fun logout() { val refresh = tokens.refresh(); if (refresh != null) runCatching { api.logout(RefreshRequest(refresh, Build.MODEL)) }; tokens.clear() }
     suspend fun dashboard() = api.dashboard().data
     suspend fun attendance() = api.attendance().data
+    suspend fun verifyFace(action: String, selfie: ByteArray, latitude: Double, longitude: Double, accuracyMeters: Float, deviceId: String): AttendanceVerificationProof {
+        val challenge = api.faceChallenge(FaceChallengeRequest(action, deviceId)).data
+        val textType = "text/plain".toMediaType()
+        val image = MultipartBody.Part.createFormData("selfie", "live-face.jpg", selfie.toRequestBody("image/jpeg".toMediaType()))
+        val verified = api.verifyFace(
+            image,
+            challenge.challengeId.toRequestBody(textType),
+            deviceId.toRequestBody(textType),
+            "true".toRequestBody(textType),
+        ).data
+        return AttendanceVerificationProof(action, verified.faceVerificationToken, verified.similarity, latitude, longitude, accuracyMeters, deviceId, System.currentTimeMillis())
+    }
     suspend fun punch(action: String, proof: AttendanceVerificationProof? = null) = api.punch(PunchRequest(
         action = action,
-        latitude = proof?.latitude,
-        longitude = proof?.longitude,
-        locationAccuracyMeters = proof?.accuracyMeters,
-        deviceId = proof?.deviceId ?: Build.MODEL,
-        biometricVerified = proof != null,
+        latitude = requireNotNull(proof).latitude,
+        longitude = proof.longitude,
+        locationAccuracyMeters = proof.accuracyMeters,
+        deviceId = proof.deviceId,
+        faceVerificationToken = proof.faceVerificationToken,
     )).data
     suspend fun leaves() = api.leaves().data
     suspend fun applyLeave(request: ApplyLeaveRequest) = api.applyLeave(request).data
@@ -33,7 +49,9 @@ import javax.inject.Singleton
 }
 
 fun Throwable.userMessage(): String = when (this) {
-    is HttpException -> "Request failed (${code()}). Please check the details and try again."
+    is HttpException -> runCatching {
+        JSONObject(response()?.errorBody()?.string().orEmpty()).getJSONObject("error").getString("message")
+    }.getOrDefault("Request failed (${code()}). Please check the details and try again.")
     is java.io.IOException -> "OrbitHR could not reach the server. Check your connection."
     else -> message ?: "Something went wrong."
 }

@@ -19,8 +19,11 @@ import kotlinx.serialization.Serializable
 @Serializable data class HolidayDto(val id: String, val name: String, val date: String, val type: String)
 @Serializable data class DashboardDto(val activeEmployees: Int, val presentToday: Int, val pendingLeaves: Int, val announcements: List<AnnouncementDto>, val holidays: List<HolidayDto>)
 @Serializable data class AttendanceDto(val id: String, val date: String, val status: String, val clockInTime: String? = null, val clockOutTime: String? = null, val source: String, val faceAuthVerified: Boolean = false, val locationLat: Double? = null, val locationLng: Double? = null)
-@Serializable data class PunchRequest(val action: String, val latitude: Double? = null, val longitude: Double? = null, val locationAccuracyMeters: Float? = null, val deviceId: String? = null, val biometricVerified: Boolean = false)
-data class AttendanceVerificationProof(val latitude: Double, val longitude: Double, val accuracyMeters: Float, val deviceId: String, val verifiedAtMillis: Long)
+@Serializable data class PunchRequest(val action: String, val latitude: Double, val longitude: Double, val locationAccuracyMeters: Float, val deviceId: String, val faceVerificationToken: String)
+@Serializable data class FaceChallengeRequest(val action: String, val deviceId: String)
+@Serializable data class FaceChallengeDto(val challengeId: String, val expiresInSeconds: Int)
+@Serializable data class FaceVerificationDto(val faceVerificationToken: String, val similarity: Double? = null, val expiresInSeconds: Int)
+data class AttendanceVerificationProof(val action: String, val faceVerificationToken: String, val similarity: Double?, val latitude: Double, val longitude: Double, val accuracyMeters: Float, val deviceId: String, val verifiedAtMillis: Long)
 sealed interface AttendanceVerificationResult {
     data class Verified(val proof: AttendanceVerificationProof) : AttendanceVerificationResult
     data class Failed(val message: String) : AttendanceVerificationResult

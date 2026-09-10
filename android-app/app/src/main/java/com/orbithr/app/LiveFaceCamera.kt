@@ -3,6 +3,8 @@ package com.orbithr.app
 import android.annotation.SuppressLint
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -26,13 +28,14 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.io.File
 import kotlin.math.abs
 
 private enum class BlinkStage { FIND_FACE, OPEN, CLOSED, VERIFIED }
 
 @SuppressLint("UnsafeOptInUsageError")
 @Composable
-fun LiveFaceCamera(onVerified: () -> Unit, onCancel: () -> Unit) {
+fun LiveFaceCamera(onVerified: (ByteArray) -> Unit, onFailure: (String) -> Unit, onCancel: () -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val view = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
@@ -44,6 +47,7 @@ fun LiveFaceCamera(onVerified: () -> Unit, onCancel: () -> Unit) {
     var message by remember { mutableStateOf("Center your face and look forward") }
     val done = remember { AtomicBoolean(false) }
     val stage = remember { arrayOf(BlinkStage.FIND_FACE) }
+    val imageCapture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
 
     DisposableEffect(owner) {
         val future = ProcessCameraProvider.getInstance(context)
@@ -67,12 +71,32 @@ fun LiveFaceCamera(onVerified: () -> Unit, onCancel: () -> Unit) {
                             !centered -> { stage[0] = BlinkStage.FIND_FACE; message = if (faces.size > 1) "Only one person may be visible" else "Center your face and look forward" }
                             stage[0] == BlinkStage.FIND_FACE && open -> { stage[0] = BlinkStage.OPEN; message = "Blink now" }
                             stage[0] == BlinkStage.OPEN && closed -> { stage[0] = BlinkStage.CLOSED; message = "Open your eyes" }
-                            stage[0] == BlinkStage.CLOSED && open && done.compareAndSet(false, true) -> { stage[0] = BlinkStage.VERIFIED; onVerified() }
+                            stage[0] == BlinkStage.CLOSED && open && done.compareAndSet(false, true) -> {
+                                stage[0] = BlinkStage.VERIFIED
+                                message = "Face is live. Capturing secure match photo..."
+                                val output = File.createTempFile("orbithr-live-face-", ".jpg", context.cacheDir)
+                                imageCapture.takePicture(
+                                    ImageCapture.OutputFileOptions.Builder(output).build(),
+                                    ContextCompat.getMainExecutor(context),
+                                    object : ImageCapture.OnImageSavedCallback {
+                                        override fun onImageSaved(result: ImageCapture.OutputFileResults) {
+                                            runCatching { output.readBytes() }
+                                                .onSuccess(onVerified)
+                                                .onFailure { onFailure("Could not prepare the live face image. Please try again.") }
+                                            output.delete()
+                                        }
+                                        override fun onError(error: ImageCaptureException) {
+                                            output.delete()
+                                            onFailure("Could not capture a clear face photo. Please try again.")
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }.addOnCompleteListener { frame.close() }
             }
             provider.unbindAll()
-            provider.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
+            provider.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis, imageCapture)
         }, ContextCompat.getMainExecutor(context))
         onDispose {
             if (future.isDone) runCatching { future.get().unbindAll() }

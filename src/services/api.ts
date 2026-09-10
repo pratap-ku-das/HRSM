@@ -37,7 +37,7 @@ async function renewAccessToken(): Promise<string> {
 
 async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true): Promise<T> {
   const requestHeaders = new Headers(options?.headers);
-  if (!requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
+  if (!requestHeaders.has('Content-Type') && !(options?.body instanceof FormData)) requestHeaders.set('Content-Type', 'application/json');
   const res = await fetch(url, {
     ...options,
     headers: requestHeaders,
@@ -134,6 +134,29 @@ export const api = {
     fetchJSON<{ success: boolean }>(`${API_BASE}/employees/${id}`, {
       method: 'DELETE',
     }),
+  getFaceEnrollment: (employeeId: string) => fetchJSON<ApiEnvelope<{
+    enrolled: boolean;
+    enrolledAt?: string;
+    enrolledBy?: string;
+    enrolledByRole?: string;
+    provider?: string;
+  }>>(`${API_BASE}/v1/employees/${employeeId}/face-enrollment`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  }),
+  enrollFace: (employeeId: string, face: File) => {
+    const form = new FormData();
+    form.append('face', face);
+    form.append('consentAcknowledged', 'true');
+    return fetchJSON<ApiEnvelope<{ enrolled: boolean; enrolledAt: string }>>(`${API_BASE}/v1/employees/${employeeId}/face-enrollment`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: form,
+    });
+  },
+  revokeFaceEnrollment: (employeeId: string) => fetchJSON<ApiEnvelope<{ enrolled: boolean }>>(`${API_BASE}/v1/employees/${employeeId}/face-enrollment`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  }),
 
   // Departments
   getDepartments: (companyId: string) => fetchJSON<Department[]>(`${API_BASE}/departments?companyId=${companyId}`),
@@ -169,19 +192,15 @@ export const api = {
   saveAttendanceRecord: (record: any) => 
     fetchJSON<AttendanceRecord>(`${API_BASE}/attendance`, {
       method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
       body: JSON.stringify(record),
     }),
   bulkMarkAttendance: (records: any[]) => 
     fetchJSON<{ count: number }>(`${API_BASE}/attendance/bulk`, {
       method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
       body: JSON.stringify({ records }),
     }),
-  mobileVerifyFace: (payload: any) =>
-    fetchJSON<{ success: boolean; message: string; record: AttendanceRecord }>(`${API_BASE}/attendance/mobile-verify`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
   // Leaves
   getLeaveTypes: (companyId: string) => fetchJSON<LeaveType[]>(`${API_BASE}/leaves/types?companyId=${companyId}`),
   saveLeaveType: (leaveType: Partial<LeaveType>, adminUserId: string) =>

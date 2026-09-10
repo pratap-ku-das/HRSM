@@ -17,6 +17,7 @@ node_modules
 android-app/local.properties
 android-app/.gradle/
 android-app/gradle-user-home/
+.gradle-home/
 android-app/app/build/
 dist
 dist-ssr

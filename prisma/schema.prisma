@@ -141,6 +141,8 @@ model Company {
   expenses          ExpenseClaim[]
   auditLogs         AuditLog[]
   settings          CompanySettings?
+  faceEnrollments   FaceEnrollment[]
+  faceSessions      FaceVerificationSession[]
 }
 
 // --------------------------------------------------------
@@ -159,10 +161,11 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee      Employee?
-  refreshTokens RefreshToken[]
-  actionTokens  ActionToken[]
+  company                Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee               Employee?
+  refreshTokens          RefreshToken[]
+  actionTokens           ActionToken[]
+  faceEnrollmentsCreated FaceEnrollment[] @relation("FaceEnrollmentCreator")
 
   @@index([companyId])
 }
@@ -293,20 +296,80 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user              User?              @relation(fields: [userId], references: [id])
-  department        Department         @relation(fields: [departmentId], references: [id])
-  designation       Designation        @relation(fields: [designationId], references: [id])
+  company           Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user              User?                     @relation(fields: [userId], references: [id])
+  department        Department                @relation(fields: [departmentId], references: [id])
+  designation       Designation               @relation(fields: [designationId], references: [id])
   attendanceRecords AttendanceRecord[]
   leaveRequests     LeaveRequest[]
   payslips          Payslip[]
   goals             PerformanceGoal[]
   assets            Asset[]
   expenses          ExpenseClaim[]
+  faceEnrollment    FaceEnrollment?
+  faceSessions      FaceVerificationSession[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId])
   @@index([departmentId])
+}
+
+enum FaceEnrollmentStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum FaceVerificationStatus {
+  CHALLENGE
+  VERIFIED
+  CONSUMED
+  REJECTED
+  EXPIRED
+}
+
+// A provider face identifier is retained instead of the employee's raw photo.
+// Enrollment is tenant-scoped and can only be created by HR/Admin API roles.
+model FaceEnrollment {
+  id             String               @id @default(uuid())
+  companyId      String
+  employeeId     String               @unique
+  provider       String               @default("AWS_REKOGNITION")
+  providerFaceId String
+  status         FaceEnrollmentStatus @default(ACTIVE)
+  enrolledById   String
+  enrolledAt     DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  enrolledBy User     @relation("FaceEnrollmentCreator", fields: [enrolledById], references: [id])
+
+  @@index([companyId, status])
+}
+
+// Short-lived server-side state prevents reusing a successful face check for a
+// different employee, device, action or attendance punch.
+model FaceVerificationSession {
+  id             String                 @id @default(uuid())
+  companyId      String
+  employeeId     String
+  action         String
+  status         FaceVerificationStatus @default(CHALLENGE)
+  deviceId       String
+  proofTokenHash String?                @unique
+  similarity     Float?
+  attemptCount   Int                    @default(0)
+  expiresAt      DateTime
+  verifiedAt     DateTime?
+  consumedAt     DateTime?
+  createdAt      DateTime               @default(now())
+  ipAddress      String?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, status, expiresAt])
+  @@index([companyId, createdAt])
 }
 
 // --------------------------------------------------------
