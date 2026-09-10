@@ -49,6 +49,27 @@ Build the signed APK with the live API URL and place it at
 `public/downloads/OrbitHR.apk`. The application serves it directly from
 `https://hr.balajione.dev/downloads/orbithr-android.apk`.
 
+### Publish from the local Windows computer
+
+GitHub Actions is not required. Keep `android-app/orbithr-release.jks` and
+`android-app/keystore.properties` on the authorized build computer, then run:
+
+```powershell
+.\scripts\publish-android.cmd
+```
+
+The script detects Android changes, increments the version, builds the release,
+verifies that it is signed by the permanent BalajiOne certificate, replaces the
+public APK, commits the exact release files, and pushes `main`. Railway then
+publishes the APK at the existing download URL. It refuses to publish a debug-
+signed or differently signed APK.
+
+For an intentional rebuild of a specific version without committing or pushing:
+
+```powershell
+.\scripts\publish-android.cmd -VersionCode 5 -VersionName 1.1.0 -Force -NoCommit -NoPush
+```
+
 ### Automatic Android publishing
 
 `.github/workflows/android-release.yml` rebuilds and publishes the APK whenever
