@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class UserDto(val id: String, val email: String, val fullName: String, val role: String, val avatarUrl: String? = null, val permissions: List<String> = emptyList())
 @Serializable data class CompanyDto(val id: String, val name: String, val email: String, val logoUrl: String? = null)
 @Serializable data class DepartmentDto(val id: String, val name: String, val code: String)
-@Serializable data class DesignationDto(val id: String, val title: String)
+@Serializable data class DesignationDto(val id: String, val title: String, val departmentId: String)
 @Serializable data class EmployeeDto(val id: String, val employeeCode: String, val firstName: String, val lastName: String, val email: String, val phone: String? = null, val avatarUrl: String? = null, val status: String, val workLocation: String? = null, val department: DepartmentDto? = null, val designation: DesignationDto? = null)
 @Serializable data class MeDto(val user: UserDto, val company: CompanyDto, val employee: EmployeeDto? = null)
 @Serializable data class AnnouncementDto(val id: String, val title: String, val content: String, val priority: String, val createdAt: String)

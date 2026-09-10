@@ -25,6 +25,8 @@ interface OrbitApi {
     @GET("me/payslips") suspend fun payslips(): ApiEnvelope<List<PayslipDto>>
     @GET("me/expenses") suspend fun expenses(): ApiEnvelope<List<ExpenseDto>>
     @POST("me/expenses") suspend fun submitExpense(@Body body: SubmitExpenseRequest): ApiEnvelope<ExpenseDto>
+    @GET("departments") suspend fun departments(): ApiEnvelope<List<DepartmentDto>>
+    @GET("designations") suspend fun designations(): ApiEnvelope<List<DesignationDto>>
     @GET("employees") suspend fun employees(@Query("page") page: Int, @Query("pageSize") pageSize: Int = 25, @Query("search") search: String? = null): ApiEnvelope<List<EmployeeDto>>
     @POST("employees/onboard") suspend fun onboard(@Header("Idempotency-Key") key: String, @Body body: OnboardEmployeeRequest): ApiEnvelope<OnboardingDto>
 }

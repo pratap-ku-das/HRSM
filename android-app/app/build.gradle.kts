@@ -15,8 +15,8 @@ android {
         applicationId = "com.orbithr.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 6
-        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.1"
+        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 7
+        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${providers.gradleProperty("ORBIT_API_BASE_URL").orElse("http://10.0.2.2:3001/api/v1/").get()}\"")
     }

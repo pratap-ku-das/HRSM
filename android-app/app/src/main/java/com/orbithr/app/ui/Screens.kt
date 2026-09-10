@@ -609,6 +609,7 @@ private fun MoreAction(icon: ImageVector, title: String, subtitle: String, color
 @Composable
 fun EmployeeScreen(back: () -> Unit, vm: EmployeeViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
+    val organization by vm.organization.collectAsState()
     var search by remember { mutableStateOf("") }
     var showOnboarding by remember { mutableStateOf(false) }
     Page("PEOPLE", "Employee directory", "Your connected workforce", action = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", back); OrbitIconButton(Icons.Outlined.PersonAdd, "Onboard employee") { showOnboarding = true } } }) {
@@ -623,18 +624,115 @@ fun EmployeeScreen(back: () -> Unit, vm: EmployeeViewModel = hiltViewModel()) {
             ) }
         } }
     }
-    if (showOnboarding) OnboardDialog({ showOnboarding = false }) { vm.onboard(it); showOnboarding = false }
+    if (showOnboarding) OnboardDialog(
+        organization = organization,
+        dismiss = { showOnboarding = false },
+        retryOrganization = vm::loadOrganization,
+    ) { vm.onboard(it); showOnboarding = false }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OnboardDialog(dismiss: () -> Unit, submit: (OnboardEmployeeRequest) -> Unit) {
-    var code by remember { mutableStateOf("") }; var first by remember { mutableStateOf("") }; var last by remember { mutableStateOf("") }; var email by remember { mutableStateOf("") }; var department by remember { mutableStateOf("") }; var designation by remember { mutableStateOf("") }
+private fun OnboardDialog(
+    organization: LoadState<OrganizationOptions>,
+    dismiss: () -> Unit,
+    retryOrganization: () -> Unit,
+    submit: (OnboardEmployeeRequest) -> Unit,
+) {
+    var code by remember { mutableStateOf("") }
+    var first by remember { mutableStateOf("") }
+    var last by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var departmentId by remember { mutableStateOf("") }
+    var designationId by remember { mutableStateOf("") }
+    var departmentExpanded by remember { mutableStateOf(false) }
+    var designationExpanded by remember { mutableStateOf(false) }
+    val departments = organization.data?.departments.orEmpty()
+    val designations = organization.data?.designations.orEmpty()
+    val selectedDepartment = departments.firstOrNull { it.id == departmentId }
+    val availableDesignations = designations.filter { it.departmentId == departmentId }
+    val selectedDesignation = availableDesignations.firstOrNull { it.id == designationId }
+
+    LaunchedEffect(departments) {
+        if (departmentId.isBlank() && departments.size == 1) departmentId = departments.first().id
+    }
+    LaunchedEffect(departmentId, designations) {
+        if (availableDesignations.none { it.id == designationId }) designationId = ""
+        if (designationId.isBlank() && availableDesignations.size == 1) designationId = availableDesignations.first().id
+    }
+
     AlertDialog(onDismissRequest = dismiss, shape = RoundedCornerShape(28.dp), icon = { Icon(Icons.Outlined.PersonAdd, null, tint = OrbitViolet) }, title = { Text("Onboard employee") }, text = {
         Column(Modifier.heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedTextField(code, { code = it }, label = { Text("Employee code") }); OutlinedTextField(first, { first = it }, label = { Text("First name") }); OutlinedTextField(last, { last = it }, label = { Text("Last name") }); OutlinedTextField(email, { email = it }, label = { Text("Work email") }); OutlinedTextField(department, { department = it }, label = { Text("Department UUID") }); OutlinedTextField(designation, { designation = it }, label = { Text("Designation UUID") })
+            OutlinedTextField(code, { code = it }, label = { Text("Employee code") })
+            OutlinedTextField(first, { first = it }, label = { Text("First name") })
+            OutlinedTextField(last, { last = it }, label = { Text("Last name") })
+            OutlinedTextField(email, { email = it }, label = { Text("Work email") })
+
+            ExposedDropdownMenuBox(
+                expanded = departmentExpanded,
+                onExpandedChange = { if (!organization.loading && departments.isNotEmpty()) departmentExpanded = it },
+            ) {
+                OutlinedTextField(
+                    value = selectedDepartment?.name.orEmpty(),
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = !organization.loading && departments.isNotEmpty(),
+                    label = { Text(if (organization.loading) "Loading departments…" else "Department") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(departmentExpanded) },
+                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = departmentExpanded, onDismissRequest = { departmentExpanded = false }) {
+                    departments.forEach { department ->
+                        DropdownMenuItem(
+                            text = { Text("${department.name} (${department.code})") },
+                            onClick = {
+                                departmentId = department.id
+                                designationId = ""
+                                departmentExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+
+            ExposedDropdownMenuBox(
+                expanded = designationExpanded,
+                onExpandedChange = { if (departmentId.isNotBlank() && availableDesignations.isNotEmpty()) designationExpanded = it },
+            ) {
+                OutlinedTextField(
+                    value = selectedDesignation?.title.orEmpty(),
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = departmentId.isNotBlank() && availableDesignations.isNotEmpty(),
+                    label = { Text(if (departmentId.isBlank()) "Select department first" else "Designation") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(designationExpanded) },
+                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(expanded = designationExpanded, onDismissRequest = { designationExpanded = false }) {
+                    availableDesignations.forEach { designation ->
+                        DropdownMenuItem(
+                            text = { Text(designation.title) },
+                            onClick = {
+                                designationId = designation.id
+                                designationExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+
+            organization.error?.let { error ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = OrbitRose)
+                    TextButton(onClick = retryOrganization) { Text("Retry") }
+                }
+            }
+            if (!organization.loading && departments.isEmpty() && organization.error == null) {
+                Text("Create at least one department and designation before onboarding an employee.", style = MaterialTheme.typography.bodySmall, color = OrbitRose)
+            }
             Text("OrbitHR creates the profile first, then securely delivers the activation email.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
         }
-    }, confirmButton = { Button(onClick = { submit(OnboardEmployeeRequest(code, first, last, email, department, designation, LocalDate.now().toString())) }, enabled = code.isNotBlank() && first.isNotBlank() && email.contains('@') && department.length == 36 && designation.length == 36) { Text("Onboard") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+    }, confirmButton = { Button(onClick = { submit(OnboardEmployeeRequest(code, first, last, email, departmentId, designationId, LocalDate.now().toString())) }, enabled = code.isNotBlank() && first.isNotBlank() && email.contains('@') && departmentId.isNotBlank() && designationId.isNotBlank()) { Text("Onboard") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
 }
 
 @Composable

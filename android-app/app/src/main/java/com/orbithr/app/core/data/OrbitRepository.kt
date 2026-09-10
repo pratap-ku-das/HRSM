@@ -44,6 +44,8 @@ import javax.inject.Singleton
     suspend fun payslips() = api.payslips().data
     suspend fun expenses() = api.expenses().data
     suspend fun submitExpense(request: SubmitExpenseRequest) = api.submitExpense(request).data
+    suspend fun departments() = api.departments().data
+    suspend fun designations() = api.designations().data
     suspend fun employees(page: Int, search: String?) = api.employees(page, search = search).data
     suspend fun onboard(request: OnboardEmployeeRequest) = api.onboard(UUID.randomUUID().toString(), request).data
 }
