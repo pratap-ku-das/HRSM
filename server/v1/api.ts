@@ -23,6 +23,7 @@ import { createSelfServiceRouter } from './selfService.js';
 import { createReminderRouter } from './reminders.js';
 import { createAiAssistantRouter } from './aiAssistant.js';
 import { createRecruitmentRouter } from './recruitment.js';
+import { createOperationsRouter } from './operations.js';
 import { verifyMfaCode } from './mfa.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; accessScopes: AccessScope[]; tokenVersion: number };
@@ -38,6 +39,7 @@ const rolePermissions: Record<UserRole, string[]> = {
   EMPLOYEE: ['employee.read.self', 'attendance.read.self', 'attendance.punch', 'leave.apply', 'expense.submit', 'payslip.read.self'],
 };
 const employeePermissions = ['employee.read.self', 'attendance.read.self', 'attendance.punch', 'leave.apply', 'expense.submit', 'payslip.read.self'];
+for (const role of ['SUPER_ADMIN', 'COMPANY_ADMIN', 'HR_MANAGER'] as UserRole[]) rolePermissions[role].push('operations.manage');
 for (const role of ['COMPANY_ADMIN', 'HR_MANAGER', 'DEPT_HEAD'] as UserRole[]) rolePermissions[role] = [...new Set([...rolePermissions[role], ...employeePermissions])];
 for (const role of ['SUPER_ADMIN', 'PAYROLL_ADMIN', 'MANAGER'] as UserRole[]) rolePermissions[role] = [...new Set([...rolePermissions[role], ...employeePermissions])];
 
@@ -570,6 +572,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createReminderRouter(prisma, authenticate));
   router.use(createAiAssistantRouter(prisma, authenticate));
   router.use(createRecruitmentRouter(prisma, authenticate));
+  router.use(createOperationsRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));
 
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

@@ -19,7 +19,8 @@ This is an evidence ledger for the uploaded master report. A row is complete onl
 | Orbit AI | permission-filtered absence, lateness, payroll, attrition, headcount and approval tools; audited sources and non-executing drafts | Governance Center | intent tests and Prisma-aware server compiler | Implemented governed local assistant |
 | Employee 360 and HR command center | scoped cross-module aggregation, activity timeline, missing punch, document expiry, approvals and payroll signals | workforce command center | server compiler and web build | Implemented |
 | Performance | cycles, assignment, ratings and ordered employee/manager/HR/acknowledgement lifecycle | web engine and Android review list | transition tests and server compiler | Implemented |
-| Legacy active web surfaces | several older pages still read browser cache or legacy company-id APIs | assets, expenses, holidays, main dashboard, leave administration, employee directory/profile | repository search evidence | **In progress: must migrate before overall completion** |
+| Operational resources | tenant-scoped assets, expense review, holidays, announcements, company documents and audit workspace with server audit events | authenticated assets, expenses, holidays, documents and audit pages | strict server/web compiler and operations tests | Implemented |
+| Legacy active web surfaces | several older pages still read browser cache or legacy company-id APIs | main dashboard, leave administration, employee directory/profile and attendance administrator mutations | repository search evidence | **In progress: must migrate before overall completion** |
 | Release operations | ordered migrations and runbook; signing material excluded from source | local debug APK | local verification only | Ready for controlled release; production not changed |
 
 ## Current verification gates

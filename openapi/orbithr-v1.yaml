@@ -528,6 +528,38 @@ paths:
       parameters:
         - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
       responses: {'200': {description: Applicant stage and hiring timestamps updated}}
+  /operations/workspace:
+    get:
+      operationId: operationsWorkspace
+      responses: {'200': {description: Permission-filtered assets, expenses, calendar, documents and audit data}}
+  /operations/assets:
+    post:
+      operationId: createAsset
+      responses: {'201': {description: Asset created}}
+  /operations/assets/{id}/assignment:
+    patch:
+      operationId: assignAsset
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Asset assigned or returned}}
+  /operations/expenses/{id}/review:
+    patch:
+      operationId: reviewExpense
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Expense approved or rejected}}
+  /operations/holidays:
+    post:
+      operationId: createHoliday
+      responses: {'201': {description: Holiday created}}
+  /operations/announcements:
+    post:
+      operationId: createAnnouncement
+      responses: {'201': {description: Announcement created}}
+  /operations/company-documents:
+    post:
+      operationId: createCompanyDocument
+      responses: {'201': {description: Company document metadata registered}}
   /recruitment:
     get:
       operationId: recruitmentWorkspace
