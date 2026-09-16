@@ -1,7 +1,6 @@
 // @refresh reset
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, Company, UserRole, CompanySettings } from '../types';
-import { storageService } from '../services/storageService';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { Company, CompanySettings, User } from '../types';
 import { api } from '../services/api';
 
 interface AuthContextType {
@@ -21,232 +20,54 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const normalizeIndianSettings = (value: CompanySettings | null): CompanySettings | null => value ? {
-  ...value,
-  currency: 'INR',
-  currencySymbol: '₹',
-  timezone: 'Asia/Kolkata (IST - UTC+5:30)',
-} : null;
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentCompany, setCurrentCompany] = useState<Company | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
 
-  const syncCompanyData = async (companyId: string) => {
-    const [employees, departments, designations, attendance] = await Promise.allSettled([
-      api.getEmployeesV1(),
-      api.getDepartmentsV1(),
-      api.getDesignationsV1(),
-      api.getAttendanceV1(),
-    ]);
-    if (employees.status === 'fulfilled') storageService.cacheEmployees(companyId, employees.value);
-    if (departments.status === 'fulfilled') storageService.cacheDepartments(companyId, departments.value);
-    if (designations.status === 'fulfilled') storageService.cacheDesignations(companyId, designations.value);
-    if (attendance.status === 'fulfilled') storageService.cacheAttendanceRecords(companyId, attendance.value);
+  const establishSession = async () => {
+    const me = (await api.getMeV1()).data;
+    setCurrentUser(me.user);
+    setCurrentCompany(me.company);
+    setSettings(await api.getWorkspaceSettingsV1());
   };
-
+  const clearSession = () => { api.clearV1Session(); setCurrentUser(null); setCurrentCompany(null); setSettings(null); };
   const refreshState = async () => {
     setIsRestoringSession(true);
-    storageService.init();
-
     try {
-      // Fetch live companies from PostgreSQL backend
-      const liveCompanies = await api.getCompanies().catch(() => storageService.getCompanies());
-      setCompanies(liveCompanies);
-
-      const storedSession = localStorage.getItem('hrms_active_session_v2');
-      if (storedSession && api.hasV1Session()) {
-        try {
-          const me = (await api.getMeV1()).data;
-          setCurrentCompany(me.company);
-          setCurrentUser(me.user);
-          setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
-          void syncCompanyData(me.company.id);
-          void api.getSettings(me.company.id)
-            .then(value => setSettings(normalizeIndianSettings(value)))
-            .catch(error => console.warn('Live settings refresh failed:', error));
-          return;
-        } catch (e) {
-          console.error('Session load error', e);
-          api.clearV1Session();
-          localStorage.removeItem('hrms_active_session_v2');
-        }
-      }
-
-      setCurrentCompany(null);
-      setCurrentUser(null);
-      setSettings(null);
-    } catch (err) {
-      console.warn('API refresh error:', err);
-    } finally {
-      setIsRestoringSession(false);
-    }
+      if (api.hasV1Session()) await establishSession();
+      else clearSession();
+    } catch (error) {
+      console.warn('Authenticated session could not be restored:', error);
+      clearSession();
+    } finally { setIsRestoringSession(false); }
   };
+  useEffect(() => { void refreshState(); }, []);
 
-  useEffect(() => {
-    refreshState();
-  }, []);
-
-  const login = async (email: string, password: string, mfaCode?: string): Promise<boolean> => {
-    try {
-      await api.loginV1(email, password, mfaCode);
-      const me = (await api.getMeV1()).data;
-      setCurrentUser(me.user);
-      setCurrentCompany(me.company);
-      setSettings(normalizeIndianSettings(storageService.getSettings(me.company.id)));
-      localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: me.user.id, companyId: me.company.id }));
-
-      // Optional workspace data must not turn a successful authentication into a login failure.
-      void syncCompanyData(me.company.id);
-      void api.getSettings(me.company.id)
-        .then(value => setSettings(normalizeIndianSettings(value)))
-        .catch(error => console.warn('Live settings refresh failed:', error));
-      return true;
-    } catch (err) {
-      console.warn('Login error:', err);
-      api.clearV1Session();
-      localStorage.removeItem('hrms_active_session_v2');
-      throw err;
-    }
+  const login = async (email: string, password: string, mfaCode?: string) => {
+    try { await api.loginV1(email, password, mfaCode); await establishSession(); return true; }
+    catch (error) { clearSession(); throw error; }
   };
-
-  const loginAsDemoUser = (userId: string) => {
-    const user = storageService.getUsers().find(u => u.id === userId);
-    if (user) {
-      const comp = storageService.getCompanyById(user.companyId);
-      if (comp) {
-        setCurrentUser(user);
-        setCurrentCompany(comp);
-        setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
-        localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: user.id, companyId: comp.id }));
-      }
-    }
+  const registerCompany: AuthContextType['registerCompany'] = async (companyData, adminData, plan) => {
+    if (!adminData.email || !adminData.password) throw new Error('Administrator email and password are required.');
+    await api.registerCompany(companyData, adminData, plan);
+    await api.loginV1(adminData.email, adminData.password);
+    await establishSession();
   };
+  const rejectDemoSession = () => { throw new Error('Local demo sessions are disabled. Sign in with an authorized account.'); };
+  const logout = () => clearSession();
 
-  const registerCompany = async (
-    companyData: Partial<Company>, 
-    adminData: Partial<User> & { password?: string },
-    plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE'
-  ) => {
-    try {
-      // Register in Supabase PostgreSQL via API
-      const res = await api.registerCompany(companyData, adminData, plan);
-      if (res && res.company && res.user) {
-        if (adminData.email && adminData.password) await api.loginV1(adminData.email, adminData.password);
-        // Synchronize local cache
-        storageService.createCompany(res.company, res.user, res.settings);
-
-        setCurrentCompany(res.company);
-        setCurrentUser(res.user);
-        setSettings(res.settings);
-        setCompanies(prev => [res.company, ...prev]);
-        localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: res.user.id, companyId: res.company.id }));
-        return;
-      }
-    } catch (err) {
-      console.warn('Direct API registration error, creating via local storage service:', err);
-      // Fallback
-      const companyId = `comp-${Date.now()}`;
-      const adminId = `usr-${Date.now()}`;
-
-      const newCompany: Company = {
-        id: companyId,
-        name: companyData.name || 'New Enterprise Corp',
-        slug: (companyData.name || 'new-corp').toLowerCase().replace(/[^a-z0-9]/g, '-'),
-        email: companyData.email || 'admin@newcorp.com',
-        phone: companyData.phone || '+91 80 4000 0000',
-        address: companyData.address || 'Bengaluru, Karnataka, India',
-        industry: companyData.industry || 'Technology & Services',
-        size: companyData.size || '11-50',
-        plan: plan,
-        createdAt: new Date().toISOString(),
-      };
-
-      const newAdmin: User = {
-        id: adminId,
-        companyId: companyId,
-        email: adminData.email || 'admin@newcorp.com',
-        fullName: adminData.fullName || 'Admin User',
-        role: 'COMPANY_ADMIN',
-        avatarUrl: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
-        createdAt: new Date().toISOString(),
-      };
-
-      const initialSettings: CompanySettings = {
-        id: `set-${companyId}`,
-        companyId: companyId,
-        companyName: newCompany.name,
-        legalEntityName: `${newCompany.name} Private Limited`,
-        taxRegistrationNumber: `GSTIN: 29AABCA${Math.floor(1000 + Math.random() * 9000)}F1Z8`,
-        currency: 'INR',
-        currencySymbol: '₹',
-        timezone: 'Asia/Kolkata (IST)',
-        workDays: [1, 2, 3, 4, 5],
-        businessHoursStart: '09:00',
-        businessHoursEnd: '18:00',
-        enableAutomaticOvertime: true,
-        enableAuditLogging: true,
-        defaultProbationPeriodMonths: 3,
-      };
-
-      storageService.createCompany(newCompany, newAdmin, initialSettings);
-      setCompanies(storageService.getCompanies());
-      setCurrentCompany(newCompany);
-      setCurrentUser(newAdmin);
-      setSettings(initialSettings);
-      localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: newAdmin.id, companyId: newCompany.id }));
-    }
-  };
-
-  const switchCompany = (companyId: string) => {
-    const comp = companies.find(c => c.id === companyId) || storageService.getCompanyById(companyId);
-    if (comp) {
-      const companyUsers = storageService.getUsersByCompany(companyId);
-      const userToSet = companyUsers[0] || null;
-      setCurrentCompany(comp);
-      setCurrentUser(userToSet);
-      setSettings(normalizeIndianSettings(storageService.getSettings(comp.id)));
-      if (userToSet) {
-        localStorage.setItem('hrms_active_session_v2', JSON.stringify({ userId: userToSet.id, companyId: comp.id }));
-      }
-    }
-  };
-
-  const logout = () => {
-    api.clearV1Session();
-    setCurrentUser(null);
-    localStorage.removeItem('hrms_active_session_v2');
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        currentUser,
-        currentCompany,
-        companies,
-        settings,
-        isAuthenticated: !!currentUser && !!currentCompany,
-        isRestoringSession,
-        login,
-        loginAsDemoUser,
-        registerCompany,
-        switchCompany,
-        logout,
-        refreshState,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{
+    currentUser, currentCompany, companies: currentCompany ? [currentCompany] : [], settings,
+    isAuthenticated: Boolean(currentUser && currentCompany), isRestoringSession, login,
+    loginAsDemoUser: rejectDemoSession, registerCompany, switchCompany: rejectDemoSession,
+    logout, refreshState,
+  }}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

@@ -409,6 +409,35 @@ paths:
         - {in: header, name: Idempotency-Key, schema: {type: string}}
       responses:
         '202': {description: Onboarding email accepted}
+  /employees/{id}/lifecycle:
+    patch:
+      operationId: updateEmployeeLifecycle
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Employment status and lifecycle dates updated with audit event}
+  /organization/departments:
+    post:
+      operationId: createDepartment
+      responses:
+        '201': {description: Tenant department created and audited}
+        '403': {description: Organization management permission is required}
+  /organization/designations:
+    post:
+      operationId: createDesignation
+      responses:
+        '201': {description: Tenant designation created and audited}
+        '403': {description: Organization management permission is required}
+  /workspace-settings:
+    get:
+      operationId: getWorkspaceSettings
+      responses:
+        '200': {description: Tenant legal identity and workspace policy defaults}
+    put:
+      operationId: updateWorkspaceSettings
+      responses:
+        '200': {description: Workspace settings updated and audited}
+        '403': {description: Company management permission is required}
   /search:
     get:
       operationId: universalAuthorizedSearch
@@ -560,6 +589,18 @@ paths:
     post:
       operationId: createCompanyDocument
       responses: {'201': {description: Company document metadata registered}}
+  /attendance/manual:
+    post:
+      operationId: saveManualAttendance
+      responses: {'200': {description: Audited attendance correction saved unless payroll period is locked}}
+  /leave-administration:
+    get:
+      operationId: leaveAdministration
+      responses: {'200': {description: Scoped leave policies and requests}}
+  /leave-administration/types:
+    post:
+      operationId: createLeavePolicy
+      responses: {'201': {description: Leave policy created}}
   /recruitment:
     get:
       operationId: recruitmentWorkspace

@@ -20,7 +20,7 @@ This is an evidence ledger for the uploaded master report. A row is complete onl
 | Employee 360 and HR command center | scoped cross-module aggregation, activity timeline, missing punch, document expiry, approvals and payroll signals | workforce command center | server compiler and web build | Implemented |
 | Performance | cycles, assignment, ratings and ordered employee/manager/HR/acknowledgement lifecycle | web engine and Android review list | transition tests and server compiler | Implemented |
 | Operational resources | tenant-scoped assets, expense review, holidays, announcements, company documents and audit workspace with server audit events | authenticated assets, expenses, holidays, documents and audit pages | strict server/web compiler and operations tests | Implemented |
-| Legacy active web surfaces | several older pages still read browser cache or legacy company-id APIs | main dashboard, leave administration, employee directory/profile and attendance administrator mutations | repository search evidence | **In progress: must migrate before overall completion** |
+| Active web data authority | authenticated v1 APIs for dashboard, directory/lifecycle, organization, attendance administration, leave administration, payroll, recruitment, performance, operations, settings, notifications and search | all routed web pages; fake browser face punch and demo role session removed | TypeScript build, production bundle, API tests and zero active `storageService` imports | Implemented |
 | Release operations | ordered migrations and runbook; signing material excluded from source | local debug APK | local verification only | Ready for controlled release; production not changed |
 
 ## Current verification gates
@@ -41,6 +41,6 @@ This is an evidence ledger for the uploaded master report. A row is complete onl
 4. Bank output remains a masked preview until a banking provider and dual-control release process are approved.
 5. Public signed APK publication requires explicit authorization to use signing secrets and publish an external artifact.
 
-## Completion rule
+## Final audit result
 
-The overall master objective remains open while any active web or Android path uses browser-only data as authority, bypasses tenant-scoped v1 authorization, or lacks requirement-level evidence. Passing builds alone do not close those gaps.
+All capability groups in the uploaded report now have authoritative tenant-scoped persistence and APIs, applicable web/Android surfaces, authorization, audit behavior, contract documentation and verification evidence. Browser storage is no longer imported by an active application path, local demo authentication is disabled, and web biometric simulation was removed. The external and irreversible boundaries above are release integrations rather than missing in-repository engines; they remain intentionally disabled until an operator approves providers, credentials, migrations and publication.

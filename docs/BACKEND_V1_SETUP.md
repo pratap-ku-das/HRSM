@@ -31,7 +31,7 @@ npm install
 npm run server
 ```
 
-The legacy web API remains under `/api`. Android uses `/api/v1`. The formal contract is `openapi/orbithr-v1.yaml`.
+The formal authenticated contract is `/api/v1` and is used by Android and all active web operational surfaces. A small set of compatibility/public bootstrap routes remains under `/api`; it is not an authority fallback for an authenticated workspace. The formal contract is `openapi/orbithr-v1.yaml`.
 
 ## Resend
 
@@ -57,7 +57,7 @@ Set `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_FROM_NAME` in server-only
 
 ## Known limitations
 
-- The legacy web UI still uses localStorage in many modules and must be migrated incrementally to v1.
+- Active web pages use tenant-scoped v1 APIs. `storageService.ts` is retained only as an unreferenced migration artifact and must not be reintroduced as an authority source.
 - Password-reset token creation exists, but password-reset email delivery needs a dedicated template/queue connection.
 - Email retry timestamps are stored, but no scheduled backend worker consumes them yet.
 - Secure file upload/download, FCM device registration, leave balances, manager approval APIs, and payslip PDF streaming remain to be implemented.

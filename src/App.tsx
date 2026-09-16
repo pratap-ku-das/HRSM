@@ -3,7 +3,6 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
-import { RoleSwitcherModal } from './components/layout/RoleSwitcherModal';
 import { CommandPalette } from './components/layout/CommandPalette';
 
 // Public Pages
@@ -19,7 +18,6 @@ import { EmployeeDirectory } from './pages/employees/EmployeeDirectory';
 import { DepartmentsPage } from './pages/departments/DepartmentsPage';
 import { AttendancePage } from './pages/attendance/AttendancePage';
 import { LeaveManagementPage } from './pages/leaves/LeaveManagementPage';
-import { PayrollPage } from './pages/payroll/PayrollPage';
 import { RecruitmentPage } from './pages/recruitment/RecruitmentPage';
 import { PerformanceEnginePage } from './pages/performance/PerformanceEnginePage';
 import { AssetsPage } from './pages/assets/AssetsPage';
@@ -47,7 +45,6 @@ const MainApp: React.FC = () => {
   const [activeView, setActiveView] = useState<string>(() => localStorage.getItem('orbithr_active_view') || 'dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
-  const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
 
   // Global keyboard listener for Ctrl+K or Cmd+K
@@ -195,7 +192,7 @@ const MainApp: React.FC = () => {
       {/* Header and workspace content */}
       <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
         <Navbar
-          onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+          onOpenRoleSwitcher={() => undefined}
           onNavigateToPublic={() => setPageMode('public_landing')}
           activeView={activeView}
           setActiveView={setActiveView}
@@ -216,14 +213,9 @@ const MainApp: React.FC = () => {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         setActiveView={setActiveView}
-        onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+        onOpenRoleSwitcher={() => undefined}
       />
 
-      {/* Instant Demo Role Switcher Modal */}
-      <RoleSwitcherModal
-        isOpen={isRoleSwitcherOpen}
-        onClose={() => setIsRoleSwitcherOpen(false)}
-      />
     </div>
   );
 };

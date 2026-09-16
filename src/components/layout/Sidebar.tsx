@@ -5,8 +5,6 @@ import {
   Megaphone, Receipt, ShieldCheck, Settings, Sparkles, ChevronRight, Bell,
   PanelLeftClose, PanelLeftOpen, X, Network, Inbox, GitPullRequestArrow, Activity
 } from 'lucide-react';
-import { storageService } from '../../services/storageService';
-import { useAuth } from '../../context/AuthContext';
 import { BrandCredit } from '../BrandCredit';
 import { ProductLogo } from '../ProductLogo';
 
@@ -27,12 +25,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen = false,
   onCloseMobile,
 }) => {
-  const { currentCompany } = useAuth();
-
-  const pendingLeaves = storageService.getLeaveRequests(currentCompany?.id).filter(r => r.status === 'PENDING').length;
-  const openJobs = storageService.getJobPostings(currentCompany?.id).filter(j => j.status === 'OPEN').length;
-  const pendingExpenses = storageService.getExpenses(currentCompany?.id).filter(e => e.status === 'PENDING').length;
-
   const navItems = [
     {
       id: 'dashboard',
@@ -88,7 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'leaves',
       label: 'Leave Approvals',
       icon: CalendarDays,
-      badge: pendingLeaves > 0 ? `${pendingLeaves}` : null,
+      badge: null,
       badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30 font-bold',
       section: 'TIME & ATTENDANCE'
     },
@@ -103,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'expenses',
       label: 'Expense Claims',
       icon: Receipt,
-      badge: pendingExpenses > 0 ? `${pendingExpenses}` : null,
+      badge: null,
       badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30 font-bold',
       section: 'COMPENSATION'
     },
@@ -111,7 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'recruitment',
       label: 'Recruitment & ATS',
       icon: Briefcase,
-      badge: openJobs > 0 ? `${openJobs} Open` : null,
+      badge: null,
       badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
       section: 'TALENT'
     },
