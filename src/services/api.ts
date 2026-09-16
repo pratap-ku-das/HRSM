@@ -2,7 +2,7 @@ import {
   Company, User, Employee, Department, Designation, AttendanceRecord, 
   LeaveType, LeaveRequest, PayrollRun, Payslip, JobPosting, JobApplicant, 
   PerformanceGoal, Asset, CompanyDocument, Holiday, Announcement, ExpenseClaim, 
-  AuditLog, CompanySettings, AttendanceStatus 
+  AuditLog, CompanySettings, AttendanceStatus, OrganizationStructure, AccessConfiguration, PermissionScope, WorkflowDefinition, WorkflowInstance, ApprovalInboxItem, WorkflowModule, AttendanceConfiguration, AttendanceRequestItem, PayrollConfiguration, Employee360, CommandCenterData, OrbitNotification, NotificationPreference, PerformanceWorkspace
 } from '../types';
 
 const API_BASE = '/api';
@@ -58,6 +58,8 @@ async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true
   return res.json();
 }
 
+async function downloadFile(url:string,options:RequestInit,retryAuth=true){const headers=new Headers(options.headers);const response=await fetch(url,{...options,headers});if(response.status===401&&retryAuth){headers.set('Authorization',`Bearer ${await renewAccessToken()}`);return downloadFile(url,{...options,headers},false)}if(!response.ok){const errorData=await response.json().catch(()=>null);throw new Error(errorData?.error?.message||`Export failed (${response.status})`)}const blob=await response.blob(),disposition=response.headers.get('content-disposition')||'',name=/filename="([^"]+)"/.exec(disposition)?.[1]||'orbithr-report';const href=URL.createObjectURL(blob),link=document.createElement('a');link.href=href;link.download=name;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href)}
+
 export const api = {
   // Health
   checkHealth: () => fetchJSON<{ status: string; database: string }>(`${API_BASE}/health`),
@@ -68,9 +70,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email }),
     }),
-  loginV1: async (email: string, password: string) => {
+  loginV1: async (email: string, password: string, mfaCode?: string) => {
     const result = await fetchJSON<ApiEnvelope<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>>(`${API_BASE}/v1/auth/login`, {
-      method: 'POST', body: JSON.stringify({ email, password, deviceName: 'OrbitHR Web' }),
+      method: 'POST', body: JSON.stringify({ email, password, deviceName: 'OrbitHR Web', mfaCode: mfaCode || undefined }),
     });
     localStorage.setItem(ACCESS_TOKEN_KEY, result.data.accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
@@ -103,6 +105,45 @@ export const api = {
 
   // Companies
   getCompanies: () => fetchJSON<Company[]>(`${API_BASE}/companies`),
+
+  getOrganization: async () => (await fetchJSON<ApiEnvelope<OrganizationStructure>>(`${API_BASE}/v1/organization`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createOrganizationItem: async (kind: 'branches' | 'locations' | 'teams' | 'cost-centers' | 'grades', body: Record<string, unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/organization/${kind}`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  getAccessConfiguration: async () => (await fetchJSON<ApiEnvelope<AccessConfiguration>>(`${API_BASE}/v1/rbac`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createPermission: async (key: string, description?: string) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/rbac/permissions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ key, description }) })).data,
+  createAccessRole: async (body: { name: string; code: string; description?: string; permissionIds: string[] }) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/rbac/roles`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  createAccessGrant: async (body: { userId: string; roleId: string; scope: PermissionScope; scopeEntityId?: string; expiresAt?: string }) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/rbac/grants`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  revokeAccessGrant: async (id: string) => (await fetchJSON<ApiEnvelope<{ revoked: boolean }>>(`${API_BASE}/v1/rbac/grants/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getWorkflowDefinitions: async () => (await fetchJSON<ApiEnvelope<WorkflowDefinition[]>>(`${API_BASE}/v1/workflows/definitions`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createWorkflowDefinition: async (body: { module: WorkflowModule; name: string; code: string; steps: Array<{ name: string; approverType: string; approverReference?: string; minimumApprovals: number; slaHours?: number }> }) => (await fetchJSON<ApiEnvelope<WorkflowDefinition>>(`${API_BASE}/v1/workflows/definitions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  activateWorkflowDefinition: async (id: string) => (await fetchJSON<ApiEnvelope<{ activated: boolean }>>(`${API_BASE}/v1/workflows/definitions/${id}/activate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getApprovalInbox: async () => (await fetchJSON<ApiEnvelope<ApprovalInboxItem[]>>(`${API_BASE}/v1/workflows/inbox`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getMyRequests: async () => (await fetchJSON<ApiEnvelope<WorkflowInstance[]>>(`${API_BASE}/v1/workflows/my-requests`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  actOnWorkflow: async (id: string, action: 'APPROVE' | 'REJECT' | 'COMMENT', comment?: string) => (await fetchJSON<ApiEnvelope<{ status: string }>>(`${API_BASE}/v1/workflows/instances/${id}/actions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ action, comment }) })).data,
+  withdrawWorkflow: async (id: string, comment?: string) => (await fetchJSON<ApiEnvelope<{ status: string }>>(`${API_BASE}/v1/workflows/instances/${id}/withdraw`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ comment }) })).data,
+  getAttendanceConfiguration: async () => (await fetchJSON<ApiEnvelope<AttendanceConfiguration>>(`${API_BASE}/v1/attendance/config`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createShift: async (body: Record<string, unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/attendance/shifts`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  createAttendancePolicy: async (body: Record<string, unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/attendance/policies`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  assignShift: async (body: Record<string, unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/attendance/assignments`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  lockAttendancePeriod: async (body: { periodStart: string; periodEnd: string; reason?: string }) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/attendance/locks`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  getAttendanceRequests: async () => (await fetchJSON<ApiEnvelope<AttendanceRequestItem[]>>(`${API_BASE}/v1/me/attendance/requests`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createAttendanceRequest: async (body: Omit<AttendanceRequestItem,'id'|'status'|'workflowInstanceId'|'createdAt'>) => (await fetchJSON<ApiEnvelope<AttendanceRequestItem>>(`${API_BASE}/v1/me/attendance/requests`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  startBreak: async () => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/me/attendance/breaks/start`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  endBreak: async () => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/me/attendance/breaks/end`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getPayrollConfiguration: async () => (await fetchJSON<ApiEnvelope<PayrollConfiguration>>(`${API_BASE}/v1/payroll/config`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createSalaryStructure: async (body: Record<string,unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/structures`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  createSalaryRevision: async (body: Record<string,unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/revisions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  approveSalaryRevision: async (id: string) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/revisions/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createStatutoryRule: async (body: Record<string,unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/statutory-rules`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  createPayrollRun: async (month: string) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/runs`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({month}) })).data,
+  payrollRunAction: async (id: string, action: 'lock-attendance'|'calculate'|'hr-review'|'finance-approve'|'lock'|'publish') => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/runs/${id}/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getBankExportPreview: async (id: string) => (await fetchJSON<ApiEnvelope<{month:string;deliveryRequired:boolean;rows:Array<{employeeCode:string;beneficiary:string;maskedAccount?:string;amount:number}>}>>(`${API_BASE}/v1/payroll/runs/${id}/bank-export-preview`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getEmployee360: async (id: string) => (await fetchJSON<ApiEnvelope<Employee360>>(`${API_BASE}/v1/employees/${id}/360`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getCommandCenter: async () => (await fetchJSON<ApiEnvelope<CommandCenterData>>(`${API_BASE}/v1/command-center`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getNotifications: async (unread=false) => (await fetchJSON<ApiEnvelope<OrbitNotification[]>>(`${API_BASE}/v1/notifications?unread=${unread}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  readNotification: async (id:string) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/notifications/${id}/read`, { method:'PATCH', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  readAllNotifications: async () => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/notifications/read-all`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getNotificationPreferences: async () => (await fetchJSON<ApiEnvelope<NotificationPreference[]>>(`${API_BASE}/v1/notifications/preferences`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  saveNotificationPreferences: async (preferences:NotificationPreference[]) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/notifications/preferences`, { method:'PUT', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body:JSON.stringify({preferences}) })).data,
 
   // Employees
   getEmployees: (companyId: string) => fetchJSON<Employee[]>(`${API_BASE}/employees?companyId=${companyId}`),
@@ -314,4 +355,22 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
+
+  universalSearch: async (q: string) => (await fetchJSON<ApiEnvelope<Array<{ type: string; id: string; title: string; subtitle: string; route: string }>>>(`${API_BASE}/v1/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getReportCatalog: async () => (await fetchJSON<ApiEnvelope<Array<{ key: string; name: string }>>>(`${API_BASE}/v1/reports/catalog`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getReport: async (key: string) => (await fetchJSON<ApiEnvelope<{ key: string; rows: Record<string, unknown>[]; truncated: boolean }>>(`${API_BASE}/v1/reports/${key}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  requestReportExport: (key: string, format: 'CSV'|'XLSX'|'PDF') => downloadFile(`${API_BASE}/v1/reports/${key}/exports`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}`, 'Content-Type':'application/json' }, body: JSON.stringify({ format, filters: {} }) }),
+  getSecuritySessions: async () => (await fetchJSON<ApiEnvelope<Array<{ id: string; deviceName?: string; createdAt: string; lastUsedAt?: string; expiresAt: string }>>>(`${API_BASE}/v1/security/sessions`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  revokeSecuritySession: (id: string) => fetchJSON<ApiEnvelope<{ revoked: boolean }>>(`${API_BASE}/v1/security/sessions/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }),
+  getLoginHistory: async () => (await fetchJSON<ApiEnvelope<Array<{ id: string; email: string; success: boolean; reason?: string; ipAddress: string; createdAt: string }>>>(`${API_BASE}/v1/security/login-history`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getMfaStatus: async () => (await fetchJSON<ApiEnvelope<{enabled:boolean;verifiedAt?:string}>>(`${API_BASE}/v1/security/mfa`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  setupMfa: async () => (await fetchJSON<ApiEnvelope<{secret:string;otpauthUri:string}>>(`${API_BASE}/v1/security/mfa/setup`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  confirmMfa: (code:string) => fetchJSON<ApiEnvelope<{enabled:boolean}>>(`${API_BASE}/v1/security/mfa/confirm`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body:JSON.stringify({code}) }),
+  disableMfa: (code:string) => fetchJSON<ApiEnvelope<{enabled:boolean;reauthenticationRequired:boolean}>>(`${API_BASE}/v1/security/mfa/disable`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body:JSON.stringify({code}) }),
+  getEmployeeDocumentsV1: async () => (await fetchJSON<ApiEnvelope<Record<string, unknown>[]>>(`${API_BASE}/v1/employee-documents`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getPerformanceWorkspace: async () => (await fetchJSON<ApiEnvelope<PerformanceWorkspace>>(`${API_BASE}/v1/performance-engine`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createPerformanceCycle: async (body:{name:string;startsAt:string;endsAt:string;status:string}) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/cycles`, { method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  createPerformanceReviewV1: async (body:{cycleId:string;employeeId:string;reviewerId:string}) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/reviews`, { method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  updatePerformanceReviewV1: async (id:string,body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/reviews/${id}`, { method:'PATCH',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  askOrbitAi: async (prompt: string) => (await fetchJSON<ApiEnvelope<{ id: string; intent: string; answer: string; sources: Array<{ type: string; id: string }>; readOnly: boolean }>>(`${API_BASE}/v1/ai/ask`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ prompt }) })).data,
 };

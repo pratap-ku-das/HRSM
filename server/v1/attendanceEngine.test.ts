@@ -1,0 +1,9 @@
+import { describe, expect, it } from 'vitest';
+import { evaluateAttendance } from './attendanceEngine.js';
+const policy = { startMinute: 540, endMinute: 1080, crossesMidnight: false, graceInMinutes: 10, graceOutMinutes: 5, halfDayAfterMinutes: 240, fullDayMinutes: 480, overtimeAfterMinutes: 480 };
+describe('attendance policy evaluation', () => {
+  it('applies grace, breaks, and overtime deterministically', () => { const result = evaluateAttendance({ clockIn: new Date('2026-09-13T09:05:00Z'), clockOut: new Date('2026-09-13T18:35:00Z'), breakMinutes: 30, policy }); expect(result.status).toBe('PRESENT'); expect(result.workedMinutes).toBe(540); expect(result.overtimeMinutes).toBe(60); expect(result.flags).toContain('OVERTIME'); expect(result.flags).not.toContain('LATE'); });
+  it('marks a short day as half day and explains lateness', () => { const result = evaluateAttendance({ clockIn: new Date('2026-09-13T09:30:00Z'), clockOut: new Date('2026-09-13T12:30:00Z'), breakMinutes: 0, policy }); expect(result.status).toBe('HALF_DAY'); expect(result.lateMinutes).toBe(20); expect(result.flags).toEqual(expect.arrayContaining(['LATE','EARLY_EXIT','INSUFFICIENT_HOURS'])); });
+  it('supports shifts crossing midnight', () => { const result = evaluateAttendance({ clockIn: new Date('2026-09-13T22:00:00Z'), clockOut: new Date('2026-09-14T06:00:00Z'), breakMinutes: 0, policy: { ...policy, startMinute: 1320, endMinute: 360, crossesMidnight: true } }); expect(result.scheduledMinutes).toBe(480); expect(result.workedMinutes).toBe(480); expect(result.status).toBe('PRESENT'); });
+  it('flags missing punches without inventing worked time', () => { const result = evaluateAttendance({ clockIn: null, clockOut: null, breakMinutes: 0, policy }); expect(result.status).toBe('ABSENT'); expect(result.workedMinutes).toBe(0); expect(result.flags).toEqual(['MISSING_CLOCK_IN','MISSING_CLOCK_OUT']); });
+});

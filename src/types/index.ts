@@ -1,4 +1,4 @@
-export type UserRole = 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'HR_MANAGER' | 'DEPT_HEAD' | 'EMPLOYEE';
+export type UserRole = 'SUPER_ADMIN' | 'COMPANY_ADMIN' | 'HR_MANAGER' | 'PAYROLL_ADMIN' | 'MANAGER' | 'DEPT_HEAD' | 'EMPLOYEE';
 
 export interface User {
   id: string;
@@ -26,7 +26,7 @@ export interface Company {
   createdAt: string;
 }
 
-export type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'INTERN';
+export type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'INTERN' | 'CONSULTANT';
 export type EmployeeStatus = 'ACTIVE' | 'ON_PROBATION' | 'ON_LEAVE' | 'RESIGNED' | 'TERMINATED';
 
 export interface SalaryBreakdown {
@@ -66,7 +66,16 @@ export interface Employee {
   departmentId: string;
   designationId: string;
   reportingManagerId?: string;
+  branchId?: string;
+  workLocationId?: string;
+  teamId?: string;
+  costCenterId?: string;
+  employeeGradeId?: string;
   dateOfJoining: string;
+  confirmationDate?: string;
+  probationEndDate?: string;
+  resignationDate?: string;
+  lastWorkingDay?: string;
   employmentType: EmploymentType;
   status: EmployeeStatus;
   workLocation: string;
@@ -99,6 +108,37 @@ export interface Designation {
   maxSalary: number;
   description: string;
 }
+
+export interface OrganizationItem { id: string; companyId: string; name: string; code: string; active: boolean; }
+export interface Branch extends OrganizationItem { legalName?: string; timezone: string; }
+export interface WorkLocation extends OrganizationItem { branchId?: string; address?: string; city?: string; state?: string; country: string; latitude?: number; longitude?: number; geofenceRadiusMeters?: number; remote: boolean; }
+export interface Team extends OrganizationItem { departmentId?: string; managerEmployeeId?: string; }
+export interface CostCenter extends OrganizationItem { description?: string; }
+export interface EmployeeGrade extends OrganizationItem { rank: number; description?: string; }
+export interface OrganizationStructure { branches: Branch[]; locations: WorkLocation[]; departments: Department[]; teams: Team[]; designations: Designation[]; costCenters: CostCenter[]; grades: EmployeeGrade[]; }
+export type PermissionScope = 'ALL_COMPANY' | 'BRANCH' | 'DEPARTMENT' | 'TEAM' | 'SELF';
+export interface AccessPermission { id: string; companyId: string; key: string; description?: string; }
+export interface AccessRole { id: string; companyId: string; name: string; code: string; description?: string; system: boolean; active: boolean; rolePermissions: Array<{ permission: AccessPermission }>; }
+export interface UserAccessGrant { id: string; userId: string; roleId: string; scope: PermissionScope; scopeEntityId?: string; expiresAt?: string; role: AccessRole; user: Pick<User, 'id' | 'fullName' | 'email'>; }
+export interface AccessConfiguration { permissions: AccessPermission[]; roles: AccessRole[]; grants: UserAccessGrant[]; users: Array<Pick<User, 'id' | 'fullName' | 'email' | 'role'> & { employee?: { id: string; branchId?: string; departmentId: string; teamId?: string } }>; }
+export type WorkflowModule = 'LEAVE' | 'EXPENSE' | 'ATTENDANCE_CORRECTION' | 'WFH' | 'ON_DUTY' | 'BUSINESS_TRAVEL' | 'OVERTIME' | 'SALARY_REVISION' | 'PAYROLL' | 'DOCUMENT' | 'ADVANCE' | 'GENERIC';
+export type WorkflowInstanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'WITHDRAWN';
+export interface WorkflowStepDefinition { id: string; sequence: number; name: string; approverType: 'USER' | 'ROLE' | 'REPORTING_MANAGER' | 'DEPARTMENT_HEAD' | 'FINANCE'; approverReference?: string; minimumApprovals: number; slaHours?: number; allowDelegation: boolean; }
+export interface WorkflowDefinition { id: string; module: WorkflowModule; name: string; code: string; version: number; status: 'DRAFT' | 'ACTIVE' | 'RETIRED'; steps: WorkflowStepDefinition[]; }
+export interface WorkflowInstance { id: string; module: WorkflowModule; subjectType: string; subjectId: string; requesterUserId: string; status: WorkflowInstanceStatus; title: string; summary?: string; submittedAt: string; completedAt?: string; stepInstances: Array<{ id: string; sequence: number; status: string; dueAt?: string; approvals: number; minimumApprovals: number }>; actions?: Array<{ id: string; action: string; comment?: string; createdAt: string }>; }
+export interface ApprovalInboxItem { id: string; sequence: number; status: string; dueAt?: string; approvals: number; minimumApprovals: number; step: WorkflowStepDefinition; instance: WorkflowInstance; }
+export interface ShiftTemplate { id: string; companyId: string; name: string; code: string; type: 'FIXED'|'FLEXIBLE'|'NIGHT'|'ROTATIONAL'; startMinute: number; endMinute: number; breakMinutes: number; crossesMidnight: boolean; weeklyOffDays: number[]; active: boolean; }
+export interface AttendancePolicy { id: string; name: string; shiftTemplateId?: string; graceInMinutes: number; graceOutMinutes: number; halfDayAfterMinutes: number; fullDayMinutes: number; overtimeAfterMinutes: number; missingPunchAction: string; allowRemote: boolean; requireGeofence: boolean; requireFace: boolean; effectiveFrom: string; active: boolean; shiftTemplate?: ShiftTemplate; }
+export interface AttendanceRequestItem { id: string; type: 'REGULARIZATION'|'WFH'|'ON_DUTY'|'BUSINESS_TRAVEL'|'OVERTIME'; startDate: string; endDate: string; requestedClockIn?: string; requestedClockOut?: string; reason: string; status: 'PENDING'|'APPROVED'|'REJECTED'|'CANCELLED'; workflowInstanceId?: string; createdAt: string; }
+export interface AttendanceConfiguration { shifts: ShiftTemplate[]; policies: AttendancePolicy[]; assignments: Array<{ id: string; employeeId: string; startsOn: string; endsOn?: string; employee: Pick<Employee,'id'|'firstName'|'lastName'|'employeeCode'>; shiftTemplate: ShiftTemplate }>; locks: Array<{ id: string; periodStart: string; periodEnd: string; lockedAt: string; reason?: string }>; }
+export interface SalaryComponent { id: string; code: string; name: string; kind: 'EARNING'|'DEDUCTION'|'EMPLOYER_CONTRIBUTION'|'REIMBURSEMENT'; method: 'FIXED'|'PERCENT_BASIC'|'PERCENT_GROSS'; value: number; taxable: boolean; proratable: boolean; sequence: number; }
+export interface SalaryStructure { id: string; name: string; code: string; active: boolean; components: SalaryComponent[]; }
+export interface PayrollEngineRun { id: string; month: string; status: string; totalEmployees: number; totalGrossSalary: number; totalDeductions: number; totalNetPayout: number; lines: Array<{ id: string; employeeId: string; netPay: number; breakdown: Record<string,number>; calculationTrace: string[] }>; }
+export interface PayrollConfiguration { structures: SalaryStructure[]; revisions: Array<{ id: string; employeeId: string; effectiveFrom: string; annualCtc: number; status: string; employee: Pick<Employee,'id'|'employeeCode'|'firstName'|'lastName'>; structure: SalaryStructure }>; rules: Array<{ id: string; type: string; stateCode?: string; effectiveFrom: string; configuration: Record<string,unknown>; sourceNote?: string }>; loans: Array<{ id: string; type: string; principal: number; outstanding: number; installment: number; status: string }>; runs: PayrollEngineRun[]; }
+export interface Employee360 { employee: Employee & { department?: Department; designation?: Designation; branch?: Branch; location?: WorkLocation; team?: Team; costCenter?: CostCenter; employeeGrade?: EmployeeGrade; reportingManager?: Pick<Employee,'id'|'firstName'|'lastName'|'employeeCode'> }; attendance: AttendanceRecord[]; leave: LeaveRequest[]; payslips: Payslip[]; assets: Asset[]; expenses: ExpenseClaim[]; goals: PerformanceGoal[]; revisions: Array<{id:string;effectiveFrom:string;annualCtc:number;status:string}>; requests: WorkflowInstance[]; timeline: Array<{id:string;at:string;type:string;title:string;detail:string}>; }
+export interface CommandCenterData { metrics: { activeEmployees:number; presentToday:number; absentToday:number; onLeaveToday:number }; alerts: Array<{key:string;severity:'INFO'|'WARNING'|'CRITICAL';count:number;message:string}>; }
+export interface OrbitNotification { id:string; eventKey:string; title:string; body:string; entityType?:string; entityId?:string; actionUrl?:string; readAt?:string; expiresAt?:string; createdAt:string; }
+export interface NotificationPreference { id?:string; eventKey:string; channel:'IN_APP'|'EMAIL'|'PUSH'; enabled:boolean; }
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'LEAVE' | 'HOLIDAY' | 'WEEKEND';
 export type AttendanceSource = 'WEB_ADMIN' | 'MOBILE_FACE' | 'BIOMETRIC_DEVICE' | 'SYSTEM_AUTO';
@@ -281,6 +321,9 @@ export interface PerformanceReview {
   status: 'PENDING' | 'COMPLETED';
   completedDate?: string;
 }
+export interface PerformanceCycleV1 { id:string;name:string;startsAt:string;endsAt:string;status:'DRAFT'|'ACTIVE'|'REVIEW'|'CLOSED' }
+export interface PerformanceReviewV1 { id:string;cycleId:string;employeeId:string;reviewerId:string;status:'DRAFT'|'SUBMITTED'|'MANAGER_REVIEWED'|'HR_REVIEWED'|'ACKNOWLEDGED';overallRating?:number;goalRating?:number;competencyRating?:number;strengths?:string;growthAreas?:string;summary?:string;cycle:PerformanceCycleV1;employee:{employeeCode:string;firstName:string;lastName:string} }
+export interface PerformanceWorkspace { cycles:PerformanceCycleV1[];reviews:PerformanceReviewV1[] }
 
 export type AssetCategory = 'LAPTOP' | 'MONITOR' | 'PHONE' | 'ACCESS_CARD' | 'FURNITURE' | 'OTHER';
 export type AssetStatus = 'AVAILABLE' | 'ASSIGNED' | 'MAINTENANCE' | 'RETIRED';

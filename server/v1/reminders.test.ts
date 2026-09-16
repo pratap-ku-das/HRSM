@@ -1,0 +1,1 @@
+import{describe,expect,it}from'vitest';import{daysUntil}from'./reminders.js';describe('compliance reminders',()=>{it('calculates expiry windows in whole days',()=>expect(daysUntil(new Date('2026-02-01T00:00:00Z'),new Date('2026-01-30T12:00:00Z'))).toBe(2))});

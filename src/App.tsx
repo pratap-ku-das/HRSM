@@ -21,13 +21,23 @@ import { AttendancePage } from './pages/attendance/AttendancePage';
 import { LeaveManagementPage } from './pages/leaves/LeaveManagementPage';
 import { PayrollPage } from './pages/payroll/PayrollPage';
 import { RecruitmentPage } from './pages/recruitment/RecruitmentPage';
-import { PerformancePage } from './pages/performance/PerformancePage';
+import { PerformanceEnginePage } from './pages/performance/PerformanceEnginePage';
 import { AssetsPage } from './pages/assets/AssetsPage';
 import { DocumentsPage } from './pages/documents/DocumentsPage';
 import { HolidaysPage } from './pages/holidays/HolidaysPage';
 import { ExpensesPage } from './pages/expenses/ExpensesPage';
 import { AuditLogsPage } from './pages/audit/AuditLogsPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
+import { FoundationAdminPage } from './pages/settings/FoundationAdminPage';
+import { ApprovalInboxPage } from './pages/approvals/ApprovalInboxPage';
+import { WorkflowBuilderPage } from './pages/settings/WorkflowBuilderPage';
+import { AttendancePolicyPage } from './pages/attendance/AttendancePolicyPage';
+import { MyAttendanceRequestsPage } from './pages/attendance/MyAttendanceRequestsPage';
+import { PayrollEnginePage } from './pages/payroll/PayrollEnginePage';
+import { WorkforceCommandCenterPage } from './pages/employees/WorkforceCommandCenterPage';
+import { NotificationCenterPage } from './pages/settings/NotificationCenterPage';
+import { GovernanceCenterPage } from './pages/governance/GovernanceCenterPage';
+import { SecurityCenterPage } from './pages/security/SecurityCenterPage';
 
 const MainApp: React.FC = () => {
   const { isAuthenticated, isRestoringSession } = useAuth();
@@ -121,6 +131,8 @@ const MainApp: React.FC = () => {
         return <DashboardOverview setActiveView={setActiveView} />;
       case 'employees':
         return <EmployeeDirectory />;
+      case 'command-center':
+        return <WorkforceCommandCenterPage />;
       case 'departments':
         return <DepartmentsPage />;
       case 'attendance':
@@ -128,11 +140,11 @@ const MainApp: React.FC = () => {
       case 'leaves':
         return <LeaveManagementPage />;
       case 'payroll':
-        return <PayrollPage />;
+        return <PayrollEnginePage />;
       case 'recruitment':
         return <RecruitmentPage />;
       case 'performance':
-        return <PerformancePage />;
+        return <PerformanceEnginePage />;
       case 'assets':
         return <AssetsPage />;
       case 'documents':
@@ -145,6 +157,22 @@ const MainApp: React.FC = () => {
         return <AuditLogsPage />;
       case 'settings':
         return <SettingsPage />;
+      case 'notifications':
+        return <NotificationCenterPage />;
+      case 'foundation':
+        return <FoundationAdminPage />;
+      case 'governance':
+        return <GovernanceCenterPage />;
+      case 'security-center':
+        return <SecurityCenterPage />;
+      case 'approvals':
+        return <ApprovalInboxPage />;
+      case 'workflows':
+        return <WorkflowBuilderPage />;
+      case 'attendance-policy':
+        return <AttendancePolicyPage />;
+      case 'attendance-requests':
+        return <MyAttendanceRequestsPage />;
       default:
         return <DashboardOverview setActiveView={setActiveView} />;
     }

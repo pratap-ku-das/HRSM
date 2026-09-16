@@ -17,6 +17,6 @@ sealed interface SessionState { data object Loading : SessionState; data object 
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading); val state: StateFlow<SessionState> = _state.asStateFlow()
     private val _error = MutableStateFlow<String?>(null); val error: StateFlow<String?> = _error.asStateFlow()
     init { viewModelScope.launch { _state.value = repository.restore()?.let(SessionState::SignedIn) ?: SessionState.SignedOut } }
-    fun login(email: String, password: String) = viewModelScope.launch { _error.value = null; _state.value = SessionState.Loading; runCatching { repository.login(email, password) }.onSuccess { _state.value = SessionState.SignedIn(it) }.onFailure { _error.value = it.userMessage(); _state.value = SessionState.SignedOut } }
+    fun login(email: String, password: String, mfaCode:String?) = viewModelScope.launch { _error.value = null; _state.value = SessionState.Loading; runCatching { repository.login(email, password, mfaCode) }.onSuccess { _state.value = SessionState.SignedIn(it) }.onFailure { _error.value = it.userMessage(); _state.value = SessionState.SignedOut } }
     fun logout() = viewModelScope.launch { repository.logout(); _state.value = SessionState.SignedOut }
 }

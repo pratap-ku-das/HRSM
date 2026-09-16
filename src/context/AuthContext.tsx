@@ -11,7 +11,7 @@ interface AuthContextType {
   settings: CompanySettings | null;
   isAuthenticated: boolean;
   isRestoringSession: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<boolean>;
   loginAsDemoUser: (userId: string) => void;
   registerCompany: (companyData: Partial<Company>, adminData: Partial<User> & { password?: string }, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
   switchCompany: (companyId: string) => void;
@@ -90,9 +90,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshState();
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string, mfaCode?: string): Promise<boolean> => {
     try {
-      await api.loginV1(email, password);
+      await api.loginV1(email, password, mfaCode);
       const me = (await api.getMeV1()).data;
       setCurrentUser(me.user);
       setCurrentCompany(me.company);

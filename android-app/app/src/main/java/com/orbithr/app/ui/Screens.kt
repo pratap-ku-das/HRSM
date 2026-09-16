@@ -562,7 +562,7 @@ private fun ExpenseDialog(dismiss: () -> Unit, submit: (SubmitExpenseRequest) ->
 }
 
 @Composable
-fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit) {
+fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit) {
     Page("YOUR SPACE", "More from OrbitHR", "Profile, tools and settings") {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
@@ -580,10 +580,11 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
             }
             item { OrbitSectionTitle("Work tools", "Everything else in one place") }
             item { MoreAction(Icons.AutoMirrored.Outlined.ReceiptLong, "Expenses", "Submit and track claims", OrbitAmber, expenses) }
+            item { MoreAction(Icons.Outlined.EditCalendar, "Attendance requests", "Regularization, WFH, duty, travel and overtime", OrbitViolet, attendanceRequests) }
+            if ("workflow.review" in me.user.permissions) item { MoreAction(Icons.Outlined.Approval, "Approval inbox", "Review requests assigned to you", OrbitMint, approvals) }
             if ("employee.read.all" in me.user.permissions) item { MoreAction(Icons.Outlined.Groups, "People directory", "Employees and onboarding", OrbitCyan, employees) }
-            item { MoreAction(Icons.Outlined.FolderOpen, "Documents", "Secure file vault coming soon", OrbitViolet, {}, false) }
-            item { MoreAction(Icons.Outlined.TrackChanges, "Goals & performance", "Performance workspace coming soon", OrbitRose, {}, false) }
-            item { MoreAction(Icons.Outlined.NotificationsNone, "Notifications", "Push notifications coming soon", OrbitMint, {}, false) }
+            item { MoreAction(Icons.Outlined.FolderOpen, "Documents, assets & goals", "Your verified records and assigned equipment", OrbitViolet, workspace) }
+            item { MoreAction(Icons.Outlined.NotificationsNone, "Notifications", "Your persistent OrbitHR inbox", OrbitMint, notifications) }
             item {
                 OutlinedButton(onClick = logout, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, OrbitRose.copy(alpha = .35f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = OrbitRose)) {
                     Icon(Icons.AutoMirrored.Outlined.Logout, null); Spacer(Modifier.width(8.dp)); Text("Sign out securely")
@@ -605,6 +606,51 @@ private fun MoreAction(icon: ImageVector, title: String, subtitle: String, color
         onClick = onClick,
     )
 }
+
+@Composable
+fun AttendanceRequestsScreen(back:()->Unit,vm:AttendanceRequestViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();var show by remember{mutableStateOf(false)}
+    Page("SELF SERVICE","Attendance requests","Corrections, flexible work and overtime",action={Row{OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back);Spacer(Modifier.width(6.dp));OrbitIconButton(Icons.Outlined.Add,"New request"){show=true}}}){
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick={vm.breakAction(true)},modifier=Modifier.weight(1f),shape=RoundedCornerShape(16.dp)){Icon(Icons.Outlined.Coffee,null);Spacer(Modifier.width(6.dp));Text("Start break")};OutlinedButton(onClick={vm.breakAction(false)},modifier=Modifier.weight(1f),shape=RoundedCornerShape(16.dp)){Text("End break")}}
+        Spacer(Modifier.height(12.dp));StateBody(state,vm::refresh){requests->LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=20.dp)){items(requests,key={it.id}){item->OrbitListItem(headline={Text(item.type.replace('_',' '),fontWeight=FontWeight.Bold)},supporting={Text("${item.startDate.take(10)} – ${item.endDate.take(10)}\n${item.reason}",maxLines=2,overflow=TextOverflow.Ellipsis)},leading={Icon(Icons.Outlined.EditCalendar,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}}}
+    };if(show)AttendanceRequestDialog({show=false}){vm.submit(it);show=false}
+}
+
+@Composable private fun AttendanceRequestDialog(dismiss:()->Unit,submit:(CreateAttendanceRequest)->Unit){var type by remember{mutableStateOf("REGULARIZATION")};var start by remember{mutableStateOf(LocalDate.now().toString())};var end by remember{mutableStateOf(LocalDate.now().toString())};var reason by remember{mutableStateOf("")};AlertDialog(onDismissRequest=dismiss,shape=RoundedCornerShape(28.dp),title={Text("New attendance request")},text={Column(verticalArrangement=Arrangement.spacedBy(9.dp)){Text("Request type",style=MaterialTheme.typography.labelMedium);LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(listOf("REGULARIZATION","WFH","ON_DUTY","BUSINESS_TRAVEL","OVERTIME")){value->FilterChip(selected=type==value,onClick={type=value},label={Text(value.replace('_',' '))})}};OutlinedTextField(start,{start=it},label={Text("Start date (YYYY-MM-DD)")},shape=RoundedCornerShape(15.dp));OutlinedTextField(end,{end=it},label={Text("End date (YYYY-MM-DD)")},shape=RoundedCornerShape(15.dp));OutlinedTextField(reason,{reason=it},label={Text("Reason")},minLines=2,shape=RoundedCornerShape(15.dp))}},confirmButton={Button(onClick={submit(CreateAttendanceRequest(type,start,end,reason))},enabled=reason.length>=3&&runCatching{LocalDate.parse(start)<=LocalDate.parse(end)}.getOrDefault(false)){Text("Submit")}},dismissButton={TextButton(onClick=dismiss){Text("Cancel")}})}
+
+@Composable
+fun ApprovalInboxScreen(back:()->Unit,vm:ApprovalViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();var mine by remember{mutableStateOf(false)}
+    Page("APPROVALS","Approval inbox","Assigned work and request history",action={OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back)}){Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(selected=!mine,onClick={mine=false},label={Text("Assigned")});FilterChip(selected=mine,onClick={mine=true},label={Text("My requests")})};Spacer(Modifier.height(10.dp));StateBody(state,vm::refresh){workspace->if(mine)LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp)){items(workspace.mine,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text(item.module)},leading={Icon(Icons.Outlined.History,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}}else LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp)){items(workspace.inbox,key={it.id}){item->Surface(shape=RoundedCornerShape(20.dp),color=Color.White,modifier=Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(item.instance.module,style=MaterialTheme.typography.labelSmall,color=OrbitViolet);Text(item.instance.title,fontWeight=FontWeight.Bold);Text("Step ${item.sequence}: ${item.step.name}",style=MaterialTheme.typography.bodySmall,color=OrbitMuted);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick={vm.act(item.instance.id,"REJECT",null)},colors=ButtonDefaults.outlinedButtonColors(contentColor=OrbitRose)){Text("Reject")};Button(onClick={vm.act(item.instance.id,"APPROVE",null)},colors=ButtonDefaults.buttonColors(containerColor=OrbitMint)){Text("Approve")}}}}}}}}
+}
+
+@Composable
+fun NotificationCenterScreen(back:()->Unit,vm:NotificationViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();Page("NOTIFICATIONS","Your inbox","Approvals, payroll, attendance and reminders",action={Row{OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back);Spacer(Modifier.width(6.dp));OrbitIconButton(Icons.Outlined.DoneAll,"Mark all read",vm::readAll)}}){StateBody(state,vm::refresh){notifications->if(notifications.isEmpty())EmptyState(Icons.Outlined.NotificationsNone,"Inbox clear","New OrbitHR updates will appear here.")else LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=20.dp)){items(notifications,key={it.id}){item->Surface(shape=RoundedCornerShape(20.dp),color=if(item.readAt==null)Color.White else Color(0xFFF5F6FA),modifier=Modifier.fillMaxWidth().clickable{vm.read(item.id)}){Row(Modifier.padding(15.dp),verticalAlignment=Alignment.Top){Box(Modifier.size(42.dp).background(OrbitMint.copy(alpha=.12f),RoundedCornerShape(14.dp)),contentAlignment=Alignment.Center){Icon(Icons.Outlined.NotificationsActive,null,tint=OrbitMint)};Spacer(Modifier.width(11.dp));Column(Modifier.weight(1f)){Text(item.title,fontWeight=FontWeight.Bold);Text(item.body,style=MaterialTheme.typography.bodySmall,color=OrbitMuted);Text(item.eventKey.replace('_',' '),style=MaterialTheme.typography.labelSmall,color=OrbitViolet)};if(item.readAt==null)Box(Modifier.size(8.dp).background(OrbitViolet,CircleShape))}}}}}}
+}
+
+@Composable
+fun MobileWorkspaceScreen(back:()->Unit,vm:MobileWorkspaceViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();var tab by remember{mutableStateOf("DOCUMENTS")};Page("MY WORKSPACE","Documents, assets & goals","Your verified employee records",action={OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back)}){Row(horizontalArrangement=Arrangement.spacedBy(7.dp)){listOf("DOCUMENTS","ASSETS","GOALS").forEach{value->FilterChip(selected=tab==value,onClick={tab=value},label={Text(value)})}};Spacer(Modifier.height(10.dp));StateBody(state,vm::refresh){data->LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=20.dp)){when(tab){"DOCUMENTS"->items(data.documents,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.documentType} · ${item.fileName}")},leading={Icon(Icons.Outlined.Description,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.verificationStatus,orbitStatusColor(item.verificationStatus))})};"ASSETS"->items(data.assets,key={it.id}){item->OrbitListItem(headline={Text(item.name,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.serialNumber}\n${item.condition}")},leading={Icon(Icons.Outlined.Devices,null,tint=OrbitCyan)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})};else->items(data.goals,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.progress.toInt()}% · due ${item.targetDate.take(10)}")},leading={Icon(Icons.Outlined.TrackChanges,null,tint=OrbitRose)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}}}}}
+}
+
+@Composable
+fun EmployeeHubScreen(back:()->Unit,vm:MobileWorkspaceViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();var tab by remember{mutableStateOf("DOCUMENTS")};var showRequest by remember{mutableStateOf(false)}
+    Page("MY WORKSPACE","Employee self service","Documents, assets, goals, reviews and requests",action={Row{OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back);Spacer(Modifier.width(6.dp));OrbitIconButton(Icons.Outlined.Add,"New request"){showRequest=true}}}){
+        LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){items(listOf("DOCUMENTS","ASSETS","GOALS","REVIEWS","REQUESTS")){value->FilterChip(selected=tab==value,onClick={tab=value},label={Text(value)})}}
+        Spacer(Modifier.height(10.dp));StateBody(state,vm::refresh){data->LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=20.dp)){when(tab){
+            "DOCUMENTS"->items(data.documents,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.documentType} · ${item.fileName}")},leading={Icon(Icons.Outlined.Description,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.verificationStatus,orbitStatusColor(item.verificationStatus))})}
+            "ASSETS"->items(data.assets,key={it.id}){item->OrbitListItem(headline={Text(item.name,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.serialNumber}\n${item.condition}")},leading={Icon(Icons.Outlined.Devices,null,tint=OrbitCyan)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
+            "GOALS"->items(data.goals,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.progress.toInt()}% · due ${item.targetDate.take(10)}")},leading={Icon(Icons.Outlined.TrackChanges,null,tint=OrbitRose)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
+            "REVIEWS"->items(data.reviews,key={it.id}){item->OrbitListItem(headline={Text(item.cycle.name,fontWeight=FontWeight.Bold)},supporting={Text("Overall ${item.overallRating?:"—"} · Goals ${item.goalRating?:"—"} · Skills ${item.competencyRating?:"—"}")},leading={Icon(Icons.Outlined.StarRate,null,tint=OrbitAmber)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
+            else->items(data.serviceRequests,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.type.replace('_',' ')} · ${item.reason}")},leading={Icon(Icons.Outlined.RequestPage,null,tint=OrbitMint)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
+        }}}
+    }
+    if(showRequest)ServiceRequestDialog({showRequest=false}){vm.request(it);showRequest=false}
+}
+
+@Composable private fun ServiceRequestDialog(dismiss:()->Unit,submit:(CreateServiceRequest)->Unit){var type by remember{mutableStateOf("DOCUMENT_REQUEST")};var title by remember{mutableStateOf("")};var reason by remember{mutableStateOf("")};var amount by remember{mutableStateOf("")};AlertDialog(onDismissRequest=dismiss,title={Text("New employee request")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(listOf("DOCUMENT_REQUEST","SALARY_CERTIFICATE","ADVANCE")){value->FilterChip(selected=type==value,onClick={type=value},label={Text(value.replace('_',' '))})}};OutlinedTextField(title,{title=it},label={Text("Title")});OutlinedTextField(reason,{reason=it},label={Text("Reason")},minLines=2);if(type=="ADVANCE")OutlinedTextField(amount,{amount=it.filter{c->c.isDigit()||c=='.'}},label={Text("Amount")})}},confirmButton={Button(onClick={submit(CreateServiceRequest(type,title,reason,amount.toDoubleOrNull()))},enabled=title.length>=3&&reason.length>=3&&(type!="ADVANCE"||(amount.toDoubleOrNull()?:0.0)>0)){Text("Submit")}},dismissButton={TextButton(onClick=dismiss){Text("Cancel")}})}
 
 @Composable
 fun EmployeeScreen(back: () -> Unit, vm: EmployeeViewModel = hiltViewModel()) {

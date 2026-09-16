@@ -35,7 +35,7 @@ import com.orbithr.app.core.model.MeDto
 fun RootApp(
     state: SessionState,
     error: String?,
-    login: (String, String) -> Unit,
+    login: (String, String, String?) -> Unit,
     logout: () -> Unit,
     verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit,
 ) = when (state) {
@@ -56,9 +56,10 @@ private fun OrbitSplash() {
 }
 
 @Composable
-private fun LoginScreen(error: String?, login: (String, String) -> Unit) {
+private fun LoginScreen(error: String?, login: (String, String, String?) -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var mfaCode by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     OrbitBackground {
         Column(
@@ -108,6 +109,7 @@ private fun LoginScreen(error: String?, login: (String, String) -> Unit) {
                     shape = RoundedCornerShape(18.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
                 )
+                OutlinedTextField(value=mfaCode,onValueChange={mfaCode=it.filter(Char::isDigit).take(6)},modifier=Modifier.fillMaxWidth(),label={Text("Authenticator code (if enabled)")},leadingIcon={Icon(Icons.Outlined.Pin,null,tint=OrbitViolet)},singleLine=true,shape=RoundedCornerShape(18.dp),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number,imeAction=ImeAction.Done))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
@@ -133,7 +135,7 @@ private fun LoginScreen(error: String?, login: (String, String) -> Unit) {
                     }
                 }
                 Button(
-                    onClick = { login(email.lowercase(), password) },
+                    onClick = { login(email.lowercase(), password, mfaCode.takeIf(String::isNotBlank)) },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     enabled = email.contains('@') && password.length >= 8,
                     shape = RoundedCornerShape(18.dp),
@@ -224,9 +226,13 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 composable("attendance") { AttendanceScreen(verifyAttendance) }
                 composable("leave") { LeaveScreen() }
                 composable("pay") { PayslipScreen() }
-                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }) }
+                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }) }
                 composable("expenses") { ExpenseScreen(back = { nav.popBackStack() }) }
                 composable("employees") { EmployeeScreen(back = { nav.popBackStack() }) }
+                composable("attendanceRequests") { AttendanceRequestsScreen(back = { nav.popBackStack() }) }
+                composable("approvals") { ApprovalInboxScreen(back = { nav.popBackStack() }) }
+                composable("notifications") { NotificationCenterScreen(back = { nav.popBackStack() }) }
+                composable("workspace") { EmployeeHubScreen(back = { nav.popBackStack() }) }
             }
         }
     }

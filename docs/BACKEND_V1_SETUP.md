@@ -1,5 +1,7 @@
 # OrbitHR Backend v1 Setup
 
+For the complete current capability and release status, also read `ORBITHR_MASTER_BUILD.md`, `FINAL_IMPLEMENTATION_AUDIT.md`, and `RELEASE_RUNBOOK.md`.
+
 ## Environment
 
 Copy `.env.example` to `.env` locally and supply real secret values. Generate `JWT_ACCESS_SECRET` using a cryptographically secure random generator with at least 32 bytes. Set the Resend key only in the server deployment secret manager.

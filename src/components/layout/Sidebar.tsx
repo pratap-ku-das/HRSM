@@ -1,9 +1,9 @@
 import React from 'react';
 import { 
-  LayoutDashboard, Users, GitBranch, CalendarCheck, CalendarDays, 
-  CreditCard, Briefcase, Target, Laptop, FileText, 
-  Megaphone, Receipt, ShieldCheck, Settings, Sparkles, ChevronRight,
-  PanelLeftClose, PanelLeftOpen, X
+  LayoutDashboard, Users, GitBranch, CalendarCheck, CalendarDays, CalendarClock,
+  CreditCard, Briefcase, Target, Laptop, FileText, FileClock,
+  Megaphone, Receipt, ShieldCheck, Settings, Sparkles, ChevronRight, Bell,
+  PanelLeftClose, PanelLeftOpen, X, Network, Inbox, GitPullRequestArrow, Activity
 } from 'lucide-react';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
@@ -38,6 +38,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'dashboard',
       label: 'Dashboard',
       icon: LayoutDashboard,
+      badge: null,
+      section: 'OVERVIEW'
+    },
+    {
+      id: 'approvals',
+      label: 'Approval Inbox',
+      icon: Inbox,
+      badge: null,
+      section: 'OVERVIEW'
+    },
+    {
+      id: 'notifications',
+      label: 'Notification Center',
+      icon: Bell,
+      badge: null,
+      section: 'OVERVIEW'
+    },
+    {
+      id: 'command-center',
+      label: 'HR Command Center',
+      icon: Activity,
       badge: null,
       section: 'OVERVIEW'
     },
@@ -123,10 +144,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
       section: 'ORGANIZATION'
     },
     {
+      id: 'workflows',
+      label: 'Workflow Builder',
+      icon: GitPullRequestArrow,
+      badge: null,
+      section: 'SECURITY & SYSTEM'
+    },
+    {
+      id: 'attendance-policy',
+      label: 'Shifts & Policies',
+      icon: CalendarClock,
+      badge: null,
+      section: 'TIME & ATTENDANCE'
+    },
+    {
+      id: 'attendance-requests',
+      label: 'My Attendance Requests',
+      icon: FileClock,
+      badge: null,
+      section: 'TIME & ATTENDANCE'
+    },
+    {
+      id: 'foundation',
+      label: 'Organization & Access',
+      icon: Network,
+      badge: null,
+      section: 'SECURITY & SYSTEM'
+    },
+    {
       id: 'audit',
       label: 'Audit Trail (SOC-2)',
       icon: ShieldCheck,
       badge: null,
+      section: 'SECURITY & SYSTEM'
+    },
+    {
+      id: 'governance',
+      label: 'Reports & Security',
+      icon: ShieldCheck,
+      badge: 'AI',
+      section: 'SECURITY & SYSTEM'
+    },
+    {
+      id: 'security-center',
+      label: 'Security Center',
+      icon: ShieldCheck,
+      badge: 'MFA',
       section: 'SECURITY & SYSTEM'
     },
     {

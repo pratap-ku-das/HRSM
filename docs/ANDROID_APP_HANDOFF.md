@@ -1,4 +1,6 @@
-# OrbitHR HRMS: Complete Project and Android App Handoff
+# OrbitHR HRMS: Original Baseline Audit (Historical)
+
+> This file records the pre-hardening baseline and is retained for traceability. Its “current”, “prototype”, and “missing” statements are not the current implementation status. Use `ORBITHR_MASTER_BUILD.md`, `FINAL_IMPLEMENTATION_AUDIT.md`, the OpenAPI contract, and the current source tree as authoritative release documentation.
 
 ## 1. Purpose
 

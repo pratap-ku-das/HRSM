@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
 import { useToast } from '../../context/ToastContext';
+import { api } from '../../services/api';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -34,6 +35,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [remoteResults, setRemoteResults] = useState<Array<{type:string;id:string;title:string;subtitle:string;route:string}>>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -55,6 +57,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || query.trim().length < 2) { setRemoteResults([]); return; }
+    const timer = window.setTimeout(() => { void api.universalSearch(query.trim()).then(setRemoteResults).catch(() => setRemoteResults([])); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, query]);
+
   // Build commands list
   const baseCommands: CommandItem[] = [
     // Quick Actions
@@ -66,38 +74,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       subtitle: 'Record instant attendance punch',
       badge: 'Quick Action',
       action: () => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const records = storageService.getAttendanceRecords(currentCompany?.id);
-        const myEmp = employees.find(e => e.email === currentUser?.email) || employees[0];
-        
-        if (myEmp) {
-          const existing = records.find(r => r.employeeId === myEmp.id && r.date === todayStr);
-          const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-          const nowIso = new Date().toISOString();
-          
-          if (!existing || !existing.clockInTime) {
-            storageService.saveAttendanceRecord({
-              id: existing?.id || 'att_' + Math.random().toString(36).substring(2, 9),
-              companyId: currentCompany?.id || '',
-              employeeId: myEmp.id,
-              date: todayStr,
-              clockInTime: nowTime,
-              status: 'PRESENT',
-              faceAuthVerified: true,
-              source: 'MOBILE_FACE',
-              createdAt: existing?.createdAt || nowIso,
-              updatedAt: nowIso,
-            });
-            toast.success('Clocked In Successfully', `Checked in at ${nowTime} with Face Auth`);
-          } else {
-            storageService.saveAttendanceRecord({
-              ...existing,
-              clockOutTime: nowTime,
-              updatedAt: nowIso,
-            });
-            toast.success('Clocked Out Successfully', `Checked out at ${nowTime}`);
-          }
-        }
+        toast.info('Secure attendance', 'Use the attendance screen or Android live face check. Duplicate punches are blocked by the server.');
         setActiveView('attendance');
         onClose();
       }
@@ -259,7 +236,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     };
   });
 
-  const allCommands = [...baseCommands, ...employeeCommands];
+  const remoteCommands:CommandItem[]=remoteResults.map(result=>({id:`remote-${result.type}-${result.id}`,title:result.title,subtitle:result.subtitle,category:result.type==='EMPLOYEE'?'EMPLOYEES':'SECURITY',icon:result.type==='EMPLOYEE'?UserCheck:ShieldCheck,action:()=>{setActiveView(result.route);onClose();}}));
+  const allCommands = [...baseCommands, ...remoteCommands, ...employeeCommands];
 
   const filteredCommands = allCommands.filter(cmd => {
     const q = query.toLowerCase().trim();

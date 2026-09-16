@@ -1,0 +1,3 @@
+CREATE TABLE "MfaMethod" ("id" TEXT NOT NULL,"userId" TEXT NOT NULL,"encryptedSecret" TEXT NOT NULL,"enabled" BOOLEAN NOT NULL DEFAULT false,"verifiedAt" TIMESTAMP(3),"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "MfaMethod_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "MfaMethod_userId_key" ON "MfaMethod"("userId");
+ALTER TABLE "MfaMethod" ADD CONSTRAINT "MfaMethod_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

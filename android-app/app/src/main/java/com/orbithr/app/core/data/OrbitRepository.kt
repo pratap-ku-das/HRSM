@@ -15,7 +15,7 @@ import javax.inject.Singleton
 
 @Singleton class OrbitRepository @Inject constructor(private val api: OrbitApi, private val tokens: TokenStore) {
     suspend fun restore(): MeDto? { val refresh = tokens.refresh() ?: return null; val session = runCatching { api.refresh(RefreshRequest(refresh, Build.MODEL)).data }.getOrElse { tokens.clear(); return null }; tokens.save(session.accessToken, session.refreshToken); return runCatching { api.me().data }.getOrNull() }
-    suspend fun login(email: String, password: String): MeDto { val session = api.login(LoginRequest(email.trim(), password, Build.MODEL)).data; tokens.save(session.accessToken, session.refreshToken); return api.me().data }
+    suspend fun login(email: String, password: String, mfaCode:String?): MeDto { val session = api.login(LoginRequest(email.trim(), password, Build.MODEL, mfaCode)).data; tokens.save(session.accessToken, session.refreshToken); return api.me().data }
     suspend fun logout() { val refresh = tokens.refresh(); if (refresh != null) runCatching { api.logout(RefreshRequest(refresh, Build.MODEL)) }; tokens.clear() }
     suspend fun dashboard() = api.dashboard().data
     suspend fun attendance() = api.attendance().data
@@ -39,6 +39,18 @@ import javax.inject.Singleton
         deviceId = proof.deviceId,
         faceVerificationToken = proof.faceVerificationToken,
     )).data
+    suspend fun attendanceRequests() = api.attendanceRequests().data
+    suspend fun submitAttendanceRequest(body: CreateAttendanceRequest) = api.submitAttendanceRequest(body).data
+    suspend fun startBreak() = api.startBreak().data
+    suspend fun endBreak() = api.endBreak().data
+    suspend fun approvalInbox() = api.approvalInbox().data
+    suspend fun myRequests() = api.myRequests().data
+    suspend fun workflowAction(id: String, action: String, comment: String?) = api.workflowAction(id, WorkflowActionRequest(action, comment)).data
+    suspend fun notifications() = api.notifications().data
+    suspend fun readNotification(id: String) = api.readNotification(id).data
+    suspend fun readAllNotifications() = api.readAllNotifications().data
+    suspend fun mobileWorkspace() = api.mobileWorkspace().data
+    suspend fun createServiceRequest(body:CreateServiceRequest)=api.createServiceRequest(body).data
     suspend fun leaves() = api.leaves().data
     suspend fun applyLeave(request: ApplyLeaveRequest) = api.applyLeave(request).data
     suspend fun payslips() = api.payslips().data

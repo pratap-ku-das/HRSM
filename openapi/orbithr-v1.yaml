@@ -8,6 +8,129 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /payroll/config:
+    get:
+      summary: Get salary structures, revisions, statutory rules, loans, and runs
+      responses: {'200': {description: Payroll configuration returned}}
+  /payroll/structures:
+    post:
+      summary: Create a reusable salary structure and component formulae
+      responses: {'201': {description: Structure created}}
+  /payroll/revisions:
+    post:
+      summary: Submit an effective-dated employee salary revision
+      responses: {'201': {description: Revision submitted}}
+  /payroll/revisions/{id}/approve:
+    post:
+      summary: Approve and activate a salary revision
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Revision approved}}
+  /payroll/statutory-rules:
+    post:
+      summary: Create an effective-dated configurable statutory rule version
+      responses: {'201': {description: Rule version created}}
+  /payroll/loans:
+    post:
+      summary: Create an employee loan or advance repayment schedule
+      responses: {'201': {description: Loan created}}
+  /payroll/adjustments:
+    post:
+      summary: Add an auditable earning, deduction, contribution, or reimbursement
+      responses: {'201': {description: Adjustment created}}
+  /payroll/runs:
+    post:
+      summary: Create a draft monthly payroll run
+      responses: {'201': {description: Run created}}
+  /payroll/runs/{id}/calculate:
+    post:
+      summary: Calculate payroll from locked attendance and effective rules
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Payroll calculated}}
+  /payroll/runs/{id}/bank-export-preview:
+    get:
+      summary: Preview payment totals with masked account identifiers only
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Masked preview returned}}
+  /attendance/config:
+    get:
+      summary: Get shifts, policies, rosters, and locked periods
+      responses: {'200': {description: Attendance configuration returned}}
+  /attendance/shifts:
+    post:
+      summary: Create a fixed, flexible, night, or rotational shift
+      responses: {'201': {description: Shift created}}
+  /attendance/policies:
+    post:
+      summary: Create an effective-dated attendance policy
+      responses: {'201': {description: Policy created}}
+  /attendance/assignments:
+    post:
+      summary: Assign an employee to a shift for a date range
+      responses: {'201': {description: Shift assigned}}
+  /attendance/locks:
+    post:
+      summary: Lock an attendance period for payroll consumption
+      responses: {'201': {description: Period locked}}
+  /attendance/evaluate/{employeeId}/{date}:
+    post:
+      summary: Evaluate a daily record with its effective shift policy
+      parameters:
+        - {name: employeeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+      responses: {'200': {description: Explainable evaluation returned}}
+  /me/attendance/requests:
+    get:
+      summary: List the employee's attendance-related requests
+      responses: {'200': {description: Requests returned}}
+    post:
+      summary: Submit regularization, WFH, on-duty, travel, or overtime
+      responses: {'201': {description: Request submitted}}
+  /me/attendance/breaks/start:
+    post:
+      summary: Start a break session
+      responses: {'201': {description: Break started}}
+  /me/attendance/breaks/end:
+    post:
+      summary: End the active break session
+      responses: {'200': {description: Break ended}}
+  /workflows/definitions:
+    get:
+      summary: List versioned workflow definitions
+      responses: {'200': {description: Definitions returned}}
+    post:
+      summary: Create a draft workflow definition version
+      responses: {'201': {description: Definition created}}
+  /workflows/definitions/{id}/activate:
+    post:
+      summary: Activate a workflow definition version
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Definition activated}}
+  /workflows/submit:
+    post:
+      summary: Submit a request into its configured workflow
+      responses: {'201': {description: Workflow instance created}}
+  /workflows/inbox:
+    get:
+      summary: List approval steps assigned or delegated to the current user
+      responses: {'200': {description: Approval inbox returned}}
+  /workflows/my-requests:
+    get:
+      summary: List the current user's requests and immutable history
+      responses: {'200': {description: Requests returned}}
+  /workflows/instances/{id}/actions:
+    post:
+      summary: Approve, reject, or comment on the active step
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Action applied}}
+  /workflows/instances/{id}/withdraw:
+    post:
+      summary: Withdraw a pending request owned by the current user
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Request withdrawn}}
+  /workflows/delegations:
+    post:
+      summary: Delegate approvals for a bounded time window
+      responses: {'201': {description: Delegation created}}
   /auth/login:
     post:
       security: []
@@ -85,6 +208,65 @@ paths:
       operationId: getDashboard
       responses:
         '200': {description: Role-aware dashboard summary}
+  /organization:
+    get:
+      operationId: getOrganizationStructure
+      responses:
+        '200': {description: Tenant-scoped branches, locations, departments, teams, designations, cost centres, and grades}
+        '403': {$ref: '#/components/responses/ErrorResponse'}
+  /organization/branches:
+    post:
+      operationId: createBranch
+      responses:
+        '201': {description: Branch created}
+  /organization/locations:
+    post:
+      operationId: createWorkLocation
+      responses:
+        '201': {description: Work location created}
+  /organization/teams:
+    post:
+      operationId: createTeam
+      responses:
+        '201': {description: Team created}
+  /organization/cost-centers:
+    post:
+      operationId: createCostCenter
+      responses:
+        '201': {description: Cost centre created}
+  /organization/grades:
+    post:
+      operationId: createEmployeeGrade
+      responses:
+        '201': {description: Employee grade created}
+  /rbac:
+    get:
+      operationId: getAccessConfiguration
+      responses:
+        '200': {description: Tenant permissions, roles, and scoped grants}
+        '403': {$ref: '#/components/responses/ErrorResponse'}
+  /rbac/permissions:
+    post:
+      operationId: upsertPermission
+      responses:
+        '201': {description: Permission configured}
+  /rbac/roles:
+    post:
+      operationId: createAccessRole
+      responses:
+        '201': {description: Access role created}
+  /rbac/grants:
+    post:
+      operationId: createAccessGrant
+      responses:
+        '201': {description: Scoped role grant created}
+  /rbac/grants/{id}:
+    delete:
+      operationId: revokeAccessGrant
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Access grant revoked}
   /me/attendance:
     get:
       operationId: getMyAttendance
@@ -227,6 +409,136 @@ paths:
         - {in: header, name: Idempotency-Key, schema: {type: string}}
       responses:
         '202': {description: Onboarding email accepted}
+  /search:
+    get:
+      operationId: universalAuthorizedSearch
+      parameters:
+        - {in: query, name: q, required: true, schema: {type: string, minLength: 2, maxLength: 80}}
+      responses:
+        '200': {description: Permission and employee-scope filtered search results}
+  /reports/catalog:
+    get:
+      operationId: reportCatalog
+      responses:
+        '200': {description: Reports authorized for the caller}
+  /reports/{key}:
+    get:
+      operationId: runReport
+      parameters:
+        - {in: path, name: key, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Scoped report rows}
+        '403': {description: Report is not authorized}
+  /reports/{key}/exports:
+    post:
+      operationId: requestReportExport
+      parameters:
+        - {in: path, name: key, required: true, schema: {type: string}}
+      responses:
+        '202': {description: Audited export request queued}
+  /security/sessions:
+    get:
+      operationId: listSessions
+      responses:
+        '200': {description: Active sessions for the caller}
+  /security/sessions/{id}:
+    delete:
+      operationId: revokeSession
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Session revoked}
+  /security/login-history:
+    get:
+      operationId: loginHistory
+      responses:
+        '200': {description: Caller or authorized company login history}
+  /employee-documents:
+    get:
+      operationId: listEmployeeDocuments
+      responses:
+        '200': {description: Employee-scope filtered document metadata}
+    post:
+      operationId: registerEmployeeDocument
+      responses:
+        '201': {description: Document metadata registered with opaque object key}
+  /employee-documents/{id}/review:
+    post:
+      operationId: reviewEmployeeDocument
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Document verification status updated}
+  /me/mobile-workspace:
+    get:
+      operationId: mobileWorkspace
+      responses:
+        '200': {description: Caller documents, assigned assets, and goals}
+  /ai/ask:
+    post:
+      operationId: askGovernedAi
+      responses:
+        '200': {description: Audited read-only answer with source references}
+  /me/leaves/{id}/cancel:
+    post:
+      operationId: cancelOwnLeave
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Pending or future approved leave cancelled}
+  /security/mfa:
+    get:
+      operationId: mfaStatus
+      responses:
+        '200': {description: Authenticator enrollment status}
+  /security/mfa/setup:
+    post:
+      operationId: beginMfaSetup
+      responses:
+        '201': {description: One-time TOTP enrollment secret returned}
+  /security/mfa/confirm:
+    post:
+      operationId: confirmMfaSetup
+      responses:
+        '200': {description: TOTP enabled after code verification}
+  /security/mfa/disable:
+    post:
+      operationId: disableMfa
+      responses:
+        '200': {description: TOTP disabled and active refresh sessions revoked}
+  /performance-engine:
+    get:
+      operationId: performanceWorkspace
+      responses: {'200': {description: Scoped performance cycles and reviews}}
+  /performance-engine/cycles:
+    post:
+      operationId: createPerformanceCycle
+      responses: {'201': {description: Performance cycle created}}
+  /performance-engine/reviews:
+    post:
+      operationId: assignPerformanceReview
+      responses: {'201': {description: Performance review assigned}}
+  /performance-engine/reviews/{id}:
+    patch:
+      operationId: transitionPerformanceReview
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Review saved or transitioned}}
+  /me/service-requests:
+    get:
+      operationId: listOwnServiceRequests
+      responses: {'200': {description: Employee document, certificate and advance requests}}
+    post:
+      operationId: createServiceRequest
+      responses: {'201': {description: Employee request submitted to configured workflow}}
+  /notifications/jobs/compliance-reminders:
+    post:
+      operationId: runComplianceReminders
+      responses: {'200': {description: Idempotent expiry and probation reminders generated}}
+  /ai/history:
+    get:
+      operationId: aiHistory
+      responses: {'200': {description: Caller audited AI interaction history}}
 components:
   securitySchemes:
     bearerAuth:

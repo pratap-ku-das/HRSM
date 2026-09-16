@@ -8,19 +8,47 @@ import multer from 'multer';
 import { z, ZodError } from 'zod';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail, deliverPasswordResetEmail } from './email.js';
 import { deleteEmployeeFace, enrollEmployeeFace, FaceRecognitionError, verifyEmployeeFace } from './faceRecognition.js';
+import { createFoundationRouter } from './foundation.js';
+import { employeeScopeFilters, type AccessScope } from './accessScope.js';
+import { createWorkflowRouter, startConfiguredWorkflow } from './workflows.js';
+import { createAttendancePolicyRouter } from './attendancePolicies.js';
+import { createPayrollRouter } from './payroll.js';
+import { createPayrollComplianceRouter } from './payrollCompliance.js';
+import { createWorkspaceRouter } from './workspace.js';
+import { createNotificationRouter } from './notifications.js';
+import { createGovernanceRouter } from './governance.js';
+import { createReportRouter } from './reports.js';
+import { createPerformanceRouter } from './performance.js';
+import { createSelfServiceRouter } from './selfService.js';
+import { createReminderRouter } from './reminders.js';
+import { createAiAssistantRouter } from './aiAssistant.js';
+import { verifyMfaCode } from './mfa.js';
 
-type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; tokenVersion: number };
+type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; accessScopes: AccessScope[]; tokenVersion: number };
 type AuthedRequest = Request & { auth?: AuthUser; requestId?: string };
 
 const rolePermissions: Record<UserRole, string[]> = {
-  SUPER_ADMIN: ['face.enroll'],
-  COMPANY_ADMIN: ['company.manage', 'employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'leave.policy.manage', 'expense.review', 'payroll.manage', 'recruitment.manage', 'audit.read'],
-  HR_MANAGER: ['employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'expense.review', 'recruitment.manage'],
-  DEPT_HEAD: ['employee.read.team', 'attendance.read.team', 'leave.review', 'expense.review', 'goal.manage.team'],
+  SUPER_ADMIN: ['company.manage', 'performance.manage', 'performance.review', 'organization.read', 'organization.manage', 'rbac.manage', 'workflow.manage', 'workflow.review', 'notification.manage', 'employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'leave.policy.manage', 'expense.review', 'payroll.manage', 'payroll.approve', 'recruitment.manage', 'audit.read'],
+  COMPANY_ADMIN: ['company.manage', 'performance.manage', 'performance.review', 'organization.read', 'organization.manage', 'rbac.manage', 'workflow.manage', 'workflow.review', 'notification.manage', 'employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'leave.policy.manage', 'expense.review', 'payroll.manage', 'payroll.approve', 'recruitment.manage', 'audit.read'],
+  HR_MANAGER: ['performance.manage', 'performance.review', 'organization.read', 'organization.manage', 'workflow.manage', 'workflow.review', 'employee.read.all', 'employee.manage', 'face.enroll', 'attendance.read.team', 'attendance.manage', 'leave.review', 'expense.review', 'recruitment.manage'],
+  PAYROLL_ADMIN: ['organization.read', 'workflow.review', 'employee.read.all', 'attendance.read.team', 'payroll.manage', 'payroll.approve'],
+  MANAGER: ['performance.review', 'organization.read', 'workflow.review', 'employee.read.team', 'attendance.read.team', 'leave.review', 'expense.review', 'goal.manage.team'],
+  DEPT_HEAD: ['performance.review', 'workflow.review', 'employee.read.team', 'attendance.read.team', 'leave.review', 'expense.review', 'goal.manage.team'],
   EMPLOYEE: ['employee.read.self', 'attendance.read.self', 'attendance.punch', 'leave.apply', 'expense.submit', 'payslip.read.self'],
 };
 const employeePermissions = ['employee.read.self', 'attendance.read.self', 'attendance.punch', 'leave.apply', 'expense.submit', 'payslip.read.self'];
 for (const role of ['COMPANY_ADMIN', 'HR_MANAGER', 'DEPT_HEAD'] as UserRole[]) rolePermissions[role] = [...new Set([...rolePermissions[role], ...employeePermissions])];
+for (const role of ['SUPER_ADMIN', 'PAYROLL_ADMIN', 'MANAGER'] as UserRole[]) rolePermissions[role] = [...new Set([...rolePermissions[role], ...employeePermissions])];
+
+async function resolvedAccess(prisma: PrismaClient, userId: string, companyId: string, legacyRole: UserRole) {
+  const grants = await prisma.userAccessGrant.findMany({
+    where: { userId, companyId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], role: { active: true } },
+    include: { role: { include: { rolePermissions: { include: { permission: true } } } } },
+  });
+  const accessScopes = grants.map(grant => ({ scope: grant.scope, scopeEntityId: grant.scopeEntityId, permissions: grant.role.rolePermissions.map(value => value.permission.key) }));
+  const custom = accessScopes.flatMap(grant => grant.permissions);
+  return { permissions: [...new Set([...rolePermissions[legacyRole], ...custom])], accessScopes };
+}
 
 const accessMinutes = Number(process.env.ACCESS_TOKEN_MINUTES || 15);
 const refreshDays = Number(process.env.REFRESH_TOKEN_DAYS || 30);
@@ -38,6 +66,7 @@ const indiaDate = (instant = new Date()) => {
 const indiaDateKey = (instant: Date) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(instant);
+const distanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number) => { const rad = Math.PI / 180; const dLat = (lat2 - lat1) * rad; const dLng = (lng2 - lng1) * rad; const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2; return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); };
 const clientIp = (req: Request) => {
   const cloudflareIp = req.header('cf-connecting-ip')?.split(',')[0]?.trim();
   const value = cloudflareIp || req.ip || req.socket.remoteAddress || 'unknown';
@@ -52,10 +81,11 @@ function signAccess(user: AuthUser) {
   });
 }
 
-async function issueSession(prisma: PrismaClient, user: { id: string; companyId: string; role: UserRole; tokenVersion: number; employee?: { id: string } | null }, deviceName?: string, familyId: string = crypto.randomUUID()) {
+async function issueSession(prisma: PrismaClient, user: { id: string; companyId: string; role: UserRole; tokenVersion: number; employee?: { id: string } | null }, deviceName?: string, familyId: string = crypto.randomUUID(), metadata?: {ipAddress?:string;userAgent?:string}) {
   const opaque = createOpaqueToken();
-  await prisma.refreshToken.create({ data: { userId: user.id, tokenHash: opaque.hash, familyId, deviceName, expiresAt: new Date(Date.now() + refreshDays * 86_400_000) } });
-  const auth: AuthUser = { id: user.id, companyId: user.companyId, role: user.role, employeeId: user.employee?.id, permissions: rolePermissions[user.role], tokenVersion: user.tokenVersion };
+  await prisma.refreshToken.create({ data: { userId: user.id, tokenHash: opaque.hash, familyId, deviceName, ipAddress:metadata?.ipAddress,userAgent:metadata?.userAgent, expiresAt: new Date(Date.now() + refreshDays * 86_400_000) } });
+  const access = await resolvedAccess(prisma, user.id, user.companyId, user.role);
+  const auth: AuthUser = { id: user.id, companyId: user.companyId, role: user.role, employeeId: user.employee?.id, ...access, tokenVersion: user.tokenVersion };
   return { accessToken: signAccess(auth), refreshToken: opaque.token, expiresInSeconds: accessMinutes * 60 };
 }
 
@@ -78,17 +108,28 @@ export function createV1Router(prisma: PrismaClient) {
       const payload = jwt.verify(raw.slice(7), secret(), { issuer, audience: 'orbithr-clients' }) as jwt.JwtPayload;
       const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { employee: true } });
       if (!user || user.tokenVersion !== payload.tokenVersion) return fail(res, 401, 'TOKEN_REVOKED', 'The session is no longer valid.');
-      req.auth = { id: user.id, companyId: user.companyId, role: user.role, employeeId: user.employee?.id, permissions: rolePermissions[user.role], tokenVersion: user.tokenVersion };
+      const access = await resolvedAccess(prisma, user.id, user.companyId, user.role);
+      req.auth = { id: user.id, companyId: user.companyId, role: user.role, employeeId: user.employee?.id, ...access, tokenVersion: user.tokenVersion };
       next();
     } catch { return fail(res, 401, 'TOKEN_INVALID', 'The access token is invalid or expired.'); }
   };
   const requirePermission = (permission: string) => (req: AuthedRequest, res: Response, next: NextFunction) => req.auth?.permissions.includes(permission) ? next() : fail(res, 403, 'FORBIDDEN', 'You do not have permission to perform this action.');
 
   router.post('/auth/login', loginLimiter, async (req, res, next) => { try {
-    const body = z.object({ email: z.string().email(), password: z.string().min(8), deviceName: z.string().max(120).optional() }).parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() }, include: { employee: true } });
-    if (!user?.passwordHash || !await bcrypt.compare(body.password, user.passwordHash)) return fail(res, 401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
-    const session = await issueSession(prisma, user, body.deviceName);
+    const body = z.object({ email: z.string().email(), password: z.string().min(8), deviceName: z.string().max(120).optional(), mfaCode: z.string().regex(/^\d{6}$/).optional() }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() }, include: { employee: true, mfaMethod: true } });
+    const recentFailures = await prisma.loginAttempt.count({ where: { email: body.email.toLowerCase(), success: false, createdAt: { gt: new Date(Date.now() - 15 * 60_000) } } });
+    if (recentFailures >= 10) return fail(res, 423, 'ACCOUNT_TEMPORARILY_LOCKED', 'Too many failed attempts. Try again after 15 minutes.');
+    if (!user?.passwordHash || !await bcrypt.compare(body.password, user.passwordHash)) {
+      await prisma.loginAttempt.create({ data: { companyId: user?.companyId, userId: user?.id, email: body.email.toLowerCase(), success: false, reason: 'INVALID_CREDENTIALS', ipAddress: clientIp(req), userAgent: req.header('user-agent') } });
+      return fail(res, 401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+    }
+    if (user.mfaMethod?.enabled && (!body.mfaCode || !verifyMfaCode(user.mfaMethod.encryptedSecret, body.mfaCode))) {
+      await prisma.loginAttempt.create({ data: { companyId: user.companyId, userId: user.id, email: user.email, success: false, reason: 'MFA_REQUIRED_OR_INVALID', ipAddress: clientIp(req), userAgent: req.header('user-agent') } });
+      return fail(res, 401, 'MFA_REQUIRED', 'A valid 6-digit authenticator code is required.');
+    }
+    const session = await issueSession(prisma, user, body.deviceName, undefined, {ipAddress:clientIp(req),userAgent:req.header('user-agent')});
+    await prisma.loginAttempt.create({ data: { companyId: user.companyId, userId: user.id, email: user.email, success: true, ipAddress: clientIp(req), userAgent: req.header('user-agent') } });
     await prisma.auditLog.create({ data: { companyId: user.companyId, userId: user.id, userName: user.fullName, userRole: user.role, action: 'USER_LOGIN_V1', category: 'AUTH', details: 'Authenticated session created.', ipAddress: req.ip || 'unknown' } });
     return ok(res, session);
   } catch (e) { next(e); } });
@@ -102,7 +143,7 @@ export function createV1Router(prisma: PrismaClient) {
       await prisma.user.update({ where: { id: stored.userId }, data: { tokenVersion: { increment: 1 } } });
       return fail(res, 401, 'REFRESH_REUSE_DETECTED', 'This token family has been revoked.');
     }
-    const session = await issueSession(prisma, stored.user, body.deviceName || stored.deviceName || undefined, stored.familyId);
+    const session = await issueSession(prisma, stored.user, body.deviceName || stored.deviceName || undefined, stored.familyId, {ipAddress:clientIp(req),userAgent:req.header('user-agent')});
     const replacementHash = hashToken(session.refreshToken);
     await prisma.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date(), replacedBy: replacementHash, lastUsedAt: new Date() } });
     return ok(res, session);
@@ -317,9 +358,16 @@ export function createV1Router(prisma: PrismaClient) {
         expiresAt: { gt: now },
       } });
       if (!verification) throw Object.assign(new Error('Complete a fresh employee face match before recording attendance.'), { status: 401, code: 'FACE_VERIFICATION_REQUIRED' });
+      const employeeLocation = await tx.employee.findFirst({ where: { id: req.auth!.employeeId!, companyId: req.auth!.companyId }, select: { location: true } });
+      if (employeeLocation?.location?.latitude != null && employeeLocation.location.longitude != null && employeeLocation.location.geofenceRadiusMeters != null && !employeeLocation.location.remote) {
+        const distance = distanceMeters(body.latitude, body.longitude, employeeLocation.location.latitude, employeeLocation.location.longitude);
+        if (distance > employeeLocation.location.geofenceRadiusMeters + body.locationAccuracyMeters) throw Object.assign(new Error(`You are outside the ${employeeLocation.location.name} attendance area.`), { status: 403, code: 'OUTSIDE_GEOFENCE' });
+      }
       const consumed = await tx.faceVerificationSession.updateMany({ where: { id: verification.id, status: 'VERIFIED', consumedAt: null }, data: { status: 'CONSUMED', consumedAt: now } });
       if (consumed.count !== 1) throw Object.assign(new Error('Face verification was already used. Verify again.'), { status: 409, code: 'FACE_PROOF_ALREADY_USED' });
       const existing = await tx.attendanceRecord.findUnique({ where: { employeeId_date: { employeeId: req.auth!.employeeId!, date } } });
+      const locked = await tx.attendancePeriodLock.findFirst({ where: { companyId: req.auth!.companyId, periodStart: { lte: date }, periodEnd: { gte: date } } });
+      if (locked) throw Object.assign(new Error('Attendance is locked for payroll for this date.'), { status: 423, code: 'ATTENDANCE_PERIOD_LOCKED' });
       if (body.action === 'CLOCK_IN' && existing?.clockInTime) throw Object.assign(new Error('You have already clocked in today.'), { status: 409, code: 'ALREADY_CLOCKED_IN' });
       if (body.action === 'CLOCK_OUT' && !existing?.clockInTime) throw Object.assign(new Error('Clock in before clocking out.'), { status: 409, code: 'CLOCK_IN_REQUIRED' });
       if (body.action === 'CLOCK_OUT' && existing?.clockOutTime) throw Object.assign(new Error('You have already clocked out today.'), { status: 409, code: 'ALREADY_CLOCKED_OUT' });
@@ -339,11 +387,14 @@ export function createV1Router(prisma: PrismaClient) {
 
   router.get('/me/leaves', authenticate, requirePermission('leave.apply'), async (req: AuthedRequest, res, next) => { try {
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked.');
-    const [requests, types] = await prisma.$transaction([
+    const [requests, types, employee] = await prisma.$transaction([
       prisma.leaveRequest.findMany({ where: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId }, include: { leaveType: true }, orderBy: { appliedAt: 'desc' } }),
       prisma.leaveType.findMany({ where: { companyId: req.auth!.companyId } }),
+      prisma.employee.findUnique({ where: { id: req.auth!.employeeId! }, select: { dateOfJoining: true } }),
     ]);
-    return ok(res, { requests, types });
+    const year = new Date().getUTCFullYear(); const yearStart = new Date(Date.UTC(year, 0, 1)); const yearEnd = new Date(Date.UTC(year, 11, 31));
+    const balances = types.map(type => { const joinedThisYear = employee!.dateOfJoining > yearStart; const serviceStart = joinedThisYear ? employee!.dateOfJoining : yearStart; const months = Math.max(0, 12 - serviceStart.getUTCMonth()); const entitlement = type.accrualFrequency === 'MONTHLY' ? type.daysAllowedPerYear * months / 12 : type.daysAllowedPerYear; const used = requests.filter(r => r.leaveTypeId === type.id && ['PENDING','APPROVED'].includes(r.status) && r.startDate <= yearEnd && r.endDate >= yearStart).reduce((sum, r) => sum + r.totalDays, 0); const available = Math.max(type.allowNegative ? -Infinity : 0, Math.min(type.maximumBalance ?? Infinity, entitlement + type.carryForwardDays) - used); return { leaveTypeId: type.id, year, entitlement, used, available }; });
+    return ok(res, { requests, types, balances });
   } catch (e) { next(e); } });
 
   router.post('/me/leaves', authenticate, requirePermission('leave.apply'), async (req: AuthedRequest, res, next) => { try {
@@ -352,12 +403,16 @@ export function createV1Router(prisma: PrismaClient) {
     if (body.endDate < body.startDate) return fail(res, 400, 'DATE_RANGE_INVALID', 'End date must not be before start date.');
     const type = await prisma.leaveType.findFirst({ where: { id: body.leaveTypeId, companyId: req.auth!.companyId } });
     if (!type) return fail(res, 404, 'LEAVE_TYPE_NOT_FOUND', 'Leave type was not found.');
+    const noticeDays = Math.floor((body.startDate.getTime() - indiaDate().getTime()) / 86_400_000); if (noticeDays < type.minimumNoticeDays) return fail(res, 400, 'LEAVE_NOTICE_REQUIRED', `This leave requires ${type.minimumNoticeDays} days notice.`);
     const overlap = await prisma.leaveRequest.findFirst({ where: { employeeId: req.auth!.employeeId, status: { in: ['PENDING', 'APPROVED'] }, startDate: { lte: body.endDate }, endDate: { gte: body.startDate } } });
     if (overlap) return fail(res, 409, 'LEAVE_OVERLAP', 'A leave request already exists for these dates.');
     const totalDays = Math.floor((body.endDate.getTime() - body.startDate.getTime()) / 86_400_000) + 1;
-    const request = await prisma.leaveRequest.create({ data: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, leaveTypeId: type.id, startDate: body.startDate, endDate: body.endDate, totalDays, reason: body.reason } });
-    return ok(res, request, 201);
+    const yearStart = new Date(Date.UTC(body.startDate.getUTCFullYear(),0,1)),yearEnd=new Date(Date.UTC(body.startDate.getUTCFullYear(),11,31)); const employee=await prisma.employee.findUniqueOrThrow({where:{id:req.auth!.employeeId},select:{dateOfJoining:true}}); const existingUsed=(await prisma.leaveRequest.findMany({where:{employeeId:req.auth!.employeeId,leaveTypeId:type.id,status:{in:['PENDING','APPROVED']},startDate:{lte:yearEnd},endDate:{gte:yearStart}},select:{totalDays:true}})).reduce((sum,item)=>sum+item.totalDays,0); const serviceStart=employee.dateOfJoining>yearStart?employee.dateOfJoining:yearStart,months=Math.max(0,12-serviceStart.getUTCMonth()),entitlement=type.accrualFrequency==='MONTHLY'?type.daysAllowedPerYear*months/12:type.daysAllowedPerYear,available=Math.min(type.maximumBalance??Infinity,entitlement+type.carryForwardDays)-existingUsed;if(!type.allowNegative&&totalDays>available)return fail(res,409,'LEAVE_BALANCE_INSUFFICIENT',`Only ${available.toFixed(1)} leave days are available.`);
+    const result = await prisma.$transaction(async tx => { const request = await tx.leaveRequest.create({ data: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId!, leaveTypeId: type.id, startDate: body.startDate, endDate: body.endDate, totalDays, reason: body.reason } }); const workflow = await startConfiguredWorkflow(tx, { companyId: req.auth!.companyId, requesterUserId: req.auth!.id, module: 'LEAVE', subjectType: 'LeaveRequest', subjectId: request.id, title: `${type.name} leave request`, summary: body.reason, payload: { startDate: body.startDate.toISOString(), endDate: body.endDate.toISOString(), totalDays } }); return { request, workflowId: workflow?.id }; });
+    return ok(res, { ...result.request, workflowId: result.workflowId }, 201);
   } catch (e) { next(e); } });
+
+  router.post('/me/leaves/:id/cancel', authenticate, requirePermission('leave.apply'), async (req: AuthedRequest, res, next) => { try { if (!req.auth!.employeeId) return fail(res,409,'EMPLOYEE_NOT_LINKED','No employee profile is linked.'); const request=await prisma.leaveRequest.findFirst({where:{id:String(req.params.id),companyId:req.auth!.companyId,employeeId:req.auth!.employeeId,status:{in:['PENDING','APPROVED']}}});if(!request)return fail(res,404,'LEAVE_NOT_CANCELLABLE','Leave request was not found or cannot be cancelled.');if(request.startDate<=indiaDate()&&request.status==='APPROVED')return fail(res,409,'LEAVE_ALREADY_STARTED','Approved leave cannot be self-cancelled after it starts.');await prisma.leaveRequest.update({where:{id:request.id},data:{status:'CANCELLED'}});await prisma.auditLog.create({data:{companyId:req.auth!.companyId,userId:req.auth!.id,userName:req.auth!.id,userRole:req.auth!.role,action:'CANCEL_LEAVE',category:'LEAVE',details:`Leave ${request.id} cancelled by employee.`,ipAddress:clientIp(req)}});return ok(res,{cancelled:true}) } catch(e){next(e)} });
 
   router.get('/me/payslips', authenticate, requirePermission('payslip.read.self'), async (req: AuthedRequest, res, next) => { try {
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked.');
@@ -372,13 +427,18 @@ export function createV1Router(prisma: PrismaClient) {
   router.post('/me/expenses', authenticate, requirePermission('expense.submit'), async (req: AuthedRequest, res, next) => { try {
     const body = z.object({ title: z.string().trim().min(3).max(150), category: z.enum(['TRAVEL', 'MEALS', 'HARDWARE', 'CERTIFICATION', 'MISC']), amount: z.number().positive().max(10_000_000), expenseDate: z.coerce.date(), notes: z.string().max(1000).optional() }).parse(req.body);
     if (!req.auth!.employeeId) return fail(res, 409, 'EMPLOYEE_NOT_LINKED', 'No employee profile is linked.');
-    const expense = await prisma.expenseClaim.create({ data: { ...body, companyId: req.auth!.companyId, employeeId: req.auth!.employeeId, currency: 'INR' } });
-    return ok(res, expense, 201);
+    const result = await prisma.$transaction(async tx => { const expense = await tx.expenseClaim.create({ data: { ...body, companyId: req.auth!.companyId, employeeId: req.auth!.employeeId!, currency: 'INR' } }); const workflow = await startConfiguredWorkflow(tx, { companyId: req.auth!.companyId, requesterUserId: req.auth!.id, module: 'EXPENSE', subjectType: 'ExpenseClaim', subjectId: expense.id, title: expense.title, summary: expense.notes || undefined, payload: { category: expense.category, amount: expense.amount, currency: expense.currency, expenseDate: expense.expenseDate.toISOString() } }); return { expense, workflowId: workflow?.id }; });
+    return ok(res, { ...result.expense, workflowId: result.workflowId }, 201);
   } catch (e) { next(e); } });
 
-  router.get('/employees', authenticate, requirePermission('employee.read.all'), async (req: AuthedRequest, res, next) => { try {
+  router.get('/employees', authenticate, async (req: AuthedRequest, res, next) => { try {
+    const auth = req.auth!;
+    const canRead = auth.permissions.some(permission => ['employee.read.all', 'employee.read.team', 'employee.read.self'].includes(permission));
+    if (!canRead) return fail(res, 403, 'FORBIDDEN', 'You do not have permission to read employees.');
     const page = Math.max(1, Number(req.query.page || 1)); const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 25)));
-    const search = String(req.query.search || '').trim(); const where = { companyId: req.auth!.companyId, ...(search ? { OR: [{ firstName: { contains: search, mode: 'insensitive' as const } }, { lastName: { contains: search, mode: 'insensitive' as const } }, { employeeCode: { contains: search, mode: 'insensitive' as const } }] } : {}) };
+    const scopedFilters = employeeScopeFilters(auth, rolePermissions);
+    if (!scopedFilters.length) return ok(res, [], 200, { page, pageSize, total: 0, totalPages: 0 });
+    const search = String(req.query.search || '').trim(); const where = { companyId: auth.companyId, OR: scopedFilters, ...(search ? { AND: [{ OR: [{ firstName: { contains: search, mode: 'insensitive' as const } }, { lastName: { contains: search, mode: 'insensitive' as const } }, { employeeCode: { contains: search, mode: 'insensitive' as const } }] }] } : {}) };
     const [items, total] = await prisma.$transaction([prisma.employee.findMany({ where, include: { department: true, designation: true }, skip: (page - 1) * pageSize, take: pageSize, orderBy: { createdAt: 'desc' } }), prisma.employee.count({ where })]);
     return ok(res, items, 200, { page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
   } catch (e) { next(e); } });
@@ -454,16 +514,23 @@ export function createV1Router(prisma: PrismaClient) {
   } catch (e) { next(e); } });
 
   router.post('/employees/onboard', authenticate, requirePermission('employee.manage'), async (req: AuthedRequest, res, next) => { try {
-    const body = z.object({ employeeCode: z.string().trim().min(2).max(30), firstName: z.string().trim().min(1).max(80), lastName: z.string().trim().min(1).max(80), email: z.string().email(), departmentId: z.string().uuid(), designationId: z.string().uuid(), reportingManagerId: z.string().uuid().optional(), dateOfJoining: z.coerce.date(), employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN']).default('FULL_TIME'), workLocation: z.string().max(120).optional(), phone: z.string().max(30).optional() }).parse(req.body);
+    const body = z.object({ employeeCode: z.string().trim().min(2).max(30), firstName: z.string().trim().min(1).max(80), lastName: z.string().trim().min(1).max(80), email: z.string().email(), departmentId: z.string().uuid(), designationId: z.string().uuid(), reportingManagerId: z.string().uuid().optional(), branchId: z.string().uuid().optional(), workLocationId: z.string().uuid().optional(), teamId: z.string().uuid().optional(), costCenterId: z.string().uuid().optional(), employeeGradeId: z.string().uuid().optional(), dateOfJoining: z.coerce.date(), confirmationDate: z.coerce.date().optional(), probationEndDate: z.coerce.date().optional(), employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN', 'CONSULTANT']).default('FULL_TIME'), workLocation: z.string().max(120).optional(), phone: z.string().max(30).optional() }).parse(req.body);
     const idempotencyKey = req.header('idempotency-key'); if (!idempotencyKey) return fail(res, 400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required.');
     const old = await prisma.idempotencyRecord.findUnique({ where: { companyId_userId_key_operation: { companyId: req.auth!.companyId, userId: req.auth!.id, key: idempotencyKey, operation: 'EMPLOYEE_ONBOARD' } } });
     if (old) return ok(res, old.responseJson, old.statusCode);
-    const [department, designation] = await Promise.all([prisma.department.findFirst({ where: { id: body.departmentId, companyId: req.auth!.companyId } }), prisma.designation.findFirst({ where: { id: body.designationId, companyId: req.auth!.companyId, departmentId: body.departmentId } })]);
+    const companyId = req.auth!.companyId;
+    const [department, designation, branch, location, team, costCenter, grade, manager] = await Promise.all([
+      prisma.department.findFirst({ where: { id: body.departmentId, companyId } }), prisma.designation.findFirst({ where: { id: body.designationId, companyId, departmentId: body.departmentId } }),
+      body.branchId ? prisma.branch.findFirst({ where: { id: body.branchId, companyId } }) : true, body.workLocationId ? prisma.workLocation.findFirst({ where: { id: body.workLocationId, companyId } }) : true,
+      body.teamId ? prisma.team.findFirst({ where: { id: body.teamId, companyId } }) : true, body.costCenterId ? prisma.costCenter.findFirst({ where: { id: body.costCenterId, companyId } }) : true,
+      body.employeeGradeId ? prisma.employeeGrade.findFirst({ where: { id: body.employeeGradeId, companyId } }) : true, body.reportingManagerId ? prisma.employee.findFirst({ where: { id: body.reportingManagerId, companyId } }) : true,
+    ]);
     if (!department || !designation) return fail(res, 400, 'ORGANIZATION_INVALID', 'Department or designation is invalid for this company.');
+    if (!branch || !location || !team || !costCenter || !grade || !manager) return fail(res, 400, 'ORGANIZATION_INVALID', 'One or more organization assignments are invalid for this company.');
     const email = body.email.toLowerCase(); const activation = createOpaqueToken(); const temporaryPassword = createTemporaryPassword(); const response = await prisma.$transaction(async tx => {
       const duplicate = await tx.user.findUnique({ where: { email } }); if (duplicate) throw Object.assign(new Error('A user with this email already exists.'), { status: 409, code: 'EMAIL_EXISTS' });
       const user = await tx.user.create({ data: { companyId: req.auth!.companyId, email, fullName: `${body.firstName} ${body.lastName}`, role: 'EMPLOYEE', passwordHash: await bcrypt.hash(temporaryPassword, 12) } });
-      const employee = await tx.employee.create({ data: { companyId: req.auth!.companyId, userId: user.id, employeeCode: body.employeeCode, firstName: body.firstName, lastName: body.lastName, email, departmentId: body.departmentId, designationId: body.designationId, reportingManagerId: body.reportingManagerId, dateOfJoining: body.dateOfJoining, employmentType: body.employmentType, status: 'ON_PROBATION', workLocation: body.workLocation, phone: body.phone, skills: [] } });
+      const employee = await tx.employee.create({ data: { companyId, userId: user.id, employeeCode: body.employeeCode, firstName: body.firstName, lastName: body.lastName, email, departmentId: body.departmentId, designationId: body.designationId, reportingManagerId: body.reportingManagerId, branchId: body.branchId, workLocationId: body.workLocationId, teamId: body.teamId, costCenterId: body.costCenterId, employeeGradeId: body.employeeGradeId, dateOfJoining: body.dateOfJoining, confirmationDate: body.confirmationDate, probationEndDate: body.probationEndDate, employmentType: body.employmentType, status: 'ON_PROBATION', workLocation: body.workLocation, phone: body.phone, skills: [] } });
       await tx.actionToken.create({ data: { userId: user.id, type: 'ACCOUNT_ACTIVATION', tokenHash: activation.hash, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
       const delivery = await tx.emailDelivery.create({ data: { companyId: req.auth!.companyId, userId: user.id, employeeId: employee.id, idempotencyKey: `onboard:${idempotencyKey}`, messageType: 'EMPLOYEE_ONBOARDING', recipient: email } });
       const result = { employee, emailDelivery: { id: delivery.id, status: delivery.status } };
@@ -488,6 +555,20 @@ export function createV1Router(prisma: PrismaClient) {
     void deliverOnboardingEmail(prisma, delivery.id, token.token, temporaryPassword);
     return ok(res, { id: delivery.id, status: delivery.status }, 202);
   } catch (e) { next(e); } });
+
+  router.use(createFoundationRouter(prisma, authenticate));
+  router.use(createWorkflowRouter(prisma, authenticate));
+  router.use(createAttendancePolicyRouter(prisma, authenticate));
+  router.use(createPayrollRouter(prisma, authenticate));
+  router.use(createPayrollComplianceRouter(prisma, authenticate));
+  router.use(createWorkspaceRouter(prisma, authenticate));
+  router.use(createNotificationRouter(prisma, authenticate));
+  router.use(createReportRouter(prisma, authenticate));
+  router.use(createPerformanceRouter(prisma, authenticate));
+  router.use(createSelfServiceRouter(prisma, authenticate));
+  router.use(createReminderRouter(prisma, authenticate));
+  router.use(createAiAssistantRouter(prisma, authenticate));
+  router.use(createGovernanceRouter(prisma, authenticate));
 
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ZodError) return fail(res, 400, 'VALIDATION_ERROR', 'Request validation failed.', error.flatten().fieldErrors);

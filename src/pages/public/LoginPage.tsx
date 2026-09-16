@@ -23,6 +23,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const { login } = useAuth();
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
+  const [mfaCode, setMfaCode] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -39,7 +40,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setIsSubmitting(true);
 
     try {
-      const success = await login(email, password);
+      const success = await login(email, password, mfaCode || undefined);
       if (success) {
         onLoginSuccess();
       } else {
@@ -130,6 +131,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1.5">Authenticator code <span className="text-slate-500">(if enabled)</span></label>
+              <input type="text" inputMode="numeric" maxLength={6} value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,''))} placeholder="6-digit code" className="w-full bg-slate-900/90 border border-slate-700/80 rounded-2xl px-3.5 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 text-xs font-mono tracking-[0.35em]" />
             </div>
 
             <div className="flex items-center justify-between pt-1">
