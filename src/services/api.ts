@@ -276,6 +276,10 @@ export const api = {
     }),
 
   // Recruitment
+  getRecruitmentWorkspace: async () => (await fetchJSON<ApiEnvelope<{jobs: JobPosting[]; applicants: JobApplicant[]}>>(`${API_BASE}/v1/recruitment`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createJobV1: async (job: Omit<JobPosting,'id'|'companyId'|'applicantCount'|'postedAt'>) => (await fetchJSON<ApiEnvelope<JobPosting>>(`${API_BASE}/v1/recruitment/jobs`, { method:'POST', headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}, body:JSON.stringify(job) })).data,
+  createApplicantV1: async (body: Record<string, unknown>) => (await fetchJSON<ApiEnvelope<JobApplicant>>(`${API_BASE}/v1/recruitment/applicants`, { method:'POST', headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}, body:JSON.stringify(body) })).data,
+  advanceApplicantV1: async (id:string,stage:string) => (await fetchJSON<ApiEnvelope<JobApplicant>>(`${API_BASE}/v1/recruitment/applicants/${id}/stage`, { method:'PATCH', headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}, body:JSON.stringify({stage}) })).data,
   getJobs: (companyId: string) => fetchJSON<JobPosting[]>(`${API_BASE}/recruitment/jobs?companyId=${companyId}`),
   saveJob: (job: any) => 
     fetchJSON<JobPosting>(`${API_BASE}/recruitment/jobs`, {

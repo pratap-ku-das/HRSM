@@ -1,54 +1,939 @@
-import { Router, type Request, type RequestHandler, type Response } from 'express';
-import type { Prisma, PrismaClient } from '@prisma/client';
-import { z } from 'zod';
-import { calculatePayroll, type SalaryComponentInput, type StatutoryRuleInput } from './payrollEngine.js';
-import { startConfiguredWorkflow } from './workflows.js';
+import {
+  Router,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from "express";
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { z } from "zod";
+import {
+  calculatePayroll,
+  type SalaryComponentInput,
+  type StatutoryRuleInput,
+} from "./payrollEngine.js";
+import { startConfiguredWorkflow } from "./workflows.js";
 
-type PayrollRequest = Request & { auth?: { id: string; companyId: string; role: string; permissions: string[] }; requestId?: string };
-const uuid = z.string().uuid(); const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
-const monthRange = (month: string) => { const [year, value] = month.split('-').map(Number); return { start: new Date(Date.UTC(year, value - 1, 1)), end: new Date(Date.UTC(year, value, 0)) }; };
-const countWorkingDays = (start: Date, end: Date) => { let count = 0; for (let date = new Date(start); date <= end; date = new Date(date.getTime() + 86_400_000)) if (![0, 6].includes(date.getUTCDay())) count++; return count; };
+type PayrollRequest = Request & {
+  auth?: { id: string; companyId: string; role: string; permissions: string[] };
+  requestId?: string;
+};
+const uuid = z.string().uuid();
+const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
+const monthRange = (month: string) => {
+  const [year, value] = month.split("-").map(Number);
+  return {
+    start: new Date(Date.UTC(year, value - 1, 1)),
+    end: new Date(Date.UTC(year, value, 0)),
+  };
+};
+const countWorkingDays = (start: Date, end: Date) => {
+  let count = 0;
+  for (
+    let date = new Date(start);
+    date <= end;
+    date = new Date(date.getTime() + 86_400_000)
+  )
+    if (![0, 6].includes(date.getUTCDay())) count++;
+  return count;
+};
 
-export function createPayrollRouter(prisma: PrismaClient, authenticate: RequestHandler) {
-  const router = Router(); const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ data, meta: { requestId: (res.req as PayrollRequest).requestId } }); const fail = (res: Response, status: number, code: string, message: string) => res.status(status).json({ error: { code, message } });
-  const permit = (permission: string): RequestHandler => (req: PayrollRequest, res, next) => req.auth?.permissions.includes(permission) ? next() : fail(res, 403, 'FORBIDDEN', 'You do not have permission to perform this action.');
-  const audit = (req: PayrollRequest, action: string, details: string) => prisma.auditLog.create({ data: { companyId: req.auth!.companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action, category: 'PAYROLL', details, ipAddress: req.ip || 'unknown' } });
-  router.use('/payroll', authenticate, permit('payroll.manage'));
+export function createPayrollRouter(
+  prisma: PrismaClient,
+  authenticate: RequestHandler,
+) {
+  const router = Router();
+  const ok = (res: Response, data: unknown, status = 200) =>
+    res
+      .status(status)
+      .json({
+        data,
+        meta: { requestId: (res.req as PayrollRequest).requestId },
+      });
+  const fail = (res: Response, status: number, code: string, message: string) =>
+    res.status(status).json({ error: { code, message } });
+  const permit =
+    (permission: string): RequestHandler =>
+    (req: PayrollRequest, res, next) =>
+      req.auth?.permissions.includes(permission)
+        ? next()
+        : fail(
+            res,
+            403,
+            "FORBIDDEN",
+            "You do not have permission to perform this action.",
+          );
+  const audit = (req: PayrollRequest, action: string, details: string) =>
+    prisma.auditLog.create({
+      data: {
+        companyId: req.auth!.companyId,
+        userId: req.auth!.id,
+        userName: req.auth!.id,
+        userRole: req.auth!.role,
+        action,
+        category: "PAYROLL",
+        details,
+        ipAddress: req.ip || "unknown",
+      },
+    });
+  router.use("/payroll", authenticate, permit("payroll.manage"));
 
-  router.get('/payroll/config', async (req: PayrollRequest, res, next) => { try { const companyId = req.auth!.companyId; const [structures, revisions, rules, loans, runs] = await prisma.$transaction([
-    prisma.salaryStructure.findMany({ where: { companyId }, include: { components: { orderBy: { sequence: 'asc' } }, revisions: false }, orderBy: { name: 'asc' } }),
-    prisma.employeeSalaryRevision.findMany({ where: { companyId }, include: { employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } }, structure: true }, orderBy: { effectiveFrom: 'desc' } }),
-    prisma.statutoryRuleVersion.findMany({ where: { companyId }, orderBy: [{ type: 'asc' }, { effectiveFrom: 'desc' }] }),
-    prisma.employeeLoan.findMany({ where: { companyId }, include: { employee: { select: { employeeCode: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } }),
-    prisma.payrollRun.findMany({ where: { companyId }, include: { lines: true }, orderBy: { month: 'desc' } }),
-  ]); return ok(res, { structures, revisions, rules, loans, runs }); } catch (error) { next(error); } });
+  router.get("/payroll/config", async (req: PayrollRequest, res, next) => {
+    try {
+      const companyId = req.auth!.companyId;
+      const [structures, revisions, rules, loans, runs] =
+        await prisma.$transaction([
+          prisma.salaryStructure.findMany({
+            where: { companyId },
+            include: {
+              components: { orderBy: { sequence: "asc" } },
+              revisions: false,
+            },
+            orderBy: { name: "asc" },
+          }),
+          prisma.employeeSalaryRevision.findMany({
+            where: { companyId },
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  employeeCode: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+              structure: true,
+            },
+            orderBy: { effectiveFrom: "desc" },
+          }),
+          prisma.statutoryRuleVersion.findMany({
+            where: { companyId },
+            orderBy: [{ type: "asc" }, { effectiveFrom: "desc" }],
+          }),
+          prisma.employeeLoan.findMany({
+            where: { companyId },
+            include: {
+              employee: {
+                select: { employeeCode: true, firstName: true, lastName: true },
+              },
+            },
+            orderBy: { createdAt: "desc" },
+          }),
+          prisma.payrollRun.findMany({
+            where: { companyId },
+            include: { lines: true },
+            orderBy: { month: "desc" },
+          }),
+        ]);
+      return ok(res, { structures, revisions, rules, loans, runs });
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  router.post('/payroll/structures', async (req: PayrollRequest, res, next) => { try { const body = z.object({ name: z.string().trim().min(2).max(120), code: z.string().trim().min(2).max(40).transform(v => v.toUpperCase()), description: z.string().max(300).optional(), components: z.array(z.object({ code: z.string().trim().min(2).max(40).transform(v => v.toUpperCase()), name: z.string().trim().min(2).max(100), kind: z.enum(['EARNING', 'DEDUCTION', 'EMPLOYER_CONTRIBUTION', 'REIMBURSEMENT']), method: z.enum(['FIXED', 'PERCENT_BASIC', 'PERCENT_GROSS']).default('FIXED'), value: z.number().min(0), taxable: z.boolean().default(true), proratable: z.boolean().default(true), statutoryType: z.enum(['PF', 'ESI', 'PROFESSIONAL_TAX', 'TDS', 'LWF']).optional() })).min(1).max(100) }).parse(req.body); const value = await prisma.salaryStructure.create({ data: { companyId: req.auth!.companyId, name: body.name, code: body.code, description: body.description, components: { create: body.components.map((item, sequence) => ({ ...item, sequence: sequence + 1 })) } }, include: { components: true } }); await audit(req, 'CREATE_SALARY_STRUCTURE', `${value.code} created.`); return ok(res, value, 201); } catch (error) { next(error); } });
+  router.post("/payroll/structures", async (req: PayrollRequest, res, next) => {
+    try {
+      const body = z
+        .object({
+          name: z.string().trim().min(2).max(120),
+          code: z
+            .string()
+            .trim()
+            .min(2)
+            .max(40)
+            .transform((v) => v.toUpperCase()),
+          description: z.string().max(300).optional(),
+          components: z
+            .array(
+              z.object({
+                code: z
+                  .string()
+                  .trim()
+                  .min(2)
+                  .max(40)
+                  .transform((v) => v.toUpperCase()),
+                name: z.string().trim().min(2).max(100),
+                kind: z.enum([
+                  "EARNING",
+                  "DEDUCTION",
+                  "EMPLOYER_CONTRIBUTION",
+                  "REIMBURSEMENT",
+                ]),
+                method: z
+                  .enum(["FIXED", "PERCENT_BASIC", "PERCENT_GROSS"])
+                  .default("FIXED"),
+                value: z.number().min(0),
+                taxable: z.boolean().default(true),
+                proratable: z.boolean().default(true),
+                statutoryType: z
+                  .enum(["PF", "ESI", "PROFESSIONAL_TAX", "TDS", "LWF"])
+                  .optional(),
+              }),
+            )
+            .min(1)
+            .max(100),
+        })
+        .parse(req.body);
+      const value = await prisma.salaryStructure.create({
+        data: {
+          companyId: req.auth!.companyId,
+          name: body.name,
+          code: body.code,
+          description: body.description,
+          components: {
+            create: body.components.map((item, sequence) => ({
+              ...item,
+              sequence: sequence + 1,
+            })),
+          },
+        },
+        include: { components: true },
+      });
+      await audit(req, "CREATE_SALARY_STRUCTURE", `${value.code} created.`);
+      return ok(res, value, 201);
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  router.post('/payroll/revisions', async (req: PayrollRequest, res, next) => { try { const body = z.object({ employeeId: uuid, structureId: uuid, effectiveFrom: z.coerce.date(), annualCtc: z.number().positive(), componentValues: z.record(z.string(), z.number()).optional(), reason: z.string().max(500).optional() }).parse(req.body); const companyId = req.auth!.companyId; const [employee, structure] = await Promise.all([prisma.employee.findFirst({ where: { id: body.employeeId, companyId } }), prisma.salaryStructure.findFirst({ where: { id: body.structureId, companyId, active: true } })]); if (!employee || !structure) return fail(res, 400, 'SALARY_ASSIGNMENT_INVALID', 'Employee or structure is not part of this company.'); const result = await prisma.$transaction(async tx => { const revision = await tx.employeeSalaryRevision.create({ data: { ...body, companyId, status: 'PENDING', componentValues: body.componentValues } }); const workflow = await startConfiguredWorkflow(tx, { companyId, requesterUserId: req.auth!.id, module: 'SALARY_REVISION', subjectType: 'EmployeeSalaryRevision', subjectId: revision.id, title: `Salary revision for ${employee.employeeCode}`, summary: body.reason, payload: { employeeId: employee.id, effectiveFrom: body.effectiveFrom.toISOString(), annualCtc: body.annualCtc } }); if (workflow) await tx.employeeSalaryRevision.update({ where: { id: revision.id }, data: { workflowInstanceId: workflow.id } }); return { ...revision, workflowInstanceId: workflow?.id }; }); return ok(res, result, 201); } catch (error) { next(error); } });
+  router.post("/payroll/revisions", async (req: PayrollRequest, res, next) => {
+    try {
+      const body = z
+        .object({
+          employeeId: uuid,
+          structureId: uuid,
+          effectiveFrom: z.coerce.date(),
+          annualCtc: z.number().positive(),
+          componentValues: z.record(z.string(), z.number()).optional(),
+          reason: z.string().max(500).optional(),
+        })
+        .parse(req.body);
+      const companyId = req.auth!.companyId;
+      const [employee, structure] = await Promise.all([
+        prisma.employee.findFirst({
+          where: { id: body.employeeId, companyId },
+        }),
+        prisma.salaryStructure.findFirst({
+          where: { id: body.structureId, companyId, active: true },
+        }),
+      ]);
+      if (!employee || !structure)
+        return fail(
+          res,
+          400,
+          "SALARY_ASSIGNMENT_INVALID",
+          "Employee or structure is not part of this company.",
+        );
+      const result = await prisma.$transaction(async (tx) => {
+        const revision = await tx.employeeSalaryRevision.create({
+          data: {
+            ...body,
+            companyId,
+            status: "PENDING",
+            componentValues: body.componentValues,
+          },
+        });
+        const workflow = await startConfiguredWorkflow(tx, {
+          companyId,
+          requesterUserId: req.auth!.id,
+          module: "SALARY_REVISION",
+          subjectType: "EmployeeSalaryRevision",
+          subjectId: revision.id,
+          title: `Salary revision for ${employee.employeeCode}`,
+          summary: body.reason,
+          payload: {
+            employeeId: employee.id,
+            effectiveFrom: body.effectiveFrom.toISOString(),
+            annualCtc: body.annualCtc,
+          },
+        });
+        if (workflow)
+          await tx.employeeSalaryRevision.update({
+            where: { id: revision.id },
+            data: { workflowInstanceId: workflow.id },
+          });
+        return { ...revision, workflowInstanceId: workflow?.id };
+      });
+      return ok(res, result, 201);
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  router.post('/payroll/revisions/:id/approve', permit('payroll.approve'), async (req: PayrollRequest, res, next) => { try { const companyId = req.auth!.companyId; const revision = await prisma.employeeSalaryRevision.findFirst({ where: { id: String(req.params.id), companyId, status: 'PENDING' } }); if (!revision) return fail(res, 409, 'REVISION_STATE_INVALID', 'Pending salary revision was not found.'); await prisma.$transaction([prisma.employeeSalaryRevision.updateMany({ where: { companyId, employeeId: revision.employeeId, status: 'APPROVED', effectiveFrom: { lte: revision.effectiveFrom } }, data: { status: 'SUPERSEDED' } }), prisma.employeeSalaryRevision.update({ where: { id: revision.id }, data: { status: 'APPROVED', approvedById: req.auth!.id, approvedAt: new Date() } }), audit(req, 'APPROVE_SALARY_REVISION', `Salary revision ${revision.id} approved.`)]); return ok(res, { status: 'APPROVED' }); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/revisions/:id/approve",
+    permit("payroll.approve"),
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const revision = await prisma.employeeSalaryRevision.findFirst({
+          where: { id: String(req.params.id), companyId, status: "PENDING" },
+        });
+        if (!revision)
+          return fail(
+            res,
+            409,
+            "REVISION_STATE_INVALID",
+            "Pending salary revision was not found.",
+          );
+        await prisma.$transaction([
+          prisma.employeeSalaryRevision.updateMany({
+            where: {
+              companyId,
+              employeeId: revision.employeeId,
+              status: "APPROVED",
+              effectiveFrom: { lte: revision.effectiveFrom },
+            },
+            data: { status: "SUPERSEDED" },
+          }),
+          prisma.employeeSalaryRevision.update({
+            where: { id: revision.id },
+            data: {
+              status: "APPROVED",
+              approvedById: req.auth!.id,
+              approvedAt: new Date(),
+            },
+          }),
+          audit(
+            req,
+            "APPROVE_SALARY_REVISION",
+            `Salary revision ${revision.id} approved.`,
+          ),
+        ]);
+        return ok(res, { status: "APPROVED" });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  router.post('/payroll/statutory-rules', async (req: PayrollRequest, res, next) => { try { const body = z.object({ type: z.enum(['PF', 'ESI', 'PROFESSIONAL_TAX', 'TDS', 'LWF']), jurisdiction: z.string().trim().min(2).max(30).default('IN'), stateCode: z.string().trim().max(10).optional(), effectiveFrom: z.coerce.date(), effectiveTo: z.coerce.date().optional(), configuration: z.record(z.string(), z.unknown()), sourceNote: z.string().trim().max(500).optional() }).parse(req.body); const value = await prisma.statutoryRuleVersion.create({ data: { ...body, companyId: req.auth!.companyId, configuration: body.configuration as Prisma.InputJsonValue } }); await audit(req, 'CREATE_STATUTORY_RULE', `${value.type} rule version created.`); return ok(res, value, 201); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/statutory-rules",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const body = z
+          .object({
+            type: z.enum(["PF", "ESI", "PROFESSIONAL_TAX", "TDS", "LWF"]),
+            jurisdiction: z.string().trim().min(2).max(30).default("IN"),
+            stateCode: z.string().trim().max(10).optional(),
+            effectiveFrom: z.coerce.date(),
+            effectiveTo: z.coerce.date().optional(),
+            configuration: z.record(z.string(), z.unknown()),
+            sourceNote: z.string().trim().max(500).optional(),
+          })
+          .parse(req.body);
+        const value = await prisma.statutoryRuleVersion.create({
+          data: {
+            ...body,
+            companyId: req.auth!.companyId,
+            configuration: body.configuration as Prisma.InputJsonValue,
+          },
+        });
+        await audit(
+          req,
+          "CREATE_STATUTORY_RULE",
+          `${value.type} rule version created.`,
+        );
+        return ok(res, value, 201);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  router.post('/payroll/loans', async (req: PayrollRequest, res, next) => { try { const body = z.object({ employeeId: uuid, type: z.string().trim().min(2).max(80), principal: z.number().positive(), installment: z.number().positive(), interestRate: z.number().min(0).max(100).default(0), startsOn: z.coerce.date() }).parse(req.body); if (!await prisma.employee.findFirst({ where: { id: body.employeeId, companyId: req.auth!.companyId } })) return fail(res, 400, 'EMPLOYEE_INVALID', 'Employee is not part of this company.'); return ok(res, await prisma.employeeLoan.create({ data: { ...body, outstanding: body.principal, status: 'ACTIVE', companyId: req.auth!.companyId } }), 201); } catch (error) { next(error); } });
+  router.post("/payroll/loans", async (req: PayrollRequest, res, next) => {
+    try {
+      const body = z
+        .object({
+          employeeId: uuid,
+          type: z.string().trim().min(2).max(80),
+          principal: z.number().positive(),
+          installment: z.number().positive(),
+          interestRate: z.number().min(0).max(100).default(0),
+          startsOn: z.coerce.date(),
+        })
+        .parse(req.body);
+      if (
+        !(await prisma.employee.findFirst({
+          where: { id: body.employeeId, companyId: req.auth!.companyId },
+        }))
+      )
+        return fail(
+          res,
+          400,
+          "EMPLOYEE_INVALID",
+          "Employee is not part of this company.",
+        );
+      return ok(
+        res,
+        await prisma.employeeLoan.create({
+          data: {
+            ...body,
+            outstanding: body.principal,
+            status: "ACTIVE",
+            companyId: req.auth!.companyId,
+          },
+        }),
+        201,
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  router.post('/payroll/adjustments', async (req: PayrollRequest, res, next) => { try { const body = z.object({ employeeId: uuid, month: z.string().regex(monthPattern), code: z.string().trim().min(2).max(40).transform(v => v.toUpperCase()), name: z.string().trim().min(2).max(100), kind: z.enum(['EARNING', 'DEDUCTION', 'EMPLOYER_CONTRIBUTION', 'REIMBURSEMENT']), amount: z.number(), reason: z.string().trim().min(3).max(500) }).parse(req.body); if (!await prisma.employee.findFirst({ where: { id: body.employeeId, companyId: req.auth!.companyId } })) return fail(res, 400, 'EMPLOYEE_INVALID', 'Employee is not part of this company.'); return ok(res, await prisma.payrollAdjustment.create({ data: { ...body, companyId: req.auth!.companyId, createdById: req.auth!.id } }), 201); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/adjustments",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const body = z
+          .object({
+            employeeId: uuid,
+            month: z.string().regex(monthPattern),
+            code: z
+              .string()
+              .trim()
+              .min(2)
+              .max(40)
+              .transform((v) => v.toUpperCase()),
+            name: z.string().trim().min(2).max(100),
+            kind: z.enum([
+              "EARNING",
+              "DEDUCTION",
+              "EMPLOYER_CONTRIBUTION",
+              "REIMBURSEMENT",
+            ]),
+            amount: z.number(),
+            reason: z.string().trim().min(3).max(500),
+          })
+          .parse(req.body);
+        if (
+          !(await prisma.employee.findFirst({
+            where: { id: body.employeeId, companyId: req.auth!.companyId },
+          }))
+        )
+          return fail(
+            res,
+            400,
+            "EMPLOYEE_INVALID",
+            "Employee is not part of this company.",
+          );
+        return ok(
+          res,
+          await prisma.payrollAdjustment.create({
+            data: {
+              ...body,
+              companyId: req.auth!.companyId,
+              createdById: req.auth!.id,
+            },
+          }),
+          201,
+        );
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  router.post('/payroll/runs', async (req: PayrollRequest, res, next) => { try { const body = z.object({ month: z.string().regex(monthPattern) }).parse(req.body); const range = monthRange(body.month); const value = await prisma.payrollRun.create({ data: { companyId: req.auth!.companyId, month: body.month, status: 'DRAFT', periodStart: range.start, periodEnd: range.end, totalEmployees: 0, totalGrossSalary: 0, totalDeductions: 0, totalNetPayout: 0 } }); await audit(req, 'CREATE_PAYROLL_RUN', `Payroll ${body.month} created.`); return ok(res, value, 201); } catch (error) { next(error); } });
+  router.post("/payroll/runs", async (req: PayrollRequest, res, next) => {
+    try {
+      const body = z
+        .object({ month: z.string().regex(monthPattern) })
+        .parse(req.body);
+      const range = monthRange(body.month);
+      const value = await prisma.payrollRun.create({
+        data: {
+          companyId: req.auth!.companyId,
+          month: body.month,
+          status: "DRAFT",
+          periodStart: range.start,
+          periodEnd: range.end,
+          totalEmployees: 0,
+          totalGrossSalary: 0,
+          totalDeductions: 0,
+          totalNetPayout: 0,
+        },
+      });
+      await audit(req, "CREATE_PAYROLL_RUN", `Payroll ${body.month} created.`);
+      return ok(res, value, 201);
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  router.post('/payroll/runs/:id/lock-attendance', async (req: PayrollRequest, res, next) => { try { const run = await prisma.payrollRun.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId, status: 'DRAFT' } }); if (!run?.periodStart || !run.periodEnd) return fail(res, 409, 'PAYROLL_STATE_INVALID', 'Only a draft payroll run can lock attendance.'); const result = await prisma.$transaction(async tx => { const lock = await tx.attendancePeriodLock.create({ data: { companyId: run.companyId, periodStart: run.periodStart!, periodEnd: run.periodEnd!, lockedById: req.auth!.id, reason: `Payroll ${run.month}` } }); return tx.payrollRun.update({ where: { id: run.id }, data: { status: 'ATTENDANCE_LOCKED', attendanceLockId: lock.id } }); }); await audit(req, 'LOCK_PAYROLL_ATTENDANCE', `Attendance locked for ${run.month}.`); return ok(res, result); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/runs/:id/lock-attendance",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const run = await prisma.payrollRun.findFirst({
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+            status: "DRAFT",
+          },
+        });
+        if (!run?.periodStart || !run.periodEnd)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "Only a draft payroll run can lock attendance.",
+          );
+        const result = await prisma.$transaction(async (tx) => {
+          const lock = await tx.attendancePeriodLock.create({
+            data: {
+              companyId: run.companyId,
+              periodStart: run.periodStart!,
+              periodEnd: run.periodEnd!,
+              lockedById: req.auth!.id,
+              reason: `Payroll ${run.month}`,
+            },
+          });
+          return tx.payrollRun.update({
+            where: { id: run.id },
+            data: { status: "ATTENDANCE_LOCKED", attendanceLockId: lock.id },
+          });
+        });
+        await audit(
+          req,
+          "LOCK_PAYROLL_ATTENDANCE",
+          `Attendance locked for ${run.month}.`,
+        );
+        return ok(res, result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  router.post('/payroll/runs/:id/calculate', async (req: PayrollRequest, res, next) => { try { const companyId = req.auth!.companyId; const run = await prisma.payrollRun.findFirst({ where: { id: String(req.params.id), companyId, status: { in: ['ATTENDANCE_LOCKED', 'CALCULATED'] } } }); if (!run?.periodStart || !run.periodEnd) return fail(res, 409, 'PAYROLL_STATE_INVALID', 'Attendance must be locked before calculation.'); const employees = await prisma.employee.findMany({ where: { companyId, status: { in: ['ACTIVE', 'ON_PROBATION', 'ON_LEAVE'] } }, select: { id: true } }); const days = countWorkingDays(run.periodStart, run.periodEnd); const rules = await prisma.statutoryRuleVersion.findMany({ where: { companyId, active: true, effectiveFrom: { lte: run.periodEnd }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: run.periodStart } }] } }); const adjustments = await prisma.payrollAdjustment.findMany({ where: { companyId, month: run.month } }); const lines = [];
-    for (const employee of employees) { const revision = await prisma.employeeSalaryRevision.findFirst({ where: { companyId, employeeId: employee.id, status: 'APPROVED', effectiveFrom: { lte: run.periodEnd } }, include: { structure: { include: { components: { orderBy: { sequence: 'asc' } } } } }, orderBy: { effectiveFrom: 'desc' } }); if (!revision) continue; const attendance = await prisma.attendanceRecord.findMany({ where: { companyId, employeeId: employee.id, date: { gte: run.periodStart, lte: run.periodEnd } } }); const payableDays = attendance.reduce((sum, item) => sum + (['PRESENT', 'LATE'].includes(item.status) ? 1 : item.status === 'HALF_DAY' ? .5 : 0), 0); const loan = await prisma.employeeLoan.findFirst({ where: { companyId, employeeId: employee.id, status: 'ACTIVE', startsOn: { lte: run.periodEnd } }, orderBy: { startsOn: 'asc' } }); const calculated = calculatePayroll({ components: revision.structure.components as SalaryComponentInput[], overrides: (revision.componentValues || undefined) as Record<string, number> | undefined, adjustments: adjustments.filter(item => item.employeeId === employee.id), rules: rules.map(item => ({ type: item.type, configuration: item.configuration as Record<string, unknown> })) as StatutoryRuleInput[], workingDays: days, payableDays, loanInstallment: loan ? Math.min(loan.installment, loan.outstanding) : 0 }); lines.push({ employeeId: employee.id, ...calculated }); }
-    const totals = lines.reduce((value, line) => ({ gross: value.gross + line.grossEarnings, deductions: value.deductions + line.employeeDeductions, net: value.net + line.netPay }), { gross: 0, deductions: 0, net: 0 }); const result = await prisma.$transaction(async tx => { await tx.payrollLine.deleteMany({ where: { payrollRunId: run.id } }); for (const line of lines) await tx.payrollLine.create({ data: { ...line, payrollRunId: run.id, breakdown: line.breakdown, calculationTrace: line.calculationTrace } }); return tx.payrollRun.update({ where: { id: run.id }, data: { status: 'CALCULATED', calculatedAt: new Date(), totalEmployees: lines.length, totalGrossSalary: totals.gross, totalDeductions: totals.deductions, totalNetPayout: totals.net } }); }); await audit(req, 'CALCULATE_PAYROLL', `${run.month} calculated for ${lines.length} employees.`); return ok(res, result); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/runs/:id/calculate",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const run = await prisma.payrollRun.findFirst({
+          where: {
+            id: String(req.params.id),
+            companyId,
+            status: { in: ["ATTENDANCE_LOCKED", "CALCULATED"] },
+          },
+        });
+        if (!run?.periodStart || !run.periodEnd)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "Attendance must be locked before calculation.",
+          );
+        const employees = await prisma.employee.findMany({
+          where: {
+            companyId,
+            status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
+          },
+          select: { id: true },
+        });
+        const days = countWorkingDays(run.periodStart, run.periodEnd);
+        const rules = await prisma.statutoryRuleVersion.findMany({
+          where: {
+            companyId,
+            active: true,
+            effectiveFrom: { lte: run.periodEnd },
+            OR: [
+              { effectiveTo: null },
+              { effectiveTo: { gte: run.periodStart } },
+            ],
+          },
+        });
+        const adjustments = await prisma.payrollAdjustment.findMany({
+          where: { companyId, month: run.month },
+        });
+        const lines: Array<{ employeeId: string } & ReturnType<typeof calculatePayroll>> = [];
+        for (const employee of employees) {
+          const revision = await prisma.employeeSalaryRevision.findFirst({
+            where: {
+              companyId,
+              employeeId: employee.id,
+              status: "APPROVED",
+              effectiveFrom: { lte: run.periodEnd },
+            },
+            include: {
+              structure: {
+                include: { components: { orderBy: { sequence: "asc" } } },
+              },
+            },
+            orderBy: { effectiveFrom: "desc" },
+          });
+          if (!revision) continue;
+          const attendance = await prisma.attendanceRecord.findMany({
+            where: {
+              companyId,
+              employeeId: employee.id,
+              date: { gte: run.periodStart, lte: run.periodEnd },
+            },
+          });
+          const payableDays = attendance.reduce(
+            (sum, item) =>
+              sum +
+              (["PRESENT", "LATE"].includes(item.status)
+                ? 1
+                : item.status === "HALF_DAY"
+                  ? 0.5
+                  : 0),
+            0,
+          );
+          const loan = await prisma.employeeLoan.findFirst({
+            where: {
+              companyId,
+              employeeId: employee.id,
+              status: "ACTIVE",
+              startsOn: { lte: run.periodEnd },
+            },
+            orderBy: { startsOn: "asc" },
+          });
+          const calculated = calculatePayroll({
+            components: revision.structure.components as SalaryComponentInput[],
+            overrides: (revision.componentValues || undefined) as
+              | Record<string, number>
+              | undefined,
+            adjustments: adjustments.filter(
+              (item) => item.employeeId === employee.id,
+            ),
+            rules: rules.map((item) => ({
+              type: item.type,
+              configuration: item.configuration as Record<string, unknown>,
+            })) as StatutoryRuleInput[],
+            workingDays: days,
+            payableDays,
+            loanInstallment: loan
+              ? Math.min(loan.installment, loan.outstanding)
+              : 0,
+          });
+          lines.push({ employeeId: employee.id, ...calculated });
+        }
+        const totals = lines.reduce(
+          (value, line) => ({
+            gross: value.gross + line.grossEarnings,
+            deductions: value.deductions + line.employeeDeductions,
+            net: value.net + line.netPay,
+          }),
+          { gross: 0, deductions: 0, net: 0 },
+        );
+        const result = await prisma.$transaction(async (tx) => {
+          await tx.payrollLine.deleteMany({ where: { payrollRunId: run.id } });
+          for (const line of lines)
+            await tx.payrollLine.create({
+              data: {
+                ...line,
+                payrollRunId: run.id,
+                breakdown: line.breakdown,
+                calculationTrace: line.calculationTrace,
+              },
+            });
+          return tx.payrollRun.update({
+            where: { id: run.id },
+            data: {
+              status: "CALCULATED",
+              calculatedAt: new Date(),
+              totalEmployees: lines.length,
+              totalGrossSalary: totals.gross,
+              totalDeductions: totals.deductions,
+              totalNetPayout: totals.net,
+            },
+          });
+        });
+        await audit(
+          req,
+          "CALCULATE_PAYROLL",
+          `${run.month} calculated for ${lines.length} employees.`,
+        );
+        return ok(res, result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  const transition = (path: string, permission: string, from: string[], to: 'HR_REVIEW'|'FINANCE_APPROVED'|'LOCKED', auditAction: string) => router.post(path, permit(permission), async (req: PayrollRequest, res, next) => { try { const now = new Date(); const data = to === 'HR_REVIEW' ? { status: to, hrReviewedById: req.auth!.id, hrReviewedAt: now } : to === 'FINANCE_APPROVED' ? { status: to, financeApprovedById: req.auth!.id, financeApprovedAt: now } : { status: to, lockedById: req.auth!.id, lockedAt: now }; const updated = await prisma.payrollRun.updateMany({ where: { id: String(req.params.id), companyId: req.auth!.companyId, status: { in: from as never } }, data }); if (!updated.count) return fail(res, 409, 'PAYROLL_STATE_INVALID', `Payroll is not ready for ${to}.`); await audit(req, auditAction, `Payroll ${req.params.id} moved to ${to}.`); return ok(res, { status: to }); } catch (error) { next(error); } });
-  transition('/payroll/runs/:id/hr-review', 'payroll.manage', ['CALCULATED'], 'HR_REVIEW', 'HR_REVIEW_PAYROLL'); transition('/payroll/runs/:id/finance-approve', 'payroll.approve', ['HR_REVIEW'], 'FINANCE_APPROVED', 'FINANCE_APPROVE_PAYROLL'); transition('/payroll/runs/:id/lock', 'payroll.approve', ['FINANCE_APPROVED'], 'LOCKED', 'LOCK_PAYROLL');
+  const transition = (
+    path: string,
+    permission: string,
+    from: string[],
+    to: "HR_REVIEW" | "FINANCE_APPROVED" | "LOCKED",
+    auditAction: string,
+  ) =>
+    router.post(
+      path,
+      permit(permission),
+      async (req: PayrollRequest, res, next) => {
+        try {
+          const now = new Date();
+          const data =
+            to === "HR_REVIEW"
+              ? { status: to, hrReviewedById: req.auth!.id, hrReviewedAt: now }
+              : to === "FINANCE_APPROVED"
+                ? {
+                    status: to,
+                    financeApprovedById: req.auth!.id,
+                    financeApprovedAt: now,
+                  }
+                : { status: to, lockedById: req.auth!.id, lockedAt: now };
+          const updated = await prisma.payrollRun.updateMany({
+            where: {
+              id: String(req.params.id),
+              companyId: req.auth!.companyId,
+              status: { in: from as never },
+            },
+            data,
+          });
+          if (!updated.count)
+            return fail(
+              res,
+              409,
+              "PAYROLL_STATE_INVALID",
+              `Payroll is not ready for ${to}.`,
+            );
+          await audit(
+            req,
+            auditAction,
+            `Payroll ${req.params.id} moved to ${to}.`,
+          );
+          return ok(res, { status: to });
+        } catch (error) {
+          next(error);
+        }
+      },
+    );
+  transition(
+    "/payroll/runs/:id/hr-review",
+    "payroll.manage",
+    ["CALCULATED"],
+    "HR_REVIEW",
+    "HR_REVIEW_PAYROLL",
+  );
+  transition(
+    "/payroll/runs/:id/finance-approve",
+    "payroll.approve",
+    ["HR_REVIEW"],
+    "FINANCE_APPROVED",
+    "FINANCE_APPROVE_PAYROLL",
+  );
+  transition(
+    "/payroll/runs/:id/lock",
+    "payroll.approve",
+    ["FINANCE_APPROVED"],
+    "LOCKED",
+    "LOCK_PAYROLL",
+  );
 
-  router.post('/payroll/runs/:id/publish', permit('payroll.approve'), async (req: PayrollRequest, res, next) => { try { const run = await prisma.payrollRun.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId, status: 'LOCKED' }, include: { lines: true } }); if (!run) return fail(res, 409, 'PAYROLL_STATE_INVALID', 'Locked payroll was not found.'); await prisma.$transaction(async tx => { for (const line of run.lines) { const breakdown = line.breakdown as Record<string, number>; await tx.payslip.upsert({ where: { payrollRunId_employeeId: { payrollRunId: run.id, employeeId: line.employeeId } }, create: { companyId: run.companyId, payrollRunId: run.id, employeeId: line.employeeId, month: run.month, basicSalary: breakdown.BASIC || 0, hra: breakdown.HRA || 0, allowances: Math.max(0, line.grossEarnings - (breakdown.BASIC || 0) - (breakdown.HRA || 0)), grossSalary: line.grossEarnings, providentFund: breakdown.PF_EMPLOYEE || 0, taxDeductions: (breakdown.TDS || 0) + (breakdown.PROFESSIONAL_TAX || 0), otherDeductions: Math.max(0, line.employeeDeductions - (breakdown.PF_EMPLOYEE || 0) - (breakdown.TDS || 0) - (breakdown.PROFESSIONAL_TAX || 0)), totalDeductions: line.employeeDeductions, netSalary: line.netPay, workingDays: Math.round(line.workingDays), presentDays: Math.round(line.payableDays), paidLeaveDays: 0, unpaidDays: Math.round(line.unpaidDays), status: 'PUBLISHED' }, update: { grossSalary: line.grossEarnings, totalDeductions: line.employeeDeductions, netSalary: line.netPay, status: 'PUBLISHED' } }); const repayment = breakdown.LOAN_REPAYMENT || 0; if (repayment > 0) { const loan = await tx.employeeLoan.findFirst({ where: { companyId: run.companyId, employeeId: line.employeeId, status: 'ACTIVE' }, orderBy: { startsOn: 'asc' } }); if (loan) { const amount = Math.min(repayment, loan.outstanding); await tx.loanRepayment.create({ data: { loanId: loan.id, payrollRunId: run.id, amount } }); await tx.employeeLoan.update({ where: { id: loan.id }, data: { outstanding: Math.max(0, loan.outstanding - amount), status: loan.outstanding - amount <= 0 ? 'CLOSED' : 'ACTIVE' } }); } } } await tx.payrollRun.update({ where: { id: run.id }, data: { status: 'PAYSLIPS_PUBLISHED', processedDate: new Date() } }); }); await audit(req, 'PUBLISH_PAYSLIPS', `${run.month} payslips published.`); return ok(res, { status: 'PAYSLIPS_PUBLISHED', count: run.lines.length }); } catch (error) { next(error); } });
+  router.post(
+    "/payroll/runs/:id/publish",
+    permit("payroll.approve"),
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const run = await prisma.payrollRun.findFirst({
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+            status: "LOCKED",
+          },
+          include: { lines: true },
+        });
+        if (!run)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "Locked payroll was not found.",
+          );
+        await prisma.$transaction(async (tx) => {
+          for (const line of run.lines) {
+            const breakdown = line.breakdown as Record<string, number>;
+            await tx.payslip.upsert({
+              where: {
+                payrollRunId_employeeId: {
+                  payrollRunId: run.id,
+                  employeeId: line.employeeId,
+                },
+              },
+              create: {
+                companyId: run.companyId,
+                payrollRunId: run.id,
+                employeeId: line.employeeId,
+                month: run.month,
+                basicSalary: breakdown.BASIC || 0,
+                hra: breakdown.HRA || 0,
+                allowances: Math.max(
+                  0,
+                  line.grossEarnings -
+                    (breakdown.BASIC || 0) -
+                    (breakdown.HRA || 0),
+                ),
+                grossSalary: line.grossEarnings,
+                providentFund: breakdown.PF_EMPLOYEE || 0,
+                taxDeductions:
+                  (breakdown.TDS || 0) + (breakdown.PROFESSIONAL_TAX || 0),
+                otherDeductions: Math.max(
+                  0,
+                  line.employeeDeductions -
+                    (breakdown.PF_EMPLOYEE || 0) -
+                    (breakdown.TDS || 0) -
+                    (breakdown.PROFESSIONAL_TAX || 0),
+                ),
+                totalDeductions: line.employeeDeductions,
+                netSalary: line.netPay,
+                workingDays: Math.round(line.workingDays),
+                presentDays: Math.round(line.payableDays),
+                paidLeaveDays: 0,
+                unpaidDays: Math.round(line.unpaidDays),
+                status: "PUBLISHED",
+              },
+              update: {
+                grossSalary: line.grossEarnings,
+                totalDeductions: line.employeeDeductions,
+                netSalary: line.netPay,
+                status: "PUBLISHED",
+              },
+            });
+            const repayment = breakdown.LOAN_REPAYMENT || 0;
+            if (repayment > 0) {
+              const loan = await tx.employeeLoan.findFirst({
+                where: {
+                  companyId: run.companyId,
+                  employeeId: line.employeeId,
+                  status: "ACTIVE",
+                },
+                orderBy: { startsOn: "asc" },
+              });
+              if (loan) {
+                const amount = Math.min(repayment, loan.outstanding);
+                await tx.loanRepayment.create({
+                  data: { loanId: loan.id, payrollRunId: run.id, amount },
+                });
+                await tx.employeeLoan.update({
+                  where: { id: loan.id },
+                  data: {
+                    outstanding: Math.max(0, loan.outstanding - amount),
+                    status:
+                      loan.outstanding - amount <= 0 ? "CLOSED" : "ACTIVE",
+                  },
+                });
+              }
+            }
+          }
+          await tx.payrollRun.update({
+            where: { id: run.id },
+            data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date() },
+          });
+        });
+        await audit(
+          req,
+          "PUBLISH_PAYSLIPS",
+          `${run.month} payslips published.`,
+        );
+        return ok(res, {
+          status: "PAYSLIPS_PUBLISHED",
+          count: run.lines.length,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  router.get('/payroll/runs/:id/bank-export-preview', permit('payroll.approve'), async (req: PayrollRequest, res, next) => { try { const run = await prisma.payrollRun.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId, status: { in: ['LOCKED', 'PAYSLIPS_PUBLISHED', 'BANK_EXPORTED'] } }, include: { lines: true } }); if (!run) return fail(res, 409, 'PAYROLL_STATE_INVALID', 'Locked payroll was not found.'); const employees = await prisma.employee.findMany({ where: { companyId: run.companyId, id: { in: run.lines.map(item => item.employeeId) } }, select: { id: true, employeeCode: true, firstName: true, lastName: true, accountNumber: true } }); const rows = run.lines.map(line => { const employee = employees.find(item => item.id === line.employeeId)!; const last4 = employee.accountNumber?.slice(-4); return { employeeCode: employee.employeeCode, beneficiary: `${employee.firstName} ${employee.lastName}`, maskedAccount: last4 ? `••••${last4}` : null, amount: line.netPay }; }); await audit(req, 'PREVIEW_PAYROLL_BANK_EXPORT', `${run.month} masked bank preview viewed for ${rows.length} employees.`); return ok(res, { month: run.month, deliveryRequired: true, rows }); } catch (error) { next(error); } });
-  router.post('/payroll/runs/:id/reverse', permit('payroll.approve'), async (req: PayrollRequest, res, next) => { try { const body = z.object({ reason: z.string().trim().min(5).max(500) }).parse(req.body); const updated = await prisma.payrollRun.updateMany({ where: { id: String(req.params.id), companyId: req.auth!.companyId, status: { in: ['LOCKED', 'PAYSLIPS_PUBLISHED', 'BANK_EXPORTED', 'PROCESSED', 'PAID'] } }, data: { status: 'REVERSED' } }); if (!updated.count) return fail(res, 409, 'PAYROLL_STATE_INVALID', 'A locked or published payroll run was not found.'); await audit(req, 'REVERSE_PAYROLL', `Payroll ${req.params.id} reversed: ${body.reason}`); return ok(res, { status: 'REVERSED' }); } catch (error) { next(error); } });
+  router.get(
+    "/payroll/runs/:id/bank-export-preview",
+    permit("payroll.approve"),
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const run = await prisma.payrollRun.findFirst({
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+            status: { in: ["LOCKED", "PAYSLIPS_PUBLISHED", "BANK_EXPORTED"] },
+          },
+          include: { lines: true },
+        });
+        if (!run)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "Locked payroll was not found.",
+          );
+        const employees = await prisma.employee.findMany({
+          where: {
+            companyId: run.companyId,
+            id: { in: run.lines.map((item) => item.employeeId) },
+          },
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+            accountNumber: true,
+          },
+        });
+        const rows = run.lines.map((line) => {
+          const employee = employees.find(
+            (item) => item.id === line.employeeId,
+          )!;
+          const last4 = employee.accountNumber?.slice(-4);
+          return {
+            employeeCode: employee.employeeCode,
+            beneficiary: `${employee.firstName} ${employee.lastName}`,
+            maskedAccount: last4 ? `••••${last4}` : null,
+            amount: line.netPay,
+          };
+        });
+        await audit(
+          req,
+          "PREVIEW_PAYROLL_BANK_EXPORT",
+          `${run.month} masked bank preview viewed for ${rows.length} employees.`,
+        );
+        return ok(res, { month: run.month, deliveryRequired: true, rows });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+  router.post(
+    "/payroll/runs/:id/reverse",
+    permit("payroll.approve"),
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const body = z
+          .object({ reason: z.string().trim().min(5).max(500) })
+          .parse(req.body);
+        const updated = await prisma.payrollRun.updateMany({
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+            status: {
+              in: [
+                "LOCKED",
+                "PAYSLIPS_PUBLISHED",
+                "BANK_EXPORTED",
+                "PROCESSED",
+                "PAID",
+              ],
+            },
+          },
+          data: { status: "REVERSED" },
+        });
+        if (!updated.count)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "A locked or published payroll run was not found.",
+          );
+        await audit(
+          req,
+          "REVERSE_PAYROLL",
+          `Payroll ${req.params.id} reversed: ${body.reason}`,
+        );
+        return ok(res, { status: "REVERSED" });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
   return router;
 }

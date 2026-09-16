@@ -22,6 +22,7 @@ import { createPerformanceRouter } from './performance.js';
 import { createSelfServiceRouter } from './selfService.js';
 import { createReminderRouter } from './reminders.js';
 import { createAiAssistantRouter } from './aiAssistant.js';
+import { createRecruitmentRouter } from './recruitment.js';
 import { verifyMfaCode } from './mfa.js';
 
 type AuthUser = { id: string; companyId: string; role: UserRole; employeeId?: string; permissions: string[]; accessScopes: AccessScope[]; tokenVersion: number };
@@ -568,6 +569,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createSelfServiceRouter(prisma, authenticate));
   router.use(createReminderRouter(prisma, authenticate));
   router.use(createAiAssistantRouter(prisma, authenticate));
+  router.use(createRecruitmentRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));
 
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

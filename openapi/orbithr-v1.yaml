@@ -510,6 +510,60 @@ paths:
     get:
       operationId: performanceWorkspace
       responses: {'200': {description: Scoped performance cycles and reviews}}
+  /recruitment:
+    get:
+      operationId: recruitmentWorkspace
+      responses: {'200': {description: Tenant-scoped job postings and applicants}}
+  /recruitment/jobs:
+    post:
+      operationId: createJobPosting
+      responses: {'201': {description: Job posting created}}
+  /recruitment/applicants:
+    post:
+      operationId: createJobApplicant
+      responses: {'201': {description: Applicant added and posting count updated}}
+  /recruitment/applicants/{id}/stage:
+    patch:
+      operationId: transitionApplicantStage
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Applicant stage and hiring timestamps updated}}
+  /recruitment:
+    get:
+      operationId: recruitmentWorkspace
+      responses: {'200': {description: Tenant-scoped job postings and applicants}}
+  /recruitment/jobs:
+    post:
+      operationId: createJobPosting
+      responses: {'201': {description: Job posting created}}
+  /recruitment/applicants:
+    post:
+      operationId: createJobApplicant
+      responses: {'201': {description: Applicant added and posting count updated}}
+  /recruitment/applicants/{id}/stage:
+    patch:
+      operationId: transitionApplicantStage
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Applicant stage and hiring timestamps updated}}
+  /recruitment:
+    get:
+      operationId: recruitmentWorkspace
+      responses: {'200': {description: Tenant-scoped job postings and applicants}}
+  /recruitment/jobs:
+    post:
+      operationId: createJobPosting
+      responses: {'201': {description: Job posting created}}
+  /recruitment/applicants:
+    post:
+      operationId: createJobApplicant
+      responses: {'201': {description: Applicant added and posting count updated}}
+  /recruitment/applicants/{id}/stage:
+    patch:
+      operationId: transitionApplicantStage
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+      responses: {'200': {description: Applicant stage and hiring timestamps updated}}
   /performance-engine/cycles:
     post:
       operationId: createPerformanceCycle

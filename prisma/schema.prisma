@@ -1597,7 +1597,10 @@ model JobApplicant {
   stage           JobStage @default(APPLIED)
   rating          Int      @default(5)
   notes           String?
+  source          String?
   appliedAt       DateTime @default(now())
+  stageUpdatedAt  DateTime @default(now())
+  hiredAt         DateTime?
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   jobPosting JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)

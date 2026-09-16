@@ -290,6 +290,9 @@ export interface JobApplicant {
   rating: number; // 1-5
   notes: string;
   appliedAt: string;
+  source?: string;
+  stageUpdatedAt?: string;
+  hiredAt?: string;
   resumeUrl?: string;
 }
 
