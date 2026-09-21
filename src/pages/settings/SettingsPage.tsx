@@ -29,7 +29,7 @@ export const SettingsPage: React.FC = () => {
     catch (error) { toast.error('Settings save failed', error instanceof Error ? error.message : 'Unknown error'); }
     finally { setBusy(false); }
   };
-  return <div className="neo-page space-y-5">
+  return <div className="neo-page neo-settings space-y-5">
     <header className="border-b border-slate-800 pb-4"><h1 className="text-2xl font-bold flex gap-2"><Settings className="text-brand-400" />Workspace Settings</h1><p className="text-xs text-slate-400">Authoritative legal identity, timezone, business hours and policy defaults.</p></header>
     <form onSubmit={save} className="space-y-4">
       <section className="grid md:grid-cols-2 gap-3 bg-slate-900 border border-slate-800 rounded-2xl p-5">

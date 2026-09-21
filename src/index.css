@@ -847,3 +847,138 @@ button:disabled { cursor: not-allowed; }
 @media(max-width:900px){.neo-page{padding-inline:20px}.neo-page>:first-child{min-height:116px}}
 @media(max-width:640px){.neo-page{padding-inline:14px}.neo-page>:first-child{min-height:138px}.neo-page table{min-width:640px}.neo-empty-state{min-height:180px;padding:24px 18px}}
 @media(max-width:520px){.neo-metric-grid{grid-template-columns:1fr}.neo-metric-card{min-height:88px}}
+
+/* Workspace layout v2: page-scoped, compact, and responsive. */
+.app-page-frame { min-height:100%; }
+.neo-page {
+  width:min(100%,1500px);
+  min-height:auto;
+  padding:24px clamp(18px,2.2vw,32px) 48px;
+  gap:18px;
+}
+.neo-page.space-y-5 > :not([hidden]) ~ :not([hidden]) { margin-top:0!important; }
+.neo-page > :first-child {
+  flex:none;
+  min-height:112px;
+  padding:22px 26px!important;
+}
+.neo-page > :first-child > div { min-width:0;position:relative;z-index:1; }
+.neo-page > :first-child:has(> h1) { flex-direction:column;align-items:flex-start;justify-content:center; }
+.neo-page > :first-child h1 { display:flex;align-items:center;gap:11px;font-size:clamp(25px,2.1vw,34px)!important; }
+.neo-page > :first-child p { margin-top:6px!important; }
+.neo-page > :first-child > button { margin-left:auto;flex:none; }
+
+/* Never let generic card styling turn direct controls into cards. */
+.neo-page > .grid > :is(input,select,textarea,button)[class*="rounded"] {
+  min-height:46px!important;
+  height:46px!important;
+  padding:10px 12px!important;
+  border-radius:12px!important;
+  box-shadow:none!important;
+  transform:none!important;
+}
+.neo-page > form.grid,
+.neo-page > .grid > form,
+.neo-page form[class*="bg-slate-900"] {
+  min-height:0!important;
+  align-items:start!important;
+  align-content:start!important;
+}
+.neo-page form :is(input:not([type="checkbox"]):not([type="radio"]),select,button) {
+  height:46px!important;
+  min-height:46px!important;
+  max-height:46px!important;
+}
+.neo-page form textarea { min-height:92px!important;height:92px!important; }
+.neo-page form button { display:inline-flex;align-items:center;justify-content:center;padding:10px 14px!important;font-weight:700; }
+.neo-page input::placeholder,.neo-page textarea::placeholder { color:#9a93a5!important;opacity:1; }
+
+/* Horizontal creation/filter bars used by directory, attendance, leave, assets and recruiting. */
+.neo-employees > form,
+.neo-attendance > form,
+.neo-leaves > form,
+.neo-assets > form,
+.neo-recruitment > form,
+.neo-documents > form {
+  padding:16px!important;
+  gap:10px!important;
+}
+.neo-employees > form { grid-template-columns:repeat(4,minmax(150px,1fr)); }
+.neo-attendance > form { grid-template-columns:minmax(220px,1.25fr) repeat(3,minmax(160px,1fr)) minmax(150px,.75fr); }
+.neo-leaves > form { grid-template-columns:repeat(4,minmax(135px,1fr)); }
+.neo-assets > form,.neo-recruitment > form { grid-template-columns:repeat(3,minmax(170px,1fr)); }
+.neo-documents > form { grid-template-columns:1fr 1fr 2fr minmax(140px,.7fr); }
+
+/* Module-specific proportions. */
+.neo-departments > .grid:first-of-type { align-items:start; }
+.neo-payroll > .grid:first-of-type { align-items:stretch; }
+.neo-payroll > .grid:first-of-type > * { min-height:300px; }
+.neo-attendance-policy > .grid:first-of-type > *,
+.neo-performance > .grid:first-of-type > *,
+.neo-settings > form { min-height:0!important; }
+.neo-command-center > .grid:last-child,
+.neo-attendance-requests > .grid,
+.neo-recruitment > .grid { align-items:start; }
+.neo-workflows > .grid { grid-template-columns:minmax(340px,420px) minmax(0,1fr);align-items:start; }
+.neo-foundation > .grid { align-items:start; }
+
+/* Tables and empty modules remain useful instead of looking broken. */
+.neo-page > .overflow-x-auto,
+.neo-page > div:has(> table) {
+  border:1px solid #e3deea;
+  border-radius:18px;
+  background:#fff;
+  box-shadow:0 14px 36px #301d4c0b;
+}
+.neo-page table { width:100%; }
+.neo-page tbody:empty::after { width:100%; }
+.neo-assets > .grid:last-child:empty::before,
+.neo-documents > .grid:last-child:empty::before,
+.neo-expenses > .space-y-3:empty::before,
+.neo-performance > section.grid:empty::before {
+  content:'No records have been added yet.';
+  grid-column:1/-1;
+  min-height:180px;
+  display:grid;
+  place-items:center;
+  color:#81798c;
+  border:1px dashed #d9d0e5;
+  border-radius:18px;
+  background:#fbf9fd;
+}
+.neo-expenses > .space-y-3:empty,.neo-performance > section.grid:empty { display:grid; }
+
+/* Toasts stay readable without covering the full workspace. */
+.app-shell + div,
+.fixed.bottom-5.right-5 { max-width:360px!important; }
+.fixed.bottom-5.right-5 > div { min-height:72px; }
+
+@media(max-width:1280px) {
+  .neo-employees > form { grid-template-columns:repeat(3,minmax(150px,1fr)); }
+  .neo-attendance > form { grid-template-columns:repeat(3,minmax(160px,1fr)); }
+  .neo-leaves > form { grid-template-columns:repeat(3,minmax(150px,1fr)); }
+}
+@media(max-width:1024px) {
+  .neo-employees > form,.neo-attendance > form,.neo-leaves > form,
+  .neo-assets > form,.neo-recruitment > form,.neo-documents > form {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .neo-workflows > .grid { grid-template-columns:1fr; }
+}
+@media(max-width:700px) {
+  .neo-page { padding:14px 12px 32px;gap:14px; }
+  .neo-page > :first-child { min-height:128px;padding:18px!important; }
+  .neo-page > :first-child h1 { align-items:flex-start;font-size:24px!important; }
+  .neo-page > :first-child h1 svg { width:34px!important;height:34px!important; }
+  .neo-employees > form,.neo-attendance > form,.neo-leaves > form,
+  .neo-assets > form,.neo-recruitment > form,.neo-documents > form {
+    grid-template-columns:1fr;
+  }
+  .neo-page form [class*="col-span"] { grid-column:auto; }
+  .fixed.bottom-5.right-5 { left:12px!important;right:12px!important;bottom:12px!important;width:auto!important;max-width:none!important;padding:0!important; }
+}
+@media(max-height:720px) and (min-width:768px) {
+  .sidebar-footer > :last-child { display:none!important; }
+  .sidebar-footer { padding:8px!important; }
+  .sidebar-nav { padding-top:10px!important;padding-bottom:10px!important; }
+}

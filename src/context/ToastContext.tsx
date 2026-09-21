@@ -32,6 +32,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const showToast = useCallback(
     ({ type, title, message, duration = 4000 }: Omit<Toast, 'id'>) => {
+      if (type === 'error' && message?.toLowerCase().includes('session has expired')) return;
       const id = Math.random().toString(36).substring(2, 9);
       const newToast: Toast = { id, type, title, message, duration };
 
@@ -49,6 +50,12 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [removeToast]
   );
+
+  React.useEffect(() => {
+    const clearExpiredSessionErrors = () => setToasts([]);
+    window.addEventListener('orbithr:session-expired', clearExpiredSessionErrors);
+    return () => window.removeEventListener('orbithr:session-expired', clearExpiredSessionErrors);
+  }, []);
 
   const success = useCallback((title: string, message?: string) => showToast({ type: 'success', title, message }), [showToast]);
   const error = useCallback((title: string, message?: string) => showToast({ type: 'error', title, message }), [showToast]);

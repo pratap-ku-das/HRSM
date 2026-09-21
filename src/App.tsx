@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/layout/Navbar';
@@ -60,9 +60,9 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     localStorage.setItem('orbithr_active_view', activeView);
-    workspaceRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+    if (workspaceRef.current) workspaceRef.current.scrollTop = 0;
   }, [activeView]);
 
   useEffect(() => {
@@ -210,7 +210,7 @@ const MainApp: React.FC = () => {
 
         {/* Dynamic Page Content */}
         <main ref={workspaceRef} className="app-workspace flex-1 overflow-y-auto relative">
-          <div className="app-page-frame">
+          <div key={activeView} className="app-page-frame">
             {renderActiveView()}
           </div>
         </main>

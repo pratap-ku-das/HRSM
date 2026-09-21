@@ -126,7 +126,7 @@ export const EmployeeDirectory: React.FC = () => {
     }
   };
   return (
-    <div className="neo-page space-y-5">
+    <div className="neo-page neo-employees space-y-5">
       <header className="flex justify-between border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-2xl font-bold flex gap-2">
