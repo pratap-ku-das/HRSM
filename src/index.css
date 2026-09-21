@@ -799,3 +799,48 @@ button:disabled { cursor: not-allowed; }
   .glass-card,
   .app-workspace [class*="rounded-3xl"][class*="border"] { transform: none !important; }
 }
+
+/* OrbitHR workspace refinement: predictable controls, panels and zero-data views. */
+.neo-page { max-width:1540px; gap:20px; }
+.neo-page > .grid > :where(section,article,form,div)[class*="rounded"] { min-height:auto; }
+.neo-page :where(input,select,textarea),.neo-page > .grid > :where(input,select,textarea)[class*="rounded"] { width:100%;min-width:0;min-height:44px!important;padding:10px 12px!important;line-height:1.35;border-radius:12px!important; }
+.neo-page textarea { min-height:92px!important;resize:vertical; }
+.neo-page input[type="checkbox"],.neo-page input[type="radio"] { width:17px!important;min-height:17px!important;padding:0!important; }
+.neo-page > .grid > :where(input,select,textarea)[class*="rounded"]:hover { transform:none;box-shadow:inset 0 2px 5px #3d27520a!important; }
+.neo-page form { align-content:start; }
+.neo-page form > h2 { margin-bottom:4px;color:#292238;font-size:15px; }
+.neo-page table { min-width:720px; }
+.neo-page th,.neo-page td { padding-inline:16px!important; }
+.neo-page tbody:empty::after { content:'No records to display yet';display:table-cell;height:116px;padding:38px 18px;color:#81798c;text-align:center;font-size:13px; }
+.neo-empty-state { width:100%;min-height:220px;padding:32px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#756d81;text-align:center;border:1px dashed #d9d0e5;border-radius:18px;background:linear-gradient(145deg,#fcfbfe,#f7f4fb); }
+.neo-empty-state--compact { min-height:136px;padding:22px; }
+.neo-empty-state__icon { width:46px;height:46px;display:grid;place-items:center;color:var(--page-accent,#6d3df5);border-radius:15px;background:color-mix(in srgb,var(--page-accent,#6d3df5) 10%,white); }
+.neo-empty-state__icon svg { width:22px;height:22px; }
+.neo-empty-state h3 { color:#292238;font:700 14px/1.35 var(--font-display); }
+.neo-empty-state p { max-width:440px;margin-top:4px;color:#81798c;font-size:12px;line-height:1.55; }
+.neo-empty-state__action { margin-top:4px; }
+.neo-metric-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px; }
+.neo-metric-card { min-height:112px;padding:18px;display:flex;align-items:center;gap:14px;text-align:left;border:1px solid #e4deea;border-radius:18px;background:linear-gradient(145deg,#fff,#faf8fc);box-shadow:0 14px 32px #301d4c0b; }
+.neo-metric-card__icon { width:44px;height:44px;display:grid;place-items:center;flex:none;border-radius:14px;background:#eee8ff;color:#6d3df5; }
+.neo-metric-card__icon svg { width:20px;height:20px; }
+.neo-metric-card span:last-child { display:flex;flex-direction:column-reverse; }
+.neo-metric-card small { color:#7d7588;font-size:11px;font-weight:700; }
+.neo-metric-card strong { color:#241d34;font:750 27px/1.15 var(--font-display); }
+.neo-metric-card--emerald .neo-metric-card__icon { color:#12845b;background:#e2f7ee; }
+.neo-metric-card--rose .neo-metric-card__icon { color:#cf476c;background:#fde9ef; }
+.neo-metric-card--amber .neo-metric-card__icon { color:#bd7917;background:#fff3db; }
+.neo-count { min-width:22px;height:22px;padding:0 7px;display:inline-grid;place-items:center;color:#6137ce;border-radius:99px;background:#eee8ff;font-size:10px; }
+.neo-list-row { min-height:54px;padding:11px 4px;display:flex;align-items:center;gap:10px;border-top:1px solid #eee9f2; }
+.neo-list-row strong { display:block;color:#332b40;font-size:12px;line-height:1.4; }
+.neo-list-row small { display:block;margin-top:3px;color:#81798c;font-size:10px;line-height:1.4; }
+.neo-list-row--split { justify-content:space-between; }
+.neo-list-row time { color:#7d7588;font-size:11px; }
+.neo-status-dot { width:8px;height:8px;flex:none;border-radius:99px;background:#7c3aed;box-shadow:0 0 0 4px #7c3aed14; }
+.neo-status-dot--warning { background:#e7a325;box-shadow:0 0 0 4px #e7a32516; }
+.neo-status-dot--critical { background:#e34d6f;box-shadow:0 0 0 4px #e34d6f16; }
+.neo-page section:has(> h2:only-child)::after { content:'No items have been added yet.';min-height:108px;margin-top:10px;display:grid;place-items:center;color:#81798c;border:1px dashed #d9d0e5;border-radius:15px;background:#faf8fc;font-size:12px; }
+@media(hover:hover){.neo-page>.grid>[class*="rounded"]:hover,.neo-page [class*="rounded-3xl"][class*="border"]:hover{transform:translateY(-2px)}}
+@media(max-width:1100px){.neo-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.neo-page{padding-inline:20px}.neo-page>:first-child{min-height:116px}}
+@media(max-width:640px){.neo-page{padding-inline:14px}.neo-page>:first-child{min-height:138px}.neo-page table{min-width:640px}.neo-empty-state{min-height:180px;padding:24px 18px}}
+@media(max-width:520px){.neo-metric-grid{grid-template-columns:1fr}.neo-metric-card{min-height:88px}}
