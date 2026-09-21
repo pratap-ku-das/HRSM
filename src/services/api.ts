@@ -11,6 +11,13 @@ const REFRESH_TOKEN_KEY = 'orbithr_refresh_token';
 
 type ApiEnvelope<T> = { data: T; meta?: Record<string, unknown> };
 let refreshRequest: Promise<string> | null = null;
+let sessionExpiryAnnounced = false;
+
+function announceSessionExpiry() {
+  if (sessionExpiryAnnounced) return;
+  sessionExpiryAnnounced = true;
+  window.dispatchEvent(new CustomEvent('orbithr:session-expired'));
+}
 
 async function renewAccessToken(): Promise<string> {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
@@ -29,6 +36,7 @@ async function renewAccessToken(): Promise<string> {
     }).catch(error => {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
+      announceSessionExpiry();
       throw error;
     }).finally(() => { refreshRequest = null; });
   }
@@ -76,6 +84,7 @@ export const api = {
     });
     localStorage.setItem(ACCESS_TOKEN_KEY, result.data.accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
+    sessionExpiryAnnounced = false;
     return result.data;
   },
   activateAccount: (token: string, password: string) =>
@@ -94,6 +103,7 @@ export const api = {
   clearV1Session: () => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    sessionExpiryAnnounced = false;
   },
   hasV1Session: () => Boolean(localStorage.getItem(ACCESS_TOKEN_KEY)),
 

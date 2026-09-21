@@ -35,7 +35,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const id = Math.random().toString(36).substring(2, 9);
       const newToast: Toast = { id, type, title, message, duration };
 
-      setToasts((prev) => [...prev, newToast]);
+      setToasts((prev) => {
+        const duplicate = prev.some((item) => item.type === type && item.title === title && item.message === message);
+        if (duplicate) return prev;
+        return [...prev.slice(-2), newToast];
+      });
 
       if (duration > 0) {
         setTimeout(() => {

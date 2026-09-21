@@ -33,6 +33,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSettings(await api.getWorkspaceSettingsV1());
   };
   const clearSession = () => { api.clearV1Session(); setCurrentUser(null); setCurrentCompany(null); setSettings(null); };
+  useEffect(() => {
+    const handleSessionExpiry = () => clearSession();
+    window.addEventListener('orbithr:session-expired', handleSessionExpiry);
+    return () => window.removeEventListener('orbithr:session-expired', handleSessionExpiry);
+  }, []);
   const refreshState = async () => {
     setIsRestoringSession(true);
     try {

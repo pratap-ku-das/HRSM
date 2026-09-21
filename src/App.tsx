@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/layout/Navbar';
@@ -46,6 +46,7 @@ const MainApp: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const workspaceRef = useRef<HTMLElement>(null);
 
   // Global keyboard listener for Ctrl+K or Cmd+K
   useEffect(() => {
@@ -61,7 +62,14 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem('orbithr_active_view', activeView);
+    workspaceRef.current?.scrollTo({ top: 0, behavior: 'instant' });
   }, [activeView]);
+
+  useEffect(() => {
+    const handleSessionExpiry = () => setPageMode('public_login');
+    window.addEventListener('orbithr:session-expired', handleSessionExpiry);
+    return () => window.removeEventListener('orbithr:session-expired', handleSessionExpiry);
+  }, []);
 
   if (window.location.pathname === '/activate') {
     return <ActivateAccountPage onNavigateToLogin={() => { window.history.replaceState({}, '', '/'); setPageMode('public_login'); }} />;
@@ -201,7 +209,7 @@ const MainApp: React.FC = () => {
         />
 
         {/* Dynamic Page Content */}
-        <main className="app-workspace flex-1 overflow-y-auto relative">
+        <main ref={workspaceRef} className="app-workspace flex-1 overflow-y-auto relative">
           <div className="app-page-frame">
             {renderActiveView()}
           </div>
