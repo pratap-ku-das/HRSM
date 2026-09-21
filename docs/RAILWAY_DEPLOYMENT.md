@@ -30,9 +30,9 @@ generates Prisma Client, starts Express, and checks
 SPA fallback required for `/activate?token=...`.
 
 Use Supabase's IPv4-compatible pooler URL for `DATABASE_URL`. Transaction mode on port
-`6543` should include `?pgbouncer=true&connection_limit=1`. Before promotion,
-Railway runs `npx prisma migrate deploy` through `preDeployCommand`; a failed migration
-prevents the new release from replacing the current healthy deployment. Never use
+`6543` should include `?pgbouncer=true&connection_limit=1`. The Railway start command
+runs `npx prisma migrate deploy` before starting Express; a failed migration prevents
+the new container from becoming healthy. Never use
 `prisma db push` for production releases.
 
 The IAM identity used for employee-specific face attendance needs only Rekognition
