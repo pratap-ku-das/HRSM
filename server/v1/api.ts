@@ -2446,6 +2446,7 @@ export function createV1Router(prisma: PrismaClient) {
         status?: number;
         code?: string;
         message?: string;
+        meta?: { column?: string };
       };
       console.error(
         `[${(res.req as AuthedRequest).requestId}]`,
@@ -2458,6 +2459,9 @@ export function createV1Router(prisma: PrismaClient) {
         typed.status
           ? typed.message || "Request failed."
           : "An unexpected error occurred.",
+        typed.code === "P2022" && typed.meta?.column
+          ? { missingColumn: typed.meta.column }
+          : undefined,
       );
     },
   );
