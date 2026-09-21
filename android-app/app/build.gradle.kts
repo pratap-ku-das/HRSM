@@ -15,8 +15,8 @@ android {
         applicationId = "com.orbithr.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 7
-        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.2"
+        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 8
+        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${providers.gradleProperty("ORBIT_API_BASE_URL").orElse("http://10.0.2.2:3001/api/v1/").get()}\"")
     }
@@ -33,7 +33,7 @@ android {
 
             val storeFilePath = props.getProperty("RELEASE_STORE_FILE")
                 ?: providers.gradleProperty("RELEASE_STORE_FILE").orNull
-                ?: "../orbithr-release.jks"
+                ?: "signing-backup-new-key-unused/orbithr-new-unused.jks"
             val storePass = props.getProperty("RELEASE_STORE_PASSWORD")
                 ?: providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
             val keyAliasName = props.getProperty("RELEASE_KEY_ALIAS")
@@ -42,8 +42,9 @@ android {
             val keyPass = props.getProperty("RELEASE_KEY_PASSWORD")
                 ?: providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
 
-            if (storePass != null && keyPass != null && file(storeFilePath).exists()) {
-                storeFile = file(storeFilePath)
+            val resolvedStoreFile = rootProject.file(storeFilePath)
+            if (storePass != null && keyPass != null && resolvedStoreFile.exists()) {
+                storeFile = resolvedStoreFile
                 storePassword = storePass
                 keyAlias = keyAliasName
                 keyPassword = keyPass
