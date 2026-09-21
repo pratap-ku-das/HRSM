@@ -1,0 +1,14 @@
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "branchId" TEXT;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "confirmationDate" DATE;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "costCenterId" TEXT;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "employeeGradeId" TEXT;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "lastWorkingDay" DATE;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "probationEndDate" DATE;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "resignationDate" DATE;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "teamId" TEXT;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "workLocationId" TEXT;
+CREATE INDEX IF NOT EXISTS "Employee_branchId_idx" ON "Employee"("branchId");
+CREATE INDEX IF NOT EXISTS "Employee_workLocationId_idx" ON "Employee"("workLocationId");
+CREATE INDEX IF NOT EXISTS "Employee_teamId_idx" ON "Employee"("teamId");
+CREATE INDEX IF NOT EXISTS "Employee_costCenterId_idx" ON "Employee"("costCenterId");
+CREATE INDEX IF NOT EXISTS "Employee_employeeGradeId_idx" ON "Employee"("employeeGradeId");
