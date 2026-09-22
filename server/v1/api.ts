@@ -304,23 +304,48 @@ async function issueSession(
   metadata?: { ipAddress?: string; userAgent?: string },
 ) {
   const opaque = createOpaqueToken();
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: opaque.hash,
-      familyId,
-      deviceName,
-      ipAddress: metadata?.ipAddress,
-      userAgent: metadata?.userAgent,
-      expiresAt: new Date(Date.now() + refreshDays * 86_400_000),
-    },
-  });
-  const access = await resolvedAccess(
-    prisma,
-    user.id,
-    user.companyId,
-    user.role,
-  );
+  const [, grants] = await prisma.$transaction([
+    prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: opaque.hash,
+        familyId,
+        deviceName,
+        ipAddress: metadata?.ipAddress,
+        userAgent: metadata?.userAgent,
+        expiresAt: new Date(Date.now() + refreshDays * 86_400_000),
+      },
+    }),
+    prisma.userAccessGrant.findMany({
+      where: {
+        userId: user.id,
+        companyId: user.companyId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        role: { active: true },
+      },
+      include: {
+        role: {
+          include: { rolePermissions: { include: { permission: true } } },
+        },
+      },
+    }),
+  ]);
+  const accessScopes = grants.map((grant) => ({
+    scope: grant.scope,
+    scopeEntityId: grant.scopeEntityId,
+    permissions: grant.role.rolePermissions.map(
+      (value) => value.permission.key,
+    ),
+  }));
+  const access = {
+    permissions: [
+      ...new Set([
+        ...rolePermissions[user.role],
+        ...accessScopes.flatMap((grant) => grant.permissions),
+      ]),
+    ],
+    accessScopes,
+  };
   const auth: AuthUser = {
     id: user.id,
     companyId: user.companyId,
@@ -446,17 +471,20 @@ export function createV1Router(prisma: PrismaClient) {
             .optional(),
         })
         .parse(req.body);
-      const user = await prisma.user.findUnique({
-        where: { email: body.email.toLowerCase() },
-        include: { employee: true, mfaMethod: true },
-      });
-      const recentFailures = await prisma.loginAttempt.count({
-        where: {
-          email: body.email.toLowerCase(),
-          success: false,
-          createdAt: { gt: new Date(Date.now() - 15 * 60_000) },
-        },
-      });
+      const normalizedEmail = body.email.toLowerCase();
+      const [user, recentFailures] = await prisma.$transaction([
+        prisma.user.findUnique({
+          where: { email: normalizedEmail },
+          include: { employee: true, mfaMethod: true },
+        }),
+        prisma.loginAttempt.count({
+          where: {
+            email: normalizedEmail,
+            success: false,
+            createdAt: { gt: new Date(Date.now() - 15 * 60_000) },
+          },
+        }),
+      ]);
       if (recentFailures >= 10)
         return fail(
           res,
@@ -516,28 +544,30 @@ export function createV1Router(prisma: PrismaClient) {
         undefined,
         { ipAddress: clientIp(req), userAgent: req.header("user-agent") },
       );
-      await prisma.loginAttempt.create({
-        data: {
-          companyId: user.companyId,
-          userId: user.id,
-          email: user.email,
-          success: true,
-          ipAddress: clientIp(req),
-          userAgent: req.header("user-agent"),
-        },
-      });
-      await prisma.auditLog.create({
-        data: {
-          companyId: user.companyId,
-          userId: user.id,
-          userName: user.fullName,
-          userRole: user.role,
-          action: "USER_LOGIN_V1",
-          category: "AUTH",
-          details: "Authenticated session created.",
-          ipAddress: req.ip || "unknown",
-        },
-      });
+      await prisma.$transaction([
+        prisma.loginAttempt.create({
+          data: {
+            companyId: user.companyId,
+            userId: user.id,
+            email: user.email,
+            success: true,
+            ipAddress: clientIp(req),
+            userAgent: req.header("user-agent"),
+          },
+        }),
+        prisma.auditLog.create({
+          data: {
+            companyId: user.companyId,
+            userId: user.id,
+            userName: user.fullName,
+            userRole: user.role,
+            action: "USER_LOGIN_V1",
+            category: "AUTH",
+            details: "Authenticated session created.",
+            ipAddress: req.ip || "unknown",
+          },
+        }),
+      ]);
       return ok(res, session);
     } catch (e) {
       next(e);
