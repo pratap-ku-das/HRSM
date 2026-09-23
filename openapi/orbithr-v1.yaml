@@ -409,6 +409,7 @@ paths:
         - {in: header, name: Idempotency-Key, schema: {type: string}}
       responses:
         '202': {description: Onboarding email accepted}
+        '409': {description: Employee portal account is already active}
   /employees/{id}/lifecycle:
     patch:
       operationId: updateEmployeeLifecycle

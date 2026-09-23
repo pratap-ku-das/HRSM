@@ -185,6 +185,14 @@ export const api = {
       },
       body: JSON.stringify(emp),
     }),
+  resendOnboarding: (employeeId: string) =>
+    fetchJSON<ApiEnvelope<{ id: string; status: string }>>(`${API_BASE}/v1/employees/${employeeId}/resend-onboarding`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}`,
+        'Idempotency-Key': crypto.randomUUID(),
+      },
+    }),
   deleteEmployee: (id: string) => 
     fetchJSON<{ success: boolean }>(`${API_BASE}/employees/${id}`, {
       method: 'DELETE',

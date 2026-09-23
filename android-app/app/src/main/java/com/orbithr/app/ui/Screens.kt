@@ -653,12 +653,20 @@ fun EmployeeHubScreen(back:()->Unit,vm:MobileWorkspaceViewModel=hiltViewModel())
 @Composable private fun ServiceRequestDialog(dismiss:()->Unit,submit:(CreateServiceRequest)->Unit){var type by remember{mutableStateOf("DOCUMENT_REQUEST")};var title by remember{mutableStateOf("")};var reason by remember{mutableStateOf("")};var amount by remember{mutableStateOf("")};AlertDialog(onDismissRequest=dismiss,title={Text("New employee request")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(listOf("DOCUMENT_REQUEST","SALARY_CERTIFICATE","ADVANCE")){value->FilterChip(selected=type==value,onClick={type=value},label={Text(value.replace('_',' '))})}};OutlinedTextField(title,{title=it},label={Text("Title")});OutlinedTextField(reason,{reason=it},label={Text("Reason")},minLines=2);if(type=="ADVANCE")OutlinedTextField(amount,{amount=it.filter{c->c.isDigit()||c=='.'}},label={Text("Amount")})}},confirmButton={Button(onClick={submit(CreateServiceRequest(type,title,reason,amount.toDoubleOrNull()))},enabled=title.length>=3&&reason.length>=3&&(type!="ADVANCE"||(amount.toDoubleOrNull()?:0.0)>0)){Text("Submit")}},dismissButton={TextButton(onClick=dismiss){Text("Cancel")}})}
 
 @Composable
-fun EmployeeScreen(back: () -> Unit, vm: EmployeeViewModel = hiltViewModel()) {
+fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
     val organization by vm.organization.collectAsState()
+    val onboarding by vm.onboarding.collectAsState()
     var search by remember { mutableStateOf("") }
     var showOnboarding by remember { mutableStateOf(false) }
-    Page("PEOPLE", "Employee directory", "Your connected workforce", action = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", back); OrbitIconButton(Icons.Outlined.PersonAdd, "Onboard employee") { showOnboarding = true } } }) {
+    LaunchedEffect(onboarding.data?.employee?.id) { if (onboarding.data != null) showOnboarding = false }
+    Page("PEOPLE", "Employee directory", "Your connected workforce", action = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", back); if (canManage) OrbitIconButton(Icons.Outlined.PersonAdd, "Onboard employee") { vm.clearOnboardingResult(); showOnboarding = true } } }) {
+        onboarding.data?.let { result ->
+            Surface(shape = RoundedCornerShape(16.dp), color = OrbitMint.copy(alpha = .1f)) {
+                Text("${result.employee.firstName} was onboarded. Activation email: ${result.emailDelivery.status.lowercase()}. HR must enroll the approved face on the web before mobile attendance.", Modifier.fillMaxWidth().padding(13.dp), style = MaterialTheme.typography.bodySmall, color = Color(0xFF075D4A))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
         OutlinedTextField(search, { search = it; vm.search(it.takeIf(String::isNotBlank)) }, Modifier.fillMaxWidth(), label = { Text("Search people") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, shape = RoundedCornerShape(17.dp), singleLine = true)
         Spacer(Modifier.height(12.dp))
         StateBody(state, { vm.search(search) }) { employees -> LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
@@ -672,15 +680,17 @@ fun EmployeeScreen(back: () -> Unit, vm: EmployeeViewModel = hiltViewModel()) {
     }
     if (showOnboarding) OnboardDialog(
         organization = organization,
+        onboarding = onboarding,
         dismiss = { showOnboarding = false },
         retryOrganization = vm::loadOrganization,
-    ) { vm.onboard(it); showOnboarding = false }
+    ) { vm.onboard(it) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OnboardDialog(
     organization: LoadState<OrganizationOptions>,
+    onboarding: LoadState<OnboardingDto>,
     dismiss: () -> Unit,
     retryOrganization: () -> Unit,
     submit: (OnboardEmployeeRequest) -> Unit,
@@ -773,12 +783,15 @@ private fun OnboardDialog(
                     TextButton(onClick = retryOrganization) { Text("Retry") }
                 }
             }
+            onboarding.error?.let { error ->
+                Text(error, style = MaterialTheme.typography.bodySmall, color = OrbitRose)
+            }
             if (!organization.loading && departments.isEmpty() && organization.error == null) {
                 Text("Create at least one department and designation before onboarding an employee.", style = MaterialTheme.typography.bodySmall, color = OrbitRose)
             }
             Text("OrbitHR creates the profile first, then securely delivers the activation email.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
         }
-    }, confirmButton = { Button(onClick = { submit(OnboardEmployeeRequest(code, first, last, email, departmentId, designationId, LocalDate.now().toString())) }, enabled = code.isNotBlank() && first.isNotBlank() && email.contains('@') && departmentId.isNotBlank() && designationId.isNotBlank()) { Text("Onboard") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+    }, confirmButton = { Button(onClick = { submit(OnboardEmployeeRequest(code.trim(), first.trim(), last.trim(), email.trim(), departmentId, designationId, LocalDate.now().toString())) }, enabled = !onboarding.loading && code.trim().length >= 2 && first.isNotBlank() && last.isNotBlank() && email.contains('@') && departmentId.isNotBlank() && designationId.isNotBlank()) { Text(if (onboarding.loading) "Onboarding..." else "Onboard") } }, dismissButton = { TextButton(onClick = dismiss, enabled = !onboarding.loading) { Text("Cancel") } })
 }
 
 @Composable

@@ -2307,6 +2307,13 @@ export function createV1Router(prisma: PrismaClient) {
             "EMPLOYEE_NOT_FOUND",
             "Employee portal account was not found.",
           );
+        if (employee.user.emailVerifiedAt)
+          return fail(
+            res,
+            409,
+            "ACCOUNT_ALREADY_ACTIVE",
+            "This employee has already activated the portal account. Use password reset if access needs to be recovered.",
+          );
         const token = createOpaqueToken();
         const temporaryPassword = createTemporaryPassword();
         const key = `resend:${employee.id}:${req.header("idempotency-key") || crypto.randomUUID()}`;
@@ -2333,6 +2340,15 @@ export function createV1Router(prisma: PrismaClient) {
               tokenHash: token.hash,
               expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
             },
+          }),
+          prisma.actionToken.updateMany({
+            where: {
+              userId: employee.user.id,
+              type: "ACCOUNT_ACTIVATION",
+              usedAt: null,
+              tokenHash: { not: token.hash },
+            },
+            data: { usedAt: new Date() },
           }),
           prisma.user.update({
             where: { id: employee.user.id },

@@ -30,6 +30,9 @@ class EmployeeViewModel @Inject constructor(private val repo: OrbitRepository) :
     private val _organization = MutableStateFlow(LoadState<OrganizationOptions>())
     val organization = _organization.asStateFlow()
 
+    private val _onboarding = MutableStateFlow(LoadState<OnboardingDto>(loading = false))
+    val onboarding = _onboarding.asStateFlow()
+
     init {
         search()
         loadOrganization()
@@ -50,11 +53,16 @@ class EmployeeViewModel @Inject constructor(private val repo: OrbitRepository) :
     }
 
     fun onboard(body: OnboardEmployeeRequest) = viewModelScope.launch {
-        _state.value = _state.value.copy(loading = true, error = null)
+        _onboarding.value = LoadState(loading = true)
         runCatching { repo.onboard(body) }
-            .onSuccess { search() }
-            .onFailure { _state.value = _state.value.copy(loading = false, error = it.userMessage()) }
+            .onSuccess {
+                _onboarding.value = LoadState(it, loading = false)
+                search()
+            }
+            .onFailure { _onboarding.value = LoadState(error = it.userMessage(), loading = false) }
     }
+
+    fun clearOnboardingResult() { _onboarding.value = LoadState(loading = false) }
 }
 
 @HiltViewModel class MobileWorkspaceViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<MobileWorkspaceDto>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{_state.value=_state.value.copy(loading=true,error=null);runCatching{repo.mobileWorkspace()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun request(body:CreateServiceRequest)=viewModelScope.launch{runCatching{repo.createServiceRequest(body)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(error=it.userMessage())}}}
