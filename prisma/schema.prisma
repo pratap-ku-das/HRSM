@@ -1,5 +1,5 @@
 // Prisma Schema for Multi-Tenant Enterprise HRMS
-// Connected to Supabase PostgreSQL
+// Connected to PostgreSQL through the server-only DATABASE_URL.
 
 datasource db {
   provider = "postgresql"

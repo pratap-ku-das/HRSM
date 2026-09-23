@@ -9,6 +9,11 @@ export function normalizeDatabaseUrl(rawValue?: string): string | undefined {
   if (!/^postgres(?:ql)?:\/\//i.test(value)) return value;
 
   const url = new URL(value);
+  if (url.hostname.endsWith('.rds.amazonaws.com')) {
+    if (!url.searchParams.has('sslmode')) url.searchParams.set('sslmode', 'require');
+    if (!url.searchParams.has('connect_timeout')) url.searchParams.set('connect_timeout', '10');
+    if (!url.searchParams.has('pool_timeout')) url.searchParams.set('pool_timeout', '10');
+  }
   if (url.port === '6543') {
     if (!url.searchParams.has('pgbouncer')) url.searchParams.set('pgbouncer', 'true');
     if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '1');

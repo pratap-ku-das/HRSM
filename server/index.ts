@@ -1251,6 +1251,32 @@ if (existsSync(path.join(distPath, 'index.html'))) {
   });
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`⚡ HRMS PostgreSQL Backend Server running on http://127.0.0.1:${PORT}`);
-});
+const startServer = async () => {
+  try {
+    await prisma.$connect();
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`HRMS PostgreSQL backend running on port ${PORT}`);
+    });
+
+    let shuttingDown = false;
+    const shutdown = (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`${signal} received; shutting down.`);
+      server.close(async () => {
+        await prisma.$disconnect();
+        process.exit(0);
+      });
+      setTimeout(() => process.exit(1), 10_000).unref();
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  } catch (error) {
+    console.error('Backend startup failed: PostgreSQL is unavailable.', error instanceof Error ? error.message : 'Unknown error');
+    await prisma.$disconnect();
+    process.exit(1);
+  }
+};
+
+void startServer();
