@@ -6,6 +6,7 @@ import okhttp3.RequestBody
 import retrofit2.http.*
 
 interface OrbitApi {
+    @GET("mobile/android-release") suspend fun androidRelease(): ApiEnvelope<AndroidReleaseDto>
     @POST("auth/login") suspend fun login(@Body body: LoginRequest): ApiEnvelope<SessionDto>
     @POST("auth/refresh") suspend fun refresh(@Body body: RefreshRequest): ApiEnvelope<SessionDto>
     @POST("auth/logout") suspend fun logout(@Body body: RefreshRequest): ApiEnvelope<Map<String, Boolean>>

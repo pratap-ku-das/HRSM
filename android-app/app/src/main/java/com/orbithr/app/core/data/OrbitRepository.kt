@@ -14,6 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton class OrbitRepository @Inject constructor(private val api: OrbitApi, private val tokens: TokenStore) {
+    suspend fun androidRelease() = api.androidRelease().data
     suspend fun restore(): MeDto? { val refresh = tokens.refresh() ?: return null; val session = runCatching { api.refresh(RefreshRequest(refresh, Build.MODEL)).data }.getOrElse { tokens.clear(); return null }; tokens.save(session.accessToken, session.refreshToken); return runCatching { api.me().data }.getOrNull() }
     suspend fun login(email: String, password: String, mfaCode:String?): MeDto { val session = api.login(LoginRequest(email.trim(), password, Build.MODEL, mfaCode)).data; tokens.save(session.accessToken, session.refreshToken); return api.me().data }
     suspend fun logout() { val refresh = tokens.refresh(); if (refresh != null) runCatching { api.logout(RefreshRequest(refresh, Build.MODEL)) }; tokens.clear() }

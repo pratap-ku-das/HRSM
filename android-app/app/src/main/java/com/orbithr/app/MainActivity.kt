@@ -52,7 +52,8 @@ class MainActivity : FragmentActivity() {
                 val vm: MainViewModel = hiltViewModel()
                 val state by vm.state.collectAsState()
                 val error by vm.error.collectAsState()
-                RootApp(state, error, vm::login, vm::logout, ::verifyFaceAndLocation)
+                val availableUpdate by vm.availableUpdate.collectAsState()
+                RootApp(state, error, vm::login, vm::logout, ::verifyFaceAndLocation, availableUpdate, vm::dismissUpdate)
                 if (showLiveCamera) LiveFaceCamera(
                     onVerified = { selfie -> showLiveCamera = false; requestPreciseLocation(selfie) },
                     onFailure = { message -> finishVerification(AttendanceVerificationResult.Failed(message)) },

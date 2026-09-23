@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,6 +31,7 @@ import androidx.navigation.compose.*
 import com.orbithr.app.SessionState
 import com.orbithr.app.core.model.AttendanceVerificationResult
 import com.orbithr.app.core.model.MeDto
+import com.orbithr.app.core.model.AndroidReleaseDto
 
 @Composable
 fun RootApp(
@@ -38,10 +40,40 @@ fun RootApp(
     login: (String, String, String?) -> Unit,
     logout: () -> Unit,
     verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit,
-) = when (state) {
-    SessionState.Loading -> OrbitSplash()
-    SessionState.SignedOut -> LoginScreen(error, login)
-    is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance)
+    availableUpdate: AndroidReleaseDto?,
+    dismissUpdate: () -> Unit,
+) {
+    when (state) {
+        SessionState.Loading -> OrbitSplash()
+        SessionState.SignedOut -> LoginScreen(error, login)
+        is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance)
+    }
+    availableUpdate?.let { release -> UpdateAvailableDialog(release, dismissUpdate) }
+}
+
+@Composable
+private fun UpdateAvailableDialog(release: AndroidReleaseDto, dismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = dismiss,
+        icon = { Icon(Icons.Outlined.SystemUpdate, null, tint = OrbitViolet) },
+        title = { Text("OrbitHR ${release.versionName} is available") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(release.releaseNotes, color = OrbitInk)
+                Text("Update now opens the secure OrbitHR APK. Android will ask you to confirm installation.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+            }
+        },
+        confirmButton = {
+            Button(onClick = { uriHandler.openUri(release.downloadUrl) }) {
+                Icon(Icons.Outlined.Download, null)
+                Spacer(Modifier.width(7.dp))
+                Text("Update now")
+            }
+        },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Later") } },
+        shape = RoundedCornerShape(28.dp),
+    )
 }
 
 @Composable

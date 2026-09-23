@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.orbithr.app.core.data.OrbitRepository
 import com.orbithr.app.core.data.userMessage
 import com.orbithr.app.core.model.MeDto
+import com.orbithr.app.core.model.AndroidReleaseDto
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +17,17 @@ sealed interface SessionState { data object Loading : SessionState; data object 
 @HiltViewModel class MainViewModel @Inject constructor(private val repository: OrbitRepository) : ViewModel() {
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading); val state: StateFlow<SessionState> = _state.asStateFlow()
     private val _error = MutableStateFlow<String?>(null); val error: StateFlow<String?> = _error.asStateFlow()
-    init { viewModelScope.launch { _state.value = repository.restore()?.let(SessionState::SignedIn) ?: SessionState.SignedOut } }
+    private val _availableUpdate = MutableStateFlow<AndroidReleaseDto?>(null); val availableUpdate: StateFlow<AndroidReleaseDto?> = _availableUpdate.asStateFlow()
+    init {
+        viewModelScope.launch { _state.value = repository.restore()?.let(SessionState::SignedIn) ?: SessionState.SignedOut }
+        viewModelScope.launch {
+            runCatching { repository.androidRelease() }
+                .onSuccess { release -> if (shouldOfferUpdate(BuildConfig.VERSION_CODE, release.versionCode)) _availableUpdate.value = release }
+        }
+    }
+    fun dismissUpdate() { _availableUpdate.value = null }
     fun login(email: String, password: String, mfaCode:String?) = viewModelScope.launch { _error.value = null; _state.value = SessionState.Loading; runCatching { repository.login(email, password, mfaCode) }.onSuccess { _state.value = SessionState.SignedIn(it) }.onFailure { _error.value = it.userMessage(); _state.value = SessionState.SignedOut } }
     fun logout() = viewModelScope.launch { repository.logout(); _state.value = SessionState.SignedOut }
 }
+
+internal fun shouldOfferUpdate(installedVersionCode: Int, latestVersionCode: Int) = latestVersionCode > installedVersionCode

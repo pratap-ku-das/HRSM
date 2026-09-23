@@ -37,6 +37,7 @@ import { createOperationsRouter } from "./operations.js";
 import { createLeaveAdminRouter } from "./leaveAdmin.js";
 import { createSettingsRouter } from "./settings.js";
 import { verifyMfaCode } from "./mfa.js";
+import { createMobileReleaseRouter } from "./mobileRelease.js";
 
 type AuthUser = {
   id: string;
@@ -374,6 +375,7 @@ export function createV1Router(prisma: PrismaClient) {
     res.setHeader("x-request-id", req.requestId);
     next();
   });
+  router.use(createMobileReleaseRouter());
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60_000,
