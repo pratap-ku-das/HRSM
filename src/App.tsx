@@ -36,9 +36,11 @@ import { WorkforceCommandCenterPage } from './pages/employees/WorkforceCommandCe
 import { NotificationCenterPage } from './pages/settings/NotificationCenterPage';
 import { GovernanceCenterPage } from './pages/governance/GovernanceCenterPage';
 import { SecurityCenterPage } from './pages/security/SecurityCenterPage';
+import { EmployeeSelfServicePage } from './pages/self-service/EmployeeSelfServicePage';
+import { canAccessView } from './config/workspaceAccess';
 
 const MainApp: React.FC = () => {
-  const { isAuthenticated, isRestoringSession } = useAuth();
+  const { isAuthenticated, isRestoringSession, currentUser } = useAuth();
   
   // Page mode: 'public_landing' | 'public_login' | 'public_register' | 'authenticated'
   const [pageMode, setPageMode] = useState<'public_landing' | 'public_login' | 'public_register' | 'authenticated'>('authenticated');
@@ -131,10 +133,18 @@ const MainApp: React.FC = () => {
 
   // Render HRMS Authenticated Workspace
   const renderActiveView = () => {
-    switch (activeView) {
+    const authorizedView = canAccessView(currentUser, activeView) ? activeView : 'dashboard';
+    switch (authorizedView) {
       case 'dashboard':
         return <DashboardOverview setActiveView={setActiveView} />;
-      case 'employees':
+      case 'my-attendance':
+        return <EmployeeSelfServicePage section="attendance" />;
+      case 'my-leave':
+        return <EmployeeSelfServicePage section="leave" />;
+      case 'my-pay':
+        return <EmployeeSelfServicePage section="pay" />;
+      case 'my-expenses':
+        return <EmployeeSelfServicePage section="expenses" />;      case 'employees':
         return <EmployeeDirectory />;
       case 'command-center':
         return <WorkforceCommandCenterPage />;

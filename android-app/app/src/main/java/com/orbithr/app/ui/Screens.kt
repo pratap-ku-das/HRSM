@@ -149,11 +149,14 @@ fun HomeScreen(
     attendance: () -> Unit,
     leave: () -> Unit,
     pay: () -> Unit,
+    people: () -> Unit,
+    approvals: () -> Unit,
     vm: HomeViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsState()
     val firstName = me.user.fullName.substringBefore(' ')
-    Page("YOUR WORKSPACE", "Good ${greeting()}, $firstName", me.employee?.designation?.title ?: me.company.name, action = {
+    val workspaceKind = me.user.mobileWorkspaceKind()
+    Page(me.user.mobileWorkspaceTitle(), "Good ${greeting()}, $firstName", me.employee?.designation?.title ?: me.company.name, action = {
         Surface(shape = CircleShape, color = OrbitViolet, shadowElevation = 6.dp) {
             Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
                 Text(me.user.fullName.split(' ').mapNotNull { it.firstOrNull()?.uppercase() }.take(2).joinToString(""), color = Color.White, fontWeight = FontWeight.Bold)
@@ -176,7 +179,16 @@ fun HomeScreen(
                                     Spacer(Modifier.weight(1f))
                                     OrbitLogo(compact = true, light = true)
                                 }
-                                Text("Everything you need\nfor a brilliant workday.", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                                Text(
+                                    when (workspaceKind) {
+                                        MobileWorkspaceKind.EMPLOYEE -> "Everything you need\nfor a brilliant workday."
+                                        MobileWorkspaceKind.MANAGER -> "Your work and team,\ntogether in one place."
+                                        MobileWorkspaceKind.HR_ADMIN -> "Run your workforce\nwith clarity and control."
+                                        MobileWorkspaceKind.SUPER_ADMIN -> "Your organization,\nsecure and in control."
+                                    },
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Color.White,
+                                )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Outlined.CalendarToday, null, tint = OrbitCyan, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(7.dp))
@@ -186,14 +198,16 @@ fun HomeScreen(
                         }
                     }
                 }
-                item {
-                    OrbitSectionTitle("Today at a glance", "Live company pulse", trailing = { IconButton(onClick = vm::refresh) { Icon(Icons.Outlined.Refresh, "Refresh", tint = OrbitViolet) } })
-                }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                        MetricCard("Present today", dashboard.presentToday.toString(), Icons.Outlined.HowToReg, OrbitMint, Modifier.weight(1f))
-                        MetricCard("Active people", dashboard.activeEmployees.toString(), Icons.Outlined.Groups, OrbitCyan, Modifier.weight(1f))
-                        MetricCard("Leave queue", dashboard.pendingLeaves.toString(), Icons.Outlined.EventBusy, OrbitAmber, Modifier.weight(1f))
+                if (me.user.canSeeWorkforcePulse()) {
+                    item {
+                        OrbitSectionTitle("Today at a glance", "Live workforce pulse", trailing = { IconButton(onClick = vm::refresh) { Icon(Icons.Outlined.Refresh, "Refresh", tint = OrbitViolet) } })
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                            MetricCard("Present today", dashboard.presentToday.toString(), Icons.Outlined.HowToReg, OrbitMint, Modifier.weight(1f))
+                            MetricCard("Active people", dashboard.activeEmployees.toString(), Icons.Outlined.Groups, OrbitCyan, Modifier.weight(1f))
+                            MetricCard("Leave queue", dashboard.pendingLeaves.toString(), Icons.Outlined.EventBusy, OrbitAmber, Modifier.weight(1f))
+                        }
                     }
                 }
                 item { OrbitSectionTitle("Quick actions", "Move through your day") }
@@ -202,6 +216,19 @@ fun HomeScreen(
                         QuickAction(Icons.Outlined.Face, "Verify & punch", OrbitViolet, attendance, Modifier.weight(1f))
                         QuickAction(Icons.Outlined.BeachAccess, "Request leave", OrbitMint, leave, Modifier.weight(1f))
                         QuickAction(Icons.AutoMirrored.Outlined.ReceiptLong, "View payslip", OrbitRose, pay, Modifier.weight(1f))
+                    }
+                }
+                if (me.user.canOpenPeopleDirectory() || me.user.hasPermission("workflow.review")) {
+                    item { OrbitSectionTitle("Management tools", "Only tools allowed for your role") }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (me.user.canOpenPeopleDirectory()) {
+                                QuickAction(Icons.Outlined.Groups, "People directory", OrbitCyan, people, Modifier.weight(1f))
+                            }
+                            if (me.user.hasPermission("workflow.review")) {
+                                QuickAction(Icons.Outlined.Approval, "Approval inbox", OrbitMint, approvals, Modifier.weight(1f))
+                            }
+                        }
                     }
                 }
                 if (dashboard.announcements.isNotEmpty()) item { OrbitSectionTitle("Company feed", "What everyone should know") }
@@ -563,7 +590,7 @@ private fun ExpenseDialog(dismiss: () -> Unit, submit: (SubmitExpenseRequest) ->
 
 @Composable
 fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit) {
-    Page("YOUR SPACE", "More from OrbitHR", "Profile, tools and settings") {
+    Page(me.user.mobileWorkspaceTitle(), "More from OrbitHR", "Profile and permitted tools") {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
                 Surface(shape = RoundedCornerShape(28.dp), color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
@@ -581,8 +608,8 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
             item { OrbitSectionTitle("Work tools", "Everything else in one place") }
             item { MoreAction(Icons.AutoMirrored.Outlined.ReceiptLong, "Expenses", "Submit and track claims", OrbitAmber, expenses) }
             item { MoreAction(Icons.Outlined.EditCalendar, "Attendance requests", "Regularization, WFH, duty, travel and overtime", OrbitViolet, attendanceRequests) }
-            if ("workflow.review" in me.user.permissions) item { MoreAction(Icons.Outlined.Approval, "Approval inbox", "Review requests assigned to you", OrbitMint, approvals) }
-            if ("employee.read.all" in me.user.permissions) item { MoreAction(Icons.Outlined.Groups, "People directory", "Employees and onboarding", OrbitCyan, employees) }
+            if (me.user.hasPermission("workflow.review")) item { MoreAction(Icons.Outlined.Approval, "Approval inbox", "Review requests assigned to you", OrbitMint, approvals) }
+            if (me.user.canOpenPeopleDirectory()) item { MoreAction(Icons.Outlined.Groups, "People directory", if (me.user.hasPermission("employee.manage")) "Employees and onboarding" else "Your permitted team", OrbitCyan, employees) }
             item { MoreAction(Icons.Outlined.FolderOpen, "Documents, assets & goals", "Your verified records and assigned equipment", OrbitViolet, workspace) }
             item { MoreAction(Icons.Outlined.NotificationsNone, "Notifications", "Your persistent OrbitHR inbox", OrbitMint, notifications) }
             item {
@@ -590,7 +617,7 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
                     Icon(Icons.AutoMirrored.Outlined.Logout, null); Spacer(Modifier.width(8.dp)); Text("Sign out securely")
                 }
             }
-            item { Text("OrbitHR mobile · Secure employee workspace", Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = OrbitMuted) }
+            item { Text("OrbitHR mobile · ${me.user.mobileWorkspaceTitle().lowercase().replaceFirstChar { it.uppercase() }}", Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = OrbitMuted) }
         }
     }
 }

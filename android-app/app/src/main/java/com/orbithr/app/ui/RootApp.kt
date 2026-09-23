@@ -222,7 +222,16 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
     ) { padding ->
         OrbitBackground {
             NavHost(nav, "home", Modifier.padding(padding)) {
-                composable("home") { HomeScreen(me, attendance = { nav.navigate("attendance") }, leave = { nav.navigate("leave") }, pay = { nav.navigate("pay") }) }
+                composable("home") {
+                    HomeScreen(
+                        me,
+                        attendance = { nav.navigate("attendance") },
+                        leave = { nav.navigate("leave") },
+                        pay = { nav.navigate("pay") },
+                        people = { nav.navigate("employees") },
+                        approvals = { nav.navigate("approvals") },
+                    )
+                }
                 composable("attendance") { AttendanceScreen(verifyAttendance) }
                 composable("leave") { LeaveScreen() }
                 composable("pay") { PayslipScreen() }

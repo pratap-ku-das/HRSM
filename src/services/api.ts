@@ -100,6 +100,27 @@ export const api = {
   getMeV1: () => fetchJSON<ApiEnvelope<{ user: User; company: Company; employee?: Employee }>>(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
   }),
+  getMyAttendance: async () => (await fetchJSON<ApiEnvelope<AttendanceRecord[]>>(`${API_BASE}/v1/me/attendance`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  getMyLeave: async () => (await fetchJSON<ApiEnvelope<{ requests: LeaveRequest[]; types: LeaveType[]; balances: Array<{ leaveTypeId: string; year: number; entitlement: number; used: number; available: number }> }>>(`${API_BASE}/v1/me/leaves`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  applyMyLeave: async (body: { leaveTypeId: string; startDate: string; endDate: string; reason: string }) => (await fetchJSON<ApiEnvelope<LeaveRequest>>(`${API_BASE}/v1/me/leaves`, {
+    method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body),
+  })).data,
+  cancelMyLeave: async (id: string) => (await fetchJSON<ApiEnvelope<{ cancelled: boolean }>>(`${API_BASE}/v1/me/leaves/${id}/cancel`, {
+    method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  getMyPayslips: async () => (await fetchJSON<ApiEnvelope<Payslip[]>>(`${API_BASE}/v1/me/payslips`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  getMyExpenses: async () => (await fetchJSON<ApiEnvelope<ExpenseClaim[]>>(`${API_BASE}/v1/me/expenses`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  submitMyExpense: async (body: { title: string; category: 'TRAVEL' | 'MEALS' | 'HARDWARE' | 'CERTIFICATION' | 'MISC'; amount: number; expenseDate: string; notes?: string }) => (await fetchJSON<ApiEnvelope<ExpenseClaim>>(`${API_BASE}/v1/me/expenses`, {
+    method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body),
+  })).data,
   clearV1Session: () => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);

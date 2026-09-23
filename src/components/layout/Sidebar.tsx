@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { BrandCredit } from '../BrandCredit';
 import { ProductLogo } from '../ProductLogo';
+import { useAuth } from '../../context/AuthContext';
+import { canAccessView, workspaceTitle } from '../../config/workspaceAccess';
 
 interface SidebarProps {
   activeView: string;
@@ -25,7 +27,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen = false,
   onCloseMobile,
 }) => {
-  const navItems = [
+  const { currentUser } = useAuth();
+  const allNavItems = [
     {
       id: 'dashboard',
       label: 'Dashboard',
@@ -34,6 +37,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       section: 'OVERVIEW'
     },
     {
+      id: 'my-attendance', label: 'My Attendance', icon: CalendarCheck, badge: 'SELF', section: 'MY WORKSPACE'
+    },
+    {
+      id: 'my-leave', label: 'My Leave', icon: CalendarDays, badge: null, section: 'MY WORKSPACE'
+    },
+    {
+      id: 'my-pay', label: 'My Pay', icon: CreditCard, badge: null, section: 'MY WORKSPACE'
+    },
+    {
+      id: 'my-expenses', label: 'My Expenses', icon: Receipt, badge: null, section: 'MY WORKSPACE'
+    },    {
       id: 'approvals',
       label: 'Approval Inbox',
       icon: Inbox,
@@ -193,6 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
+  const navItems = allNavItems.filter(item => canAccessView(currentUser, item.id));
   const sections = Array.from(new Set(navItems.map(item => item.section)));
 
   const handleNavClick = (id: string) => {
@@ -236,7 +251,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Navigation List */}
-      <div className="sidebar-nav flex-1 min-h-0 overflow-y-auto py-4 px-3 space-y-5">
+      <div className="sidebar-nav flex-1 min-h-0 overflow-y-auto py-4 px-3 space-y-5">        {!isCollapsed && <p className="px-3 pb-1 text-[10px] font-semibold text-brand-300">{workspaceTitle(currentUser)}</p>}
         {sections.map(section => {
           const sectionItems = navItems.filter(item => item.section === section);
           return (
