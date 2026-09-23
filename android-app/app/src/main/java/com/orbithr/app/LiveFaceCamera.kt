@@ -1,6 +1,7 @@
 package com.orbithr.app
 
 import android.annotation.SuppressLint
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -47,7 +48,17 @@ fun LiveFaceCamera(onVerified: (ByteArray) -> Unit, onFailure: (String) -> Unit,
     var message by remember { mutableStateOf("Center your face and look forward") }
     val done = remember { AtomicBoolean(false) }
     val stage = remember { arrayOf(BlinkStage.FIND_FACE) }
-    val imageCapture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
+    // Face matching does not benefit from a full sensor-resolution photo. Keeping the
+    // capture at 1280x960 avoids multi-megabyte selfies on high-resolution phones and
+    // leaves comfortable headroom below the API's 5 MiB upload limit.
+    @Suppress("DEPRECATION")
+    val imageCapture = remember {
+        ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setTargetResolution(Size(1280, 960))
+            .setJpegQuality(85)
+            .build()
+    }
 
     DisposableEffect(owner) {
         val future = ProcessCameraProvider.getInstance(context)
