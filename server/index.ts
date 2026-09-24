@@ -8,6 +8,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
+import { ensureDefaultLeaveWorkflow } from './v1/workflows.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
 import { normalizeDatabaseUrl } from './databaseUrl.js';
 
@@ -194,21 +195,16 @@ app.post('/api/auth/register-company', async (req, res) => {
       },
     });
 
+    // Every new workspace starts with a usable leave approval path. Companies
+    // can replace it later with their own active LEAVE workflow.
+    await ensureDefaultLeaveWorkflow(prisma, company.id, adminUser.id);
+
     // Seed default departments
     await prisma.department.createMany({
       data: [
         { companyId: company.id, name: 'Executive & Leadership', code: 'EXEC', budget: 5000000, location: 'Tower A, Floor 5', description: 'Core leadership.' },
         { companyId: company.id, name: 'Engineering & Technology', code: 'ENG', budget: 15000000, location: 'Tower A, Floor 4', description: 'Software engineering.' },
         { companyId: company.id, name: 'People Operations & HR', code: 'HR', budget: 3000000, location: 'Tower B, Floor 2', description: 'Human resources and talent acquisition.' },
-      ],
-    });
-
-    // Seed default Indian statutory leave policies
-    await prisma.leaveType.createMany({
-      data: [
-        { companyId: company.id, name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
-        { companyId: company.id, name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
-        { companyId: company.id, name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
       ],
     });
 
@@ -388,14 +384,12 @@ app.post('/api/employees', async (req, res) => {
 
     if (isNewEmployee) {
       const activation = createOpaqueToken();
-      const temporaryPassword = createTemporaryPassword();
-      const passwordHash = await bcrypt.hash(temporaryPassword, 12);
       const delivery = await prisma.$transaction(async tx => {
-        await tx.user.update({ where: { id: portalUser.id }, data: { passwordHash } });
+        await tx.user.update({ where: { id: portalUser.id }, data: { passwordHash: null } });
         await tx.actionToken.create({ data: { userId: portalUser.id, type: 'ACCOUNT_ACTIVATION', tokenHash: activation.hash, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
         return tx.emailDelivery.create({ data: { companyId: employee.companyId, userId: portalUser.id, employeeId: employee.id, idempotencyKey: `legacy-onboard:${employee.id}:${crypto.randomUUID()}`, messageType: 'EMPLOYEE_ONBOARDING', recipient: employee.email } });
       });
-      void deliverOnboardingEmail(prisma, delivery.id, activation.token, temporaryPassword);
+      void deliverOnboardingEmail(prisma, delivery.id, activation.token);
     }
 
     res.json(employeeToClient(employee));
@@ -618,21 +612,10 @@ app.get('/api/leaves/types', async (req, res) => {
   try {
     const { companyId } = req.query;
     const normalizedCompanyId = String(companyId);
-    let types = await prisma.leaveType.findMany({
+    const types = await prisma.leaveType.findMany({
       where: { companyId: normalizedCompanyId },
     });
-    if (types.length === 0) {
-      await prisma.leaveType.createMany({
-        data: [
-          { companyId: normalizedCompanyId, name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
-          { companyId: normalizedCompanyId, name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
-          { companyId: normalizedCompanyId, name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
-          { companyId: normalizedCompanyId, name: 'Maternity Leave', code: 'ML', daysAllowedPerYear: 182, isPaid: true, color: '#ec4899' },
-          { companyId: normalizedCompanyId, name: 'Loss of Pay (LOP)', code: 'LOP', daysAllowedPerYear: 365, isPaid: false, color: '#64748b' },
-        ],
-      });
-      types = await prisma.leaveType.findMany({ where: { companyId: normalizedCompanyId } });
-    }
+
     res.json(types);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

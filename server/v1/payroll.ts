@@ -12,6 +12,7 @@ import {
   type StatutoryRuleInput,
 } from "./payrollEngine.js";
 import { startConfiguredWorkflow } from "./workflows.js";
+import { emitNotification } from "./notifications.js";
 
 type PayrollRequest = Request & {
   auth?: { id: string; companyId: string; role: string; permissions: string[] };
@@ -513,7 +514,7 @@ export function createPayrollRouter(
           where: {
             id: String(req.params.id),
             companyId,
-            status: { in: ["ATTENDANCE_LOCKED", "CALCULATED"] },
+            status: { in: ["ATTENDANCE_LOCKED", "ATTENDANCE_FINALIZED", "CALCULATED"] },
           },
         });
         if (!run?.periodStart || !run.periodEnd)
@@ -562,23 +563,15 @@ export function createPayrollRouter(
             orderBy: { effectiveFrom: "desc" },
           });
           if (!revision) continue;
-          const attendance = await prisma.attendanceRecord.findMany({
-            where: {
-              companyId,
-              employeeId: employee.id,
-              date: { gte: run.periodStart, lte: run.periodEnd },
-            },
+          const snapshot = await prisma.payrollAttendanceReview.findUnique({
+            where: { payrollRunId_employeeId: { payrollRunId: run.id, employeeId: employee.id } },
           });
-          const payableDays = attendance.reduce(
-            (sum, item) =>
-              sum +
-              (["PRESENT", "LATE"].includes(item.status)
-                ? 1
-                : item.status === "HALF_DAY"
-                  ? 0.5
-                  : 0),
-            0,
-          );
+          const attendance = snapshot ? [] : await prisma.attendanceRecord.findMany({
+            where: { companyId, employeeId: employee.id, date: { gte: run.periodStart, lte: run.periodEnd } },
+          });
+          const payableDays = snapshot
+            ? snapshot.presentDays + snapshot.lateDays + snapshot.halfDays * 0.5 + snapshot.paidLeaveDays
+            : attendance.reduce((sum, item) => sum + (["PRESENT", "LATE"].includes(item.status) ? 1 : item.status === "HALF_DAY" ? 0.5 : 0), 0);
           const loan = await prisma.employeeLoan.findFirst({
             where: {
               companyId,
@@ -623,8 +616,8 @@ export function createPayrollRouter(
               data: {
                 ...line,
                 payrollRunId: run.id,
-                breakdown: line.breakdown,
-                calculationTrace: line.calculationTrace,
+                breakdown: line.breakdown as Prisma.InputJsonValue,
+                calculationTrace: line.calculationTrace as Prisma.InputJsonValue,
               },
             });
           return tx.payrollRun.update({
@@ -648,6 +641,54 @@ export function createPayrollRouter(
       } catch (error) {
         next(error);
       }
+    },
+  );
+
+  router.get(
+    "/payroll/runs/:id/review",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const run = await prisma.payrollRun.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { lines: true },
+        });
+        if (!run) return fail(res, 404, "PAYROLL_RUN_NOT_FOUND", "Payroll run was not found.");
+        const [employees, previousRun] = await Promise.all([
+          prisma.employee.findMany({
+            where: { companyId, id: { in: run.lines.map(line => line.employeeId) } },
+            select: { id: true, employeeCode: true, firstName: true, lastName: true, accountNumber: true, routingOrIfsc: true },
+          }),
+          prisma.payrollRun.findFirst({
+            where: { companyId, month: { lt: run.month }, status: { not: "REVERSED" } },
+            include: { lines: true },
+            orderBy: { month: "desc" },
+          }),
+        ]);
+        const previousByEmployee = new Map(previousRun?.lines.map(line => [line.employeeId, line.netPay]) || []);
+        const lines = run.lines.map(line => {
+          const employee = employees.find(item => item.id === line.employeeId);
+          const previousNetPay = previousByEmployee.get(line.employeeId);
+          const variancePercent = previousNetPay && previousNetPay > 0 ? ((line.netPay - previousNetPay) / previousNetPay) * 100 : undefined;
+          const exceptions: string[] = [];
+          if (!employee?.accountNumber || !employee.routingOrIfsc) exceptions.push("Bank details incomplete");
+          if (line.netPay <= 0) exceptions.push("Net pay is zero");
+          if (line.payableDays <= 0) exceptions.push("No payable attendance days");
+          if (variancePercent !== undefined && Math.abs(variancePercent) >= 20) exceptions.push(`Net pay changed ${Math.abs(variancePercent).toFixed(1)}% from the previous run`);
+          return {
+            ...line,
+            employee: employee ? { id: employee.id, employeeCode: employee.employeeCode, firstName: employee.firstName, lastName: employee.lastName, bankReady: Boolean(employee.accountNumber && employee.routingOrIfsc) } : undefined,
+            previousNetPay,
+            variancePercent,
+            exceptions,
+          };
+        });
+        return ok(res, {
+          run,
+          lines,
+          exceptions: lines.filter(line => line.exceptions.length).map(line => ({ employeeId: line.employeeId, employeeName: line.employee ? `${line.employee.firstName} ${line.employee.lastName}` : line.employeeId, messages: line.exceptions })),
+        });
+      } catch (error) { next(error); }
     },
   );
 
@@ -723,6 +764,23 @@ export function createPayrollRouter(
   );
 
   router.post(
+    "/payroll/runs/:id/record-payment",
+    permit("payroll.approve"),
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const body = z.object({ paymentDate: z.coerce.date(), paymentReference: z.string().trim().min(3).max(120) }).parse(req.body);
+        const updated = await prisma.payrollRun.updateMany({
+          where: { id: String(req.params.id), companyId: req.auth!.companyId, status: "LOCKED" },
+          data: { paymentDate: body.paymentDate, paymentReference: body.paymentReference, paymentRecordedById: req.auth!.id, paymentRecordedAt: new Date() },
+        });
+        if (!updated.count) return fail(res, 409, "PAYROLL_STATE_INVALID", "Only a locked payroll can record payment.");
+        await audit(req, "RECORD_PAYROLL_PAYMENT", `Payment ${body.paymentReference} recorded for payroll ${req.params.id}.`);
+        return ok(res, { recorded: true, paymentDate: body.paymentDate, paymentReference: body.paymentReference });
+      } catch (error) { next(error); }
+    },
+  );
+
+  router.post(
     "/payroll/runs/:id/publish",
     permit("payroll.approve"),
     async (req: PayrollRequest, res, next) => {
@@ -731,7 +789,7 @@ export function createPayrollRouter(
           where: {
             id: String(req.params.id),
             companyId: req.auth!.companyId,
-            status: "LOCKED",
+            status: { in: ["LOCKED", "PAYSLIP_GENERATED"] },
           },
           include: { lines: true },
         });
@@ -742,9 +800,12 @@ export function createPayrollRouter(
             "PAYROLL_STATE_INVALID",
             "Locked payroll was not found.",
           );
+        if (run.status === "LOCKED" && (!run.paymentDate || !run.paymentReference))
+          return fail(res, 409, "PAYMENT_NOT_RECORDED", "Record the payroll payment before publishing payslips.");
         await prisma.$transaction(async (tx) => {
-          for (const line of run.lines) {
+          for (const [index, line] of run.lines.entries()) {
             const breakdown = line.breakdown as Record<string, number>;
+            const payslipNumber = `PS-${run.month}-${String(index + 1).padStart(6, "0")}`;
             await tx.payslip.upsert({
               where: {
                 payrollRunId_employeeId: {
@@ -782,13 +843,33 @@ export function createPayrollRouter(
                 presentDays: Math.round(line.payableDays),
                 paidLeaveDays: 0,
                 unpaidDays: Math.round(line.unpaidDays),
-                status: "PUBLISHED",
+                status: "PAID",
+                paymentDate: run.paymentDate,
+                payslipNumber,
+                breakdown: line.breakdown as Prisma.InputJsonValue,
+                calculationTrace: line.calculationTrace as Prisma.InputJsonValue,
+                netPayInWords: `INR ${line.netPay.toFixed(2)} Only`,
+                generatedAt: new Date(),
+                publishedAt: new Date(),
               },
               update: {
                 grossSalary: line.grossEarnings,
                 totalDeductions: line.employeeDeductions,
                 netSalary: line.netPay,
+                basicSalary: breakdown.BASIC || 0,
+                hra: breakdown.HRA || 0,
+                allowances: Math.max(0, line.grossEarnings - (breakdown.BASIC || 0) - (breakdown.HRA || 0)),
+                providentFund: breakdown.PF_EMPLOYEE || 0,
+                taxDeductions: (breakdown.TDS || 0) + (breakdown.PROFESSIONAL_TAX || 0),
+                otherDeductions: Math.max(0, line.employeeDeductions - (breakdown.PF_EMPLOYEE || 0) - (breakdown.TDS || 0) - (breakdown.PROFESSIONAL_TAX || 0)),
+                workingDays: Math.round(line.workingDays),
+                presentDays: Math.round(line.payableDays),
+                unpaidDays: Math.round(line.unpaidDays),
                 status: "PUBLISHED",
+                paymentDate: run.paymentDate,
+                breakdown: line.breakdown as Prisma.InputJsonValue,
+                calculationTrace: line.calculationTrace as Prisma.InputJsonValue,
+                publishedAt: new Date(),
               },
             });
             const repayment = breakdown.LOAN_REPAYMENT || 0;
@@ -819,7 +900,7 @@ export function createPayrollRouter(
           }
           await tx.payrollRun.update({
             where: { id: run.id },
-            data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date() },
+            data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
           });
         });
         await audit(
@@ -827,6 +908,22 @@ export function createPayrollRouter(
           "PUBLISH_PAYSLIPS",
           `${run.month} payslips published.`,
         );
+        const recipients = await prisma.employee.findMany({
+          where: { companyId: run.companyId, id: { in: run.lines.map(line => line.employeeId) }, userId: { not: null } },
+          select: { userId: true },
+        });
+        await Promise.allSettled(recipients.flatMap(employee => employee.userId ? [
+          emitNotification(prisma, {
+            companyId: run.companyId,
+            userId: employee.userId,
+            eventKey: "PAYROLL_PUBLISHED",
+            title: "Payroll published",
+            body: `Your ${run.month} payslip is now available.`,
+            entityType: "PayrollRun",
+            entityId: run.id,
+            actionUrl: "/self-service?tab=pay",
+          }),
+        ] : []));
         return ok(res, {
           status: "PAYSLIPS_PUBLISHED",
           count: run.lines.length,

@@ -8,7 +8,6 @@ import multer from "multer";
 import { z, ZodError } from "zod";
 import {
   createOpaqueToken,
-  createTemporaryPassword,
   deliverOnboardingEmail,
   deliverPasswordResetEmail,
 } from "./email.js";
@@ -38,6 +37,8 @@ import { createLeaveAdminRouter } from "./leaveAdmin.js";
 import { createSettingsRouter } from "./settings.js";
 import { verifyMfaCode } from "./mfa.js";
 import { createMobileReleaseRouter } from "./mobileRelease.js";
+import { createOnboardingRouter } from "./onboarding.js";
+import { createPayrollWorkflowRouter } from "./payrollWorkflow.js";
 
 type AuthUser = {
   id: string;
@@ -701,6 +702,10 @@ export function createV1Router(prisma: PrismaClient) {
           "ACTIVATION_INVALID",
           "Activation link is invalid or expired.",
         );
+      const activatingEmployee = await prisma.employee.findUnique({
+        where: { userId: action.userId },
+        select: { id: true },
+      });
       await prisma.$transaction([
         prisma.user.update({
           where: { id: action.userId },
@@ -718,6 +723,10 @@ export function createV1Router(prisma: PrismaClient) {
           where: { userId: action.userId, revokedAt: null },
           data: { revokedAt: new Date() },
         }),
+        ...(activatingEmployee ? [prisma.employeeOnboarding.updateMany({
+          where: { createdEmployeeId: activatingEmployee.id },
+          data: { status: "ACTIVE" },
+        })] : []),
       ]);
       return ok(res, { activated: true });
     } catch (e) {
@@ -1645,16 +1654,75 @@ export function createV1Router(prisma: PrismaClient) {
             "EMPLOYEE_NOT_LINKED",
             "No employee profile is linked.",
           );
-        return ok(
-          res,
-          await prisma.payslip.findMany({
-            where: {
-              companyId: req.auth!.companyId,
-              employeeId: req.auth!.employeeId,
+        const employeeId = req.auth!.employeeId;
+        const [payslips, ytdLines, revisions, adjustments] = await prisma.$transaction([
+          prisma.payslip.findMany({
+            where: { companyId: req.auth!.companyId, employeeId },
+            include: {
+              employee: { include: { department: true, designation: true } },
+              payrollRun: { include: { lines: { where: { employeeId } } } },
             },
             orderBy: { month: "desc" },
           }),
-        );
+          prisma.payrollLine.findMany({
+            where: { employeeId, payrollRun: { companyId: req.auth!.companyId, status: { in: ["PAYSLIPS_PUBLISHED", "PAID"] } } },
+            include: { payrollRun: { select: { month: true } } },
+          }),
+          prisma.employeeSalaryRevision.findMany({
+            where: { companyId: req.auth!.companyId, employeeId, status: { in: ["APPROVED", "SUPERSEDED"] } },
+            include: { structure: { include: { components: true } } },
+            orderBy: { effectiveFrom: "desc" },
+          }),
+          prisma.payrollAdjustment.findMany({ where: { companyId: req.auth!.companyId, employeeId } }),
+        ]);
+        return ok(res, payslips.map(item => {
+          const line = item.payrollRun.lines[0];
+          const [year, month] = item.month.split("-").map(Number);
+          const financialYearStart = month >= 4 ? year : year - 1;
+          const startMonth = `${financialYearStart}-04`, endMonth = `${financialYearStart + 1}-03`;
+          const relevant = ytdLines.filter(value => value.payrollRun.month >= startMonth && value.payrollRun.month <= item.month && value.payrollRun.month <= endMonth);
+          const ytdBreakdown = relevant.reduce<Record<string, number>>((total, value) => {
+            for (const [code, amount] of Object.entries(value.breakdown as Record<string, number>)) total[code] = (total[code] || 0) + Number(amount || 0);
+            return total;
+          }, {});
+          const employee = item.employee;
+          const monthEnd = new Date(Date.UTC(year, month, 0));
+          const revision = revisions.find(value => value.effectiveFrom <= monthEnd);
+          const componentMeta: Record<string, { name: string; kind: "EARNING" | "DEDUCTION" | "EMPLOYER_CONTRIBUTION" | "REIMBURSEMENT" }> = {};
+          for (const component of revision?.structure.components || []) componentMeta[component.code] = { name: component.name, kind: component.kind };
+          for (const adjustment of adjustments.filter(value => value.month === item.month)) componentMeta[adjustment.code] = { name: adjustment.name, kind: adjustment.kind };
+          Object.assign(componentMeta, {
+            PF_EMPLOYEE: { name: "Employee Provident Fund", kind: "DEDUCTION" }, PF_EMPLOYER: { name: "Employer Provident Fund", kind: "EMPLOYER_CONTRIBUTION" },
+            ESI_EMPLOYEE: { name: "Employee State Insurance", kind: "DEDUCTION" }, ESI_EMPLOYER: { name: "Employer State Insurance", kind: "EMPLOYER_CONTRIBUTION" },
+            PROFESSIONAL_TAX: { name: "Professional Tax", kind: "DEDUCTION" }, TDS: { name: "Income Tax (TDS)", kind: "DEDUCTION" },
+            LWF_EMPLOYEE: { name: "Labour Welfare Fund", kind: "DEDUCTION" }, LWF_EMPLOYER: { name: "Employer Labour Welfare Fund", kind: "EMPLOYER_CONTRIBUTION" },
+            LOAN_REPAYMENT: { name: "Loan repayment", kind: "DEDUCTION" },
+          });
+          return {
+            ...item,
+            payrollRun: undefined,
+            reimbursements: line?.reimbursements || 0,
+            employerContributions: line?.employerContributions || 0,
+            breakdown: (line?.breakdown || {}) as Record<string, number>,
+            ytdBreakdown,
+            ytdGross: relevant.reduce((sum, value) => sum + value.grossEarnings, 0),
+            ytdDeductions: relevant.reduce((sum, value) => sum + value.employeeDeductions, 0),
+            ytdNet: relevant.reduce((sum, value) => sum + value.netPay, 0),
+            componentMeta,
+            department: employee.department,
+            designation: employee.designation,
+            employee: {
+              ...employee,
+              phone: employee.phone || "",
+              dateOfBirth: employee.dateOfBirth?.toISOString().slice(0, 10) || "",
+              dateOfJoining: employee.dateOfJoining.toISOString().slice(0, 10),
+              workLocation: employee.workLocation || "",
+              salary: { basic: employee.basicSalary, hra: employee.hra, allowances: employee.allowances, providentFund: employee.providentFund, taxDeduction: employee.taxDeduction, currency: employee.currency },
+              bankDetails: { bankName: employee.bankName || "", accountNumber: employee.accountNumber || "", routingOrIfsc: employee.routingOrIfsc || "", taxIdentifier: employee.taxIdentifier || "" },
+              emergencyContact: { name: employee.emergencyName || "", relationship: employee.emergencyRelation || "", phone: employee.emergencyPhone || "" },
+            },
+          };
+        }));
       } catch (e) {
         next(e);
       }
@@ -2189,7 +2257,6 @@ export function createV1Router(prisma: PrismaClient) {
           );
         const email = body.email.toLowerCase();
         const activation = createOpaqueToken();
-        const temporaryPassword = createTemporaryPassword();
         const response = await prisma.$transaction(async (tx) => {
           const duplicate = await tx.user.findUnique({ where: { email } });
           if (duplicate)
@@ -2203,7 +2270,7 @@ export function createV1Router(prisma: PrismaClient) {
               email,
               fullName: `${body.firstName} ${body.lastName}`,
               role: "EMPLOYEE",
-              passwordHash: await bcrypt.hash(temporaryPassword, 12),
+              passwordHash: null,
             },
           });
           const employee = await tx.employee.create({
@@ -2283,7 +2350,6 @@ export function createV1Router(prisma: PrismaClient) {
           prisma,
           response.emailDelivery.id,
           activation.token,
-          temporaryPassword,
         );
         return ok(res, response, 201);
       } catch (e) {
@@ -2317,7 +2383,6 @@ export function createV1Router(prisma: PrismaClient) {
             "This employee has already activated the portal account. Use password reset if access needs to be recovered.",
           );
         const token = createOpaqueToken();
-        const temporaryPassword = createTemporaryPassword();
         const key = `resend:${employee.id}:${req.header("idempotency-key") || crypto.randomUUID()}`;
         const existing = await prisma.emailDelivery.findUnique({
           where: { idempotencyKey: key },
@@ -2354,17 +2419,13 @@ export function createV1Router(prisma: PrismaClient) {
           }),
           prisma.user.update({
             where: { id: employee.user.id },
-            data: {
-              passwordHash: await bcrypt.hash(temporaryPassword, 12),
-              tokenVersion: { increment: 1 },
-            },
+            data: { passwordHash: null, tokenVersion: { increment: 1 } },
           }),
         ]);
         void deliverOnboardingEmail(
           prisma,
           delivery.id,
           token.token,
-          temporaryPassword,
         );
         return ok(res, { id: delivery.id, status: delivery.status }, 202);
       } catch (e) {
@@ -2455,6 +2516,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createWorkflowRouter(prisma, authenticate));
   router.use(createAttendancePolicyRouter(prisma, authenticate));
   router.use(createPayrollRouter(prisma, authenticate));
+  router.use(createPayrollWorkflowRouter(prisma, authenticate));
   router.use(createPayrollComplianceRouter(prisma, authenticate));
   router.use(createWorkspaceRouter(prisma, authenticate));
   router.use(createNotificationRouter(prisma, authenticate));
@@ -2466,6 +2528,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createRecruitmentRouter(prisma, authenticate));
   router.use(createOperationsRouter(prisma, authenticate));
   router.use(createLeaveAdminRouter(prisma, authenticate));
+  router.use(createOnboardingRouter(prisma, authenticate));
   router.use(createSettingsRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));
 

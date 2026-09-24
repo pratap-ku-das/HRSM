@@ -16,7 +16,7 @@ describe("Android release metadata", () => {
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.data).toEqual(androidRelease);
-    expect(response.body.data.versionCode).toBe(11);
+    expect(response.body.data.versionCode).toBe(14);
     expect(response.body.data.downloadUrl).toMatch(/^https:\/\//);
   });
 });

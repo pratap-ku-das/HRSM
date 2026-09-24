@@ -382,34 +382,7 @@ async function seedIndianData() {
     }
   }
 
-  // 7. Seed Indian Leave Types
-  const indianLeaveTypes = [
-    { name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
-    { name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
-    { name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
-    { name: 'Maternity Leave (ML)', code: 'ML', daysAllowedPerYear: 182, isPaid: true, color: '#ec4899' },
-    { name: 'Paternity Leave', code: 'PTL', daysAllowedPerYear: 15, isPaid: true, color: '#8b5cf6' },
-  ];
-
-  for (const lt of indianLeaveTypes) {
-    const existing = await prisma.leaveType.findFirst({
-      where: { companyId: company.id, code: lt.code },
-    });
-    if (!existing) {
-      await prisma.leaveType.create({
-        data: {
-          companyId: company.id,
-          name: lt.name,
-          code: lt.code,
-          daysAllowedPerYear: lt.daysAllowedPerYear,
-          isPaid: lt.isPaid,
-          color: lt.color,
-        },
-      });
-    }
-  }
-
-  // 8. Seed Indian Public & Gazetted Holidays 2026
+  // 7. Seed Indian Public & Gazetted Holidays 2026
   const indianHolidays = [
     { name: 'Republic Day', date: '2026-01-26', type: 'GAZETTED' },
     { name: 'Maha Shivratri', date: '2026-02-15', type: 'RESTRICTED' },

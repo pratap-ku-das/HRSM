@@ -53,6 +53,8 @@ private fun String.prettyDate(): String = runCatching {
     LocalDate.parse(substringBefore('T')).format(DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH))
 }.getOrDefault(substringBefore('T'))
 
+private fun Double.money(): String = java.text.NumberFormat.getCurrencyInstance(Locale("en", "IN")).format(this)
+
 private fun AttendanceDto.workedTime(): String {
     if (clockInTime.isNullOrBlank()) return "No punch"
     return runCatching {
@@ -472,7 +474,8 @@ fun LeaveScreen(vm: LeaveViewModel = hiltViewModel()) {
                                 Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                                     Icon(if (type.isPaid) Icons.Outlined.Paid else Icons.AutoMirrored.Outlined.EventNote, null, tint = if (type.isPaid) OrbitMint else OrbitViolet)
                                     Text(type.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("${type.daysAllowedPerYear} days / year", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+                                    val balance = data.balances.firstOrNull { it.leaveTypeId == type.id }
+                                    Text("${balance?.available?.let { "%.1f".format(it) } ?: type.daysAllowedPerYear} days available", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
                                 }
                             }
                         }
@@ -497,12 +500,28 @@ fun LeaveScreen(vm: LeaveViewModel = hiltViewModel()) {
 @Composable
 private fun LeaveDialog(types: List<LeaveTypeDto>, dismiss: () -> Unit, submit: (ApplyLeaveRequest) -> Unit) {
     var type by remember(types) { mutableStateOf(types.firstOrNull()?.id.orEmpty()) }
+    var typeMenuOpen by remember { mutableStateOf(false) }
     var start by remember { mutableStateOf(LocalDate.now().toString()) }
     var end by remember { mutableStateOf(LocalDate.now().toString()) }
     var reason by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = dismiss, shape = RoundedCornerShape(28.dp), icon = { Icon(Icons.Outlined.BeachAccess, null, tint = OrbitMint) }, title = { Text("Plan your time away") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(types.firstOrNull { it.id == type }?.name ?: "No leave policies available", color = OrbitViolet, fontWeight = FontWeight.Bold)
+            Text("Leave category", style = MaterialTheme.typography.labelMedium, color = OrbitMuted)
+            Box(Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { typeMenuOpen = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp), enabled = types.isNotEmpty()) {
+                    Text(types.firstOrNull { it.id == type }?.name ?: "No categories available", modifier = Modifier.weight(1f))
+                    Icon(Icons.Outlined.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded = typeMenuOpen, onDismissRequest = { typeMenuOpen = false }) {
+                    types.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Column { Text(option.name, fontWeight = FontWeight.SemiBold); Text("${option.daysAllowedPerYear} days / year", style = MaterialTheme.typography.labelSmall, color = OrbitMuted) } },
+                            onClick = { type = option.id; typeMenuOpen = false },
+                            leadingIcon = { Icon(if (option.isPaid) Icons.Outlined.Paid else Icons.AutoMirrored.Outlined.EventNote, null, tint = if (option.isPaid) OrbitMint else OrbitViolet) },
+                        )
+                    }
+                }
+            }
             OutlinedTextField(start, { start = it }, label = { Text("Start date (YYYY-MM-DD)") }, shape = RoundedCornerShape(15.dp), singleLine = true)
             OutlinedTextField(end, { end = it }, label = { Text("End date (YYYY-MM-DD)") }, shape = RoundedCornerShape(15.dp), singleLine = true)
             OutlinedTextField(reason, { reason = it }, label = { Text("Reason") }, shape = RoundedCornerShape(15.dp), minLines = 2)
@@ -513,35 +532,73 @@ private fun LeaveDialog(types: List<LeaveTypeDto>, dismiss: () -> Unit, submit: 
 @Composable
 fun PayslipScreen(vm: PayViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
-    Page("COMPENSATION", "Pay, made transparent", "Your earnings and payslips") {
-        StateBody(state, retry = {}) { payslips ->
+    Page("COMPENSATION", "My pay", "Published statements and year-to-date totals") {
+        StateBody(state, retry = vm::refresh) { payslips ->
             if (payslips.isEmpty()) EmptyState(Icons.Outlined.AccountBalanceWallet, "No published payslips", "Your payroll team has not published a payslip yet.")
-            else LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+            else {
+                var selectedId by remember(payslips) { mutableStateOf(payslips.first().id) }
+                var showAmounts by remember { mutableStateOf(false) }
+                val selected = payslips.firstOrNull { it.id == selectedId } ?: payslips.first()
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
                 item {
                     val latest = payslips.first()
                     Surface(shape = RoundedCornerShape(30.dp), color = Color.Transparent, modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(30.dp), spotColor = Color(0x443E36C8))) {
                         Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF1D2145), OrbitIndigo, OrbitViolet))).padding(22.dp)) {
                             Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                                Row { Text("LATEST NET PAY", style = MaterialTheme.typography.labelMedium, color = OrbitCyan); Spacer(Modifier.weight(1f)); OrbitStatusBadge(latest.status, Color.White) }
-                                Text("₹${"%,.0f".format(latest.netSalary)}", style = MaterialTheme.typography.displaySmall, color = Color.White)
-                                Text(latest.month, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = .75f))
+                                Row(verticalAlignment = Alignment.CenterVertically) { Text("LATEST TAKE-HOME PAY", style = MaterialTheme.typography.labelMedium, color = OrbitCyan); Spacer(Modifier.weight(1f)); TextButton(onClick = { showAmounts = !showAmounts }) { Icon(if (showAmounts) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, null, tint = Color.White); Spacer(Modifier.width(5.dp)); Text(if (showAmounts) "Hide" else "Show", color = Color.White) } }
+                                Text(if (showAmounts) latest.netSalary.money() else "₹ ••••••", style = MaterialTheme.typography.displaySmall, color = Color.White)
+                                Row { Text(latest.month, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = .75f)); Spacer(Modifier.weight(1f)); OrbitStatusBadge(latest.status, Color.White) }
                                 HorizontalDivider(color = Color.White.copy(alpha = .14f))
                                 Row {
-                                    PayMetric("Gross", latest.grossSalary, Modifier.weight(1f))
-                                    PayMetric("Deductions", latest.totalDeductions, Modifier.weight(1f))
+                                    PayMetric("Gross", latest.grossSalary, showAmounts, Modifier.weight(1f))
+                                    PayMetric("Deductions", latest.totalDeductions, showAmounts, Modifier.weight(1f))
                                 }
                             }
                         }
                     }
                 }
-                item { OrbitSectionTitle("Payslip archive", "All published salary statements") }
+                item { OrbitSectionTitle("Payslip archive", "Choose a month for the full statement") }
                 items(payslips, key = { it.id }) { payslip ->
                     OrbitListItem(
                         headline = { Text(payslip.month, fontWeight = FontWeight.Bold) },
-                        supporting = { Text("Gross ₹${"%,.0f".format(payslip.grossSalary)} · Deductions ₹${"%,.0f".format(payslip.totalDeductions)}") },
+                        supporting = { Text(if (showAmounts) "Gross ${payslip.grossSalary.money()} · Deductions ${payslip.totalDeductions.money()}" else "Published salary statement") },
                         leading = { Box(Modifier.size(42.dp).background(OrbitViolet.copy(alpha = .1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Description, null, tint = OrbitViolet) } },
-                        trailing = { Column(horizontalAlignment = Alignment.End) { Text("₹${"%,.0f".format(payslip.netSalary)}", fontWeight = FontWeight.Bold); Text(payslip.status, style = MaterialTheme.typography.labelMedium, color = orbitStatusColor(payslip.status)) } },
+                        trailing = { Column(horizontalAlignment = Alignment.End) { Text(if (showAmounts) payslip.netSalary.money() else "••••••", fontWeight = FontWeight.Bold); Text(payslip.status, style = MaterialTheme.typography.labelMedium, color = orbitStatusColor(payslip.status)) } },
+                        onClick = { selectedId = payslip.id },
                     )
+                }
+                item { OrbitSectionTitle("Statement details", selected.month) }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PaySummaryCard("Gross", selected.grossSalary, showAmounts, OrbitCyan, Modifier.weight(1f))
+                        PaySummaryCard("Deductions", selected.totalDeductions, showAmounts, OrbitRose, Modifier.weight(1f))
+                        PaySummaryCard("Net pay", selected.netSalary, showAmounts, OrbitMint, Modifier.weight(1f))
+                    }
+                }
+                item {
+                    Surface(shape = RoundedCornerShape(22.dp), color = Color.White, border = BorderStroke(1.dp, Color(0xFFE9EAF2))) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Pay period", fontWeight = FontWeight.Bold)
+                            PayFact("Working days", selected.workingDays.toString())
+                            PayFact("Paid attendance", "${selected.presentDays} present · ${selected.paidLeaveDays} paid leave")
+                            PayFact("Unpaid days", selected.unpaidDays.toString())
+                            PayFact("Payment date", selected.paymentDate?.prettyDate() ?: "Not recorded")
+                        }
+                    }
+                }
+                item { PayComponents("Earnings", "EARNING", selected, showAmounts, OrbitMint) }
+                item { PayComponents("Deductions", "DEDUCTION", selected, showAmounts, OrbitRose) }
+                if (selected.componentMeta.any { it.value.kind == "EMPLOYER_CONTRIBUTION" }) item { PayComponents("Employer contributions", "EMPLOYER_CONTRIBUTION", selected, showAmounts, OrbitViolet) }
+                item {
+                    Surface(shape = RoundedCornerShape(22.dp), color = OrbitMint.copy(alpha = .1f), border = BorderStroke(1.dp, OrbitMint.copy(alpha = .3f))) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Text("Year to date", fontWeight = FontWeight.Bold, color = OrbitInk)
+                            PayFact("Gross earnings", if (showAmounts) selected.ytdGross.money() else "₹ ••••••")
+                            PayFact("Deductions", if (showAmounts) selected.ytdDeductions.money() else "₹ ••••••")
+                            PayFact("Net pay", if (showAmounts) selected.ytdNet.money() else "₹ ••••••", true)
+                        }
+                    }
+                }
                 }
             }
         }
@@ -549,8 +606,32 @@ fun PayslipScreen(vm: PayViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun RowScope.PayMetric(label: String, value: Double, modifier: Modifier = Modifier) {
-    Column(modifier) { Text(label, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .58f)); Text("₹${"%,.0f".format(value)}", style = MaterialTheme.typography.titleMedium, color = Color.White) }
+private fun RowScope.PayMetric(label: String, value: Double, visible: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier) { Text(label, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .58f)); Text(if (visible) value.money() else "₹ ••••", style = MaterialTheme.typography.titleMedium, color = Color.White) }
+}
+
+@Composable private fun PaySummaryCard(label: String, amount: Double, visible: Boolean, color: Color, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(18.dp), color = color.copy(alpha = .1f)) { Column(Modifier.padding(12.dp)) { Text(label, style = MaterialTheme.typography.labelSmall, color = OrbitMuted); Text(if (visible) amount.money() else "₹ ••••", fontWeight = FontWeight.Bold, color = OrbitInk, maxLines = 1) } }
+}
+
+@Composable private fun PayFact(label: String, value: String, strong: Boolean = false) {
+    Row(Modifier.fillMaxWidth()) { Text(label, color = OrbitMuted, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.weight(1f)); Text(value, fontWeight = if (strong) FontWeight.Bold else FontWeight.Medium, style = MaterialTheme.typography.bodySmall, color = if (strong) OrbitMint else OrbitInk) }
+}
+
+@Composable private fun PayComponents(title: String, kind: String, payslip: PayslipDto, visible: Boolean, color: Color) {
+    val rows = payslip.breakdown.filter { (code, amount) -> amount != 0.0 && payslip.componentMeta[code]?.kind == kind }
+    Surface(shape = RoundedCornerShape(22.dp), color = Color.White, border = BorderStroke(1.dp, Color(0xFFE9EAF2))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(9.dp).background(color, CircleShape)); Spacer(Modifier.width(8.dp)); Text(title, fontWeight = FontWeight.Bold) }
+            if (rows.isEmpty()) Text("No components for this period", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+            rows.forEach { (code, amount) ->
+                Row(Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) { Text(payslip.componentMeta[code]?.name ?: code, style = MaterialTheme.typography.bodySmall); Text("YTD ${if (visible) (payslip.ytdBreakdown[code] ?: 0.0).money() else "₹ ••••"}", style = MaterialTheme.typography.labelSmall, color = OrbitMuted) }
+                    Text(if (visible) amount.money() else "₹ ••••", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -589,7 +670,7 @@ private fun ExpenseDialog(dismiss: () -> Unit, submit: (SubmitExpenseRequest) ->
 }
 
 @Composable
-fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit) {
+fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit, payroll:()->Unit) {
     Page(me.user.mobileWorkspaceTitle(), "More from OrbitHR", "Profile and permitted tools") {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
@@ -610,6 +691,7 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
             item { MoreAction(Icons.Outlined.EditCalendar, "Attendance requests", "Regularization, WFH, duty, travel and overtime", OrbitViolet, attendanceRequests) }
             if (me.user.hasPermission("workflow.review")) item { MoreAction(Icons.Outlined.Approval, "Approval inbox", "Review requests assigned to you", OrbitMint, approvals) }
             if (me.user.canOpenPeopleDirectory()) item { MoreAction(Icons.Outlined.Groups, "People directory", if (me.user.hasPermission("employee.manage")) "Employees and onboarding" else "Your permitted team", OrbitCyan, employees) }
+            if (me.user.hasPermission("payroll.manage")) item { MoreAction(Icons.Outlined.Calculate, "Payroll processing", "Attendance review, approval and payslip publication", OrbitAmber, payroll) }
             item { MoreAction(Icons.Outlined.FolderOpen, "Documents, assets & goals", "Your verified records and assigned equipment", OrbitViolet, workspace) }
             item { MoreAction(Icons.Outlined.NotificationsNone, "Notifications", "Your persistent OrbitHR inbox", OrbitMint, notifications) }
             item {
@@ -619,6 +701,17 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
             }
             item { Text("OrbitHR mobile · ${me.user.mobileWorkspaceTitle().lowercase().replaceFirstChar { it.uppercase() }}", Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = OrbitMuted) }
         }
+    }
+}
+
+@Composable
+fun PayrollAdminScreen(back:()->Unit,vm:PayrollAdminViewModel=hiltViewModel()){
+    val state by vm.state.collectAsState();var month by remember{mutableStateOf(LocalDate.now().toString().take(7))}
+    fun label(status:String)=when(status){"DRAFT"->"Review attendance";"ATTENDANCE_REVIEW"->"Finalize attendance";"ATTENDANCE_FINALIZED","ATTENDANCE_LOCKED"->"Calculate";"CALCULATED","REJECTED"->"Submit for approval";"PENDING_APPROVAL"->"Approve";"APPROVED"->"Generate payslips";"PAYSLIP_GENERATED"->"Publish";else->""}
+    Page("PAYROLL","Payroll processing","Controlled monthly workflow",action={Row{OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back);Spacer(Modifier.width(6.dp));OrbitIconButton(Icons.Outlined.Refresh,"Refresh",vm::refresh)}}){
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically){OutlinedTextField(month,{month=it},Modifier.weight(1f),label={Text("Month YYYY-MM")},singleLine=true);Button(onClick={vm.create(month)},enabled=!state.loading&&month.matches(Regex("\\d{4}-\\d{2}"))){Text("New")}}
+        Spacer(Modifier.height(12.dp));state.error?.let{Text(it,color=OrbitRose);Spacer(Modifier.height(8.dp))}
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=20.dp)){items(state.data?.runs.orEmpty(),key={it.id}){run->OrbitGlassCard(Modifier.fillMaxWidth()){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(run.month,fontWeight=FontWeight.Bold);Text(run.status.replace('_',' '),style=MaterialTheme.typography.bodySmall,color=OrbitMuted);Text("₹${String.format(Locale.ENGLISH,"%.0f",run.totalNetPayout)} · ${run.totalEmployees} employees",style=MaterialTheme.typography.labelSmall,color=OrbitInk)};val action=label(run.status);if(action.isNotBlank())Button(onClick={vm.advance(run)},enabled=!state.loading){Text(action)}}}}}
     }
 }
 
@@ -705,12 +798,45 @@ fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel =
             ) }
         } }
     }
-    if (showOnboarding) OnboardDialog(
+    if (showOnboarding) OnboardWizardDialog(
         organization = organization,
         onboarding = onboarding,
         dismiss = { showOnboarding = false },
         retryOrganization = vm::loadOrganization,
-    ) { vm.onboard(it) }
+    ) { vm.onboardStaged(it) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OnboardWizardDialog(
+    organization: LoadState<OrganizationOptions>,
+    onboarding: LoadState<OnboardingDto>,
+    dismiss: () -> Unit,
+    retryOrganization: () -> Unit,
+    submit: (MobileOnboardingRequest) -> Unit,
+) {
+    var step by remember { mutableIntStateOf(0) }
+    var code by remember { mutableStateOf("") }; var first by remember { mutableStateOf("") }; var last by remember { mutableStateOf("") }
+    var workEmail by remember { mutableStateOf("") }; var personalEmail by remember { mutableStateOf("") }; var mobile by remember { mutableStateOf("") }
+    var dob by remember { mutableStateOf("") }; var gender by remember { mutableStateOf("") }; var address by remember { mutableStateOf("") }
+    var city by remember { mutableStateOf("") }; var region by remember { mutableStateOf("") }; var pin by remember { mutableStateOf("") }
+    var emergencyName by remember { mutableStateOf("") }; var emergencyPhone by remember { mutableStateOf("") }; var emergencyRelation by remember { mutableStateOf("") }
+    var departmentId by remember { mutableStateOf("") }; var designationId by remember { mutableStateOf("") }; var structureId by remember { mutableStateOf("") }
+    var annualCtc by remember { mutableStateOf("") }; var departmentExpanded by remember { mutableStateOf(false) }; var designationExpanded by remember { mutableStateOf(false) }; var salaryExpanded by remember { mutableStateOf(false) }
+    val departments=organization.data?.departments.orEmpty();val designations=organization.data?.designations.orEmpty();val structures=organization.data?.salaryStructures.orEmpty()
+    val availableDesignations=designations.filter{it.departmentId==departmentId}
+    LaunchedEffect(departments,structures){if(departmentId.isBlank()&&departments.size==1)departmentId=departments.first().id;if(structureId.isBlank()&&structures.size==1)structureId=structures.first().id}
+    LaunchedEffect(departmentId){if(availableDesignations.none{it.id==designationId})designationId="";if(availableDesignations.size==1)designationId=availableDesignations.first().id}
+    val personalReady=first.isNotBlank()&&last.isNotBlank()&&personalEmail.contains('@')&&mobile.length>=7&&dob.isNotBlank()&&gender.isNotBlank()&&address.length>=5&&city.length>=2&&region.length>=2&&pin.length>=3&&emergencyName.length>=2&&emergencyPhone.length>=7&&emergencyRelation.length>=2
+    val employmentReady=code.length>=2&&workEmail.contains('@')&&departmentId.isNotBlank()&&designationId.isNotBlank()&&structureId.isNotBlank()&&(annualCtc.toDoubleOrNull()?:0.0)>0
+    AlertDialog(onDismissRequest=dismiss,shape=RoundedCornerShape(28.dp),icon={Icon(Icons.Outlined.PersonAdd,null,tint=OrbitViolet)},title={Column{Text("Employee onboarding");Text("Step ${step+1} of 3",style=MaterialTheme.typography.labelSmall,color=OrbitMuted)}},text={
+        LazyColumn(Modifier.heightIn(max=520.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            if(step==0){item{Text("Personal details",fontWeight=FontWeight.Bold)};item{OutlinedTextField(first,{first=it},Modifier.fillMaxWidth(),label={Text("First name")})};item{OutlinedTextField(last,{last=it},Modifier.fillMaxWidth(),label={Text("Last name")})};item{OutlinedTextField(gender,{gender=it},Modifier.fillMaxWidth(),label={Text("Gender")})};item{OutlinedTextField(dob,{dob=it},Modifier.fillMaxWidth(),label={Text("Date of birth (YYYY-MM-DD)")})};item{OutlinedTextField(personalEmail,{personalEmail=it},Modifier.fillMaxWidth(),label={Text("Personal email")})};item{OutlinedTextField(mobile,{mobile=it},Modifier.fillMaxWidth(),label={Text("Mobile number")})};item{OutlinedTextField(address,{address=it},Modifier.fillMaxWidth(),label={Text("Current/permanent address")})};item{OutlinedTextField(city,{city=it},Modifier.fillMaxWidth(),label={Text("City")})};item{OutlinedTextField(region,{region=it},Modifier.fillMaxWidth(),label={Text("State")})};item{OutlinedTextField(pin,{pin=it},Modifier.fillMaxWidth(),label={Text("PIN code")})};item{OutlinedTextField(emergencyName,{emergencyName=it},Modifier.fillMaxWidth(),label={Text("Emergency contact")})};item{OutlinedTextField(emergencyPhone,{emergencyPhone=it},Modifier.fillMaxWidth(),label={Text("Emergency phone")})};item{OutlinedTextField(emergencyRelation,{emergencyRelation=it},Modifier.fillMaxWidth(),label={Text("Relationship")})}}
+            if(step==1){item{Text("Employment and salary",fontWeight=FontWeight.Bold)};item{OutlinedTextField(code,{code=it},Modifier.fillMaxWidth(),label={Text("Employee ID")})};item{OutlinedTextField(workEmail,{workEmail=it},Modifier.fillMaxWidth(),label={Text("Work email")})};item{ExposedDropdownMenuBox(departmentExpanded,{departmentExpanded=it}){OutlinedTextField(departments.firstOrNull{it.id==departmentId}?.name.orEmpty(),{},readOnly=true,label={Text("Department")},trailingIcon={ExposedDropdownMenuDefaults.TrailingIcon(departmentExpanded)},modifier=Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth());ExposedDropdownMenu(departmentExpanded,{departmentExpanded=false}){departments.forEach{d->DropdownMenuItem({Text(d.name)},{departmentId=d.id;departmentExpanded=false})}}}};item{ExposedDropdownMenuBox(designationExpanded,{designationExpanded=it}){OutlinedTextField(availableDesignations.firstOrNull{it.id==designationId}?.title.orEmpty(),{},readOnly=true,label={Text("Designation")},trailingIcon={ExposedDropdownMenuDefaults.TrailingIcon(designationExpanded)},modifier=Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth());ExposedDropdownMenu(designationExpanded,{designationExpanded=false}){availableDesignations.forEach{d->DropdownMenuItem({Text(d.title)},{designationId=d.id;designationExpanded=false})}}}};item{ExposedDropdownMenuBox(salaryExpanded,{salaryExpanded=it}){OutlinedTextField(structures.firstOrNull{it.id==structureId}?.name.orEmpty(),{},readOnly=true,label={Text("Salary structure")},trailingIcon={ExposedDropdownMenuDefaults.TrailingIcon(salaryExpanded)},modifier=Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth());ExposedDropdownMenu(salaryExpanded,{salaryExpanded=false}){structures.forEach{s->DropdownMenuItem({Text(s.name)},{structureId=s.id;salaryExpanded=false})}}}};item{OutlinedTextField(annualCtc,{annualCtc=it.filter{c->c.isDigit()||c=='.'}},Modifier.fillMaxWidth(),label={Text("Annual CTC")})}}
+            if(step==2){item{Text("Review and invite",fontWeight=FontWeight.Bold)};item{Text("$first $last\n$code · $workEmail\n${departments.firstOrNull{it.id==departmentId}?.name} · ${availableDesignations.firstOrNull{it.id==designationId}?.title}\nAnnual CTC ₹$annualCtc",color=OrbitInk)};item{Surface(shape=RoundedCornerShape(14.dp),color=OrbitMint.copy(alpha=.1f)){Text("The employee is created atomically. A one-time activation link is emailed; no password is sent.",Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)}}}
+            organization.error?.let{item{Row(verticalAlignment=Alignment.CenterVertically){Text(it,Modifier.weight(1f),color=OrbitRose);TextButton(onClick=retryOrganization){Text("Retry")}}}};onboarding.error?.let{item{Text(it,color=OrbitRose)}}
+        }
+    },confirmButton={Button(enabled=!onboarding.loading&&when(step){0->personalReady;1->employmentReady;else->true},onClick={if(step<2)step++ else submit(MobileOnboardingRequest(PersonalOnboardingSection(firstName=first,lastName=last,gender=gender,dateOfBirth=dob,personalEmail=personalEmail,mobileNumber=mobile,currentAddress=address,permanentAddress=address,city=city,state=region,pinCode=pin,emergencyContactName=emergencyName,emergencyContactNumber=emergencyPhone,emergencyContactRelationship=emergencyRelation),SalaryOnboardingSection(structureId,annualCtc.toDouble(),LocalDate.now().toString()),additional=AdditionalOnboardingSection(code,workEmail,departmentId,designationId,dateOfJoining=LocalDate.now().toString())))} ){Text(if(onboarding.loading)"Creating…" else if(step<2)"Continue" else "Create & invite")}},dismissButton={TextButton(onClick={if(step>0)step-- else dismiss()}){Text(if(step>0)"Back" else "Cancel")}})
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

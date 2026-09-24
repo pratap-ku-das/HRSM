@@ -267,13 +267,14 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 composable("attendance") { AttendanceScreen(verifyAttendance) }
                 composable("leave") { LeaveScreen() }
                 composable("pay") { PayslipScreen() }
-                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }) }
+                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }, { nav.navigate("payrollAdmin") }) }
                 composable("expenses") { ExpenseScreen(back = { nav.popBackStack() }) }
                 composable("employees") { EmployeeScreen(back = { nav.popBackStack() }, canManage = "employee.manage" in me.user.permissions) }
                 composable("attendanceRequests") { AttendanceRequestsScreen(back = { nav.popBackStack() }) }
                 composable("approvals") { ApprovalInboxScreen(back = { nav.popBackStack() }) }
                 composable("notifications") { NotificationCenterScreen(back = { nav.popBackStack() }) }
                 composable("workspace") { EmployeeHubScreen(back = { nav.popBackStack() }) }
+                composable("payrollAdmin") { PayrollAdminScreen(back = { nav.popBackStack() }) }
             }
         }
     }

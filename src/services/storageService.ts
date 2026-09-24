@@ -114,16 +114,6 @@ class StorageService {
     depts.push(...defaultDepts);
     this.set(STORAGE_KEYS.DEPARTMENTS, depts);
 
-    // Seed default leave types for the new company
-    const defaultLeaves: LeaveType[] = [
-      { id: `lt-${Date.now()}-1`, companyId: company.id, name: 'Paid Annual Leave', code: 'AL', daysAllowedPerYear: 20, isPaid: true, color: '#3b82f6' },
-      { id: `lt-${Date.now()}-2`, companyId: company.id, name: 'Sick Leave', code: 'SL', daysAllowedPerYear: 12, isPaid: true, color: '#ef4444' },
-      { id: `lt-${Date.now()}-3`, companyId: company.id, name: 'Casual Leave', code: 'CL', daysAllowedPerYear: 10, isPaid: true, color: '#f59e0b' },
-    ];
-    const leaves = this.getLeaveTypes();
-    leaves.push(...defaultLeaves);
-    this.set(STORAGE_KEYS.LEAVE_TYPES, leaves);
-
     this.logAudit({
       companyId: company.id,
       userId: adminUser.id,
@@ -309,21 +299,6 @@ class StorageService {
   public cacheLeaveTypes(companyId: string, leaveTypes: LeaveType[]): void {
     const otherCompanies = this.getLeaveTypes().filter(item => item.companyId !== companyId);
     this.set(STORAGE_KEYS.LEAVE_TYPES, [...otherCompanies, ...leaveTypes]);
-  }
-
-  public ensureIndianLeaveTypes(companyId: string): LeaveType[] {
-    const existing = this.getLeaveTypes(companyId);
-    if (existing.length) return existing;
-
-    const defaults: LeaveType[] = [
-      { id: `lt-${companyId}-pl`, companyId, name: 'Privilege Leave (PL/EL)', code: 'PL', daysAllowedPerYear: 18, isPaid: true, color: '#3b82f6' },
-      { id: `lt-${companyId}-cl`, companyId, name: 'Casual Leave (CL)', code: 'CL', daysAllowedPerYear: 12, isPaid: true, color: '#10b981' },
-      { id: `lt-${companyId}-sl`, companyId, name: 'Sick & Medical Leave (SL)', code: 'SL', daysAllowedPerYear: 10, isPaid: true, color: '#ef4444' },
-      { id: `lt-${companyId}-ml`, companyId, name: 'Maternity Leave', code: 'ML', daysAllowedPerYear: 182, isPaid: true, color: '#ec4899' },
-      { id: `lt-${companyId}-lop`, companyId, name: 'Loss of Pay (LOP)', code: 'LOP', daysAllowedPerYear: 365, isPaid: false, color: '#64748b' },
-    ];
-    this.cacheLeaveTypes(companyId, defaults);
-    return defaults;
   }
 
   public getLeaveRequests(companyId?: string): LeaveRequest[] {

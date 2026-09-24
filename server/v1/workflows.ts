@@ -48,6 +48,57 @@ const approverTypes = [
 
 type WorkflowDb = PrismaClient | Prisma.TransactionClient;
 type WorkflowStepSeed = { stepId: string; sequence: number; status: 'PENDING' | 'WAITING'; approverUserIds: string[]; minimumApprovals: number; startedAt?: Date; dueAt?: Date };
+
+export async function ensureDefaultLeaveWorkflow(
+  prisma: WorkflowDb,
+  companyId: string,
+  createdById: string,
+) {
+  const active = await prisma.workflowDefinition.findFirst({
+    where: { companyId, module: "LEAVE", status: "ACTIVE" },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+    orderBy: { version: "desc" },
+  });
+  if (active) return active;
+
+  const existingDefault = await prisma.workflowDefinition.findFirst({
+    where: { companyId, code: "LEAVE_DEFAULT" },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+    orderBy: { version: "desc" },
+  });
+  if (existingDefault) {
+    return prisma.workflowDefinition.update({
+      where: { id: existingDefault.id },
+      data: { status: "ACTIVE" },
+      include: { steps: { orderBy: { sequence: "asc" } } },
+    });
+  }
+
+  return prisma.workflowDefinition.create({
+    data: {
+      companyId,
+      module: "LEAVE",
+      name: "Default leave approval",
+      code: "LEAVE_DEFAULT",
+      version: 1,
+      status: "ACTIVE",
+      createdById,
+      steps: {
+        create: {
+          sequence: 1,
+          name: "Company administrator approval",
+          approverType: "ROLE",
+          approverReference: "COMPANY_ADMIN",
+          minimumApprovals: 1,
+          slaHours: 48,
+          allowDelegation: true,
+        },
+      },
+    },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+  });
+}
+
 async function adapterApprovers(
   prisma: WorkflowDb,
   companyId: string,
@@ -108,7 +159,7 @@ export async function startConfiguredWorkflow(
     payload?: Prisma.InputJsonValue;
   },
 ) {
-  const definition = await prisma.workflowDefinition.findFirst({
+  let definition = await prisma.workflowDefinition.findFirst({
     where: {
       companyId: input.companyId,
       module: input.module,
@@ -117,7 +168,18 @@ export async function startConfiguredWorkflow(
     include: { steps: { orderBy: { sequence: "asc" } } },
     orderBy: { version: "desc" },
   });
-  if (!definition) return null;
+  if (!definition && input.module === "LEAVE") {
+    definition = await ensureDefaultLeaveWorkflow(
+      prisma,
+      input.companyId,
+      input.requesterUserId,
+    );
+  }
+  if (!definition)
+    throw Object.assign(
+      new Error(`No active ${input.module} workflow is configured.`),
+      { status: 409, code: "WORKFLOW_NOT_CONFIGURED" },
+    );
   const stepData: WorkflowStepSeed[] = [];
   for (const step of definition.steps) {
     const approverUserIds = await adapterApprovers(
@@ -381,8 +443,9 @@ export function createWorkflowRouter(
           prisma.workflowDefinition.updateMany({
             where: {
               companyId: definition.companyId,
-              code: definition.code,
+              module: definition.module,
               status: "ACTIVE",
+              id: { not: definition.id },
             },
             data: { status: "RETIRED" },
           }),

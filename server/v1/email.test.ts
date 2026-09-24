@@ -3,14 +3,14 @@ import { createOpaqueToken, createTemporaryPassword, onboardingEmail, passwordRe
 
 describe('onboarding email', () => {
   it('contains activation, Android download, fallback, expiry and escaped employee data', () => {
-    const message = onboardingEmail({ employeeName: '<Admin>', companyName: 'Orbit & Co', email: 'person@example.com', temporaryPassword: 'Temp!Pass123', activationUrl: 'https://web.test/activate?t=secret', androidUrl: 'https://download.test/app', supportEmail: 'hr@example.com', expiresHours: 24 });
+    const message = onboardingEmail({ employeeName: '<Admin>', companyName: 'Orbit & Co', email: 'person@example.com', activationUrl: 'https://web.test/activate?t=secret', androidUrl: 'https://download.test/app', supportEmail: 'hr@example.com', expiresHours: 24 });
     expect(message.html).toContain('&lt;Admin&gt;');
     expect(message.html).toContain('Activate Your Account');
     expect(message.html).toContain('Download OrbitHR Android App');
     expect(message.text).toContain('https://download.test/app');
     expect(message.text).toContain('expires in 24 hours');
     expect(message.text).toContain('Username: person@example.com');
-    expect(message.text).toContain('Temporary password: Temp!Pass123');
+    expect(message.text).not.toContain('Temporary password:');
   });
   it('creates only a hash for persistence', () => {
     const first = createOpaqueToken(); const second = createOpaqueToken();

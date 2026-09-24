@@ -42,4 +42,21 @@ interface OrbitApi {
     @GET("designations") suspend fun designations(): ApiEnvelope<List<DesignationDto>>
     @GET("employees") suspend fun employees(@Query("page") page: Int, @Query("pageSize") pageSize: Int = 25, @Query("search") search: String? = null): ApiEnvelope<List<EmployeeDto>>
     @POST("employees/onboard") suspend fun onboard(@Header("Idempotency-Key") key: String, @Body body: OnboardEmployeeRequest): ApiEnvelope<OnboardingDto>
+    @GET("payroll/config") suspend fun payrollConfiguration(): ApiEnvelope<PayrollConfigurationOptionDto>
+    @POST("employees/onboarding") suspend fun createOnboarding(): ApiEnvelope<OnboardingDraftDto>
+    @PUT("employees/onboarding/{id}/personal") suspend fun saveOnboardingPersonal(@Path("id") id:String,@Body body:PersonalOnboardingSection):ApiEnvelope<OnboardingDraftDto>
+    @PUT("employees/onboarding/{id}/documents") suspend fun saveOnboardingDocuments(@Path("id") id:String,@Body body:DocumentsOnboardingSection):ApiEnvelope<OnboardingDraftDto>
+    @PUT("employees/onboarding/{id}/salary") suspend fun saveOnboardingSalary(@Path("id") id:String,@Body body:SalaryOnboardingSection):ApiEnvelope<OnboardingDraftDto>
+    @PUT("employees/onboarding/{id}/face") suspend fun saveOnboardingFace(@Path("id") id:String,@Body body:FaceOnboardingSection):ApiEnvelope<OnboardingDraftDto>
+    @PUT("employees/onboarding/{id}/additional") suspend fun saveOnboardingAdditional(@Path("id") id:String,@Body body:AdditionalOnboardingSection):ApiEnvelope<OnboardingDraftDto>
+    @POST("employees/onboarding/{id}/review") suspend fun reviewOnboarding(@Path("id") id:String):ApiEnvelope<OnboardingDraftDto>
+    @POST("employees/onboarding/{id}/complete") suspend fun completeOnboarding(@Path("id") id:String):ApiEnvelope<OnboardingDto>
+    @POST("payroll/runs") suspend fun createPayrollRun(@Body body:CreatePayrollRunRequest):ApiEnvelope<PayrollRunMobileDto>
+    @GET("payroll/runs/{id}/attendance") suspend fun payrollAttendance(@Path("id") id:String):ApiEnvelope<List<PayrollAttendanceReviewMobileDto>>
+    @POST("payroll/runs/{id}/finalize-attendance") suspend fun finalizePayrollAttendance(@Path("id") id:String,@Body body:PayrollConfirmationRequest=PayrollConfirmationRequest()):ApiEnvelope<PayrollRunMobileDto>
+    @POST("payroll/runs/{id}/calculate") suspend fun calculatePayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
+    @POST("payroll/runs/{id}/submit") suspend fun submitPayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
+    @POST("payroll/runs/{id}/approve") suspend fun approvePayroll(@Path("id") id:String,@Body body:PayrollDecisionRequest=PayrollDecisionRequest()):ApiEnvelope<PayrollRunMobileDto>
+    @POST("payroll/runs/{id}/generate-payslips") suspend fun generatePayrollPayslips(@Path("id") id:String):ApiEnvelope<Map<String,Int>>
+    @POST("payroll/runs/{id}/publish") suspend fun publishPayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
 }

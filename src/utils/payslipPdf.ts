@@ -10,6 +10,8 @@ interface PayslipPdfInput {
 }
 
 const money = (value: number) => `INR ${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const masked = (value?: string, visible = 4) => value ? `${'•'.repeat(Math.max(4, value.length - visible))}${value.slice(-visible)}` : '-';
+const componentLabel = (code: string) => code.toLowerCase().split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 
 const numberToWords = (value: number): string => {
   if (value === 0) return 'Zero';
@@ -121,8 +123,8 @@ export async function downloadPayslipPdf({ company, settings, employee, departme
     ['Designation', designation?.title || '-', 'Department', department?.name || '-'],
     ['Employment Type', employee.employmentType.replace('_', ' '), 'Date of Joining', new Date(`${employee.dateOfJoining}T00:00:00`).toLocaleDateString('en-IN')],
     ['Work Location', employee.workLocation, 'Email / Phone', `${employee.email}  |  ${employee.phone}`],
-    ['PAN / Tax Identifier', employee.bankDetails.taxIdentifier || '-', 'Bank / IFSC', `${employee.bankDetails.bankName || '-'}  |  ${employee.bankDetails.routingOrIfsc || '-'}`],
-    ['Bank Account', employee.bankDetails.accountNumber || '-', 'Payment Date', payslip.paymentDate ? new Date(`${payslip.paymentDate}T00:00:00`).toLocaleDateString('en-IN') : '-'],
+    ['PAN / Tax Identifier', masked(employee.bankDetails.taxIdentifier), 'Bank / IFSC', `${employee.bankDetails.bankName || '-'}  |  ${employee.bankDetails.routingOrIfsc || '-'}`],
+    ['Bank Account', masked(employee.bankDetails.accountNumber), 'Payment Date', payslip.paymentDate ? new Date(`${payslip.paymentDate}T00:00:00`).toLocaleDateString('en-IN') : '-'],
   ]);
 
   section('ATTENDANCE SUMMARY');
@@ -135,20 +137,30 @@ export async function downloadPayslipPdf({ company, settings, employee, departme
   const tableTop = y;
   doc.setFillColor(...navy); doc.rect(margin, tableTop, contentWidth, 8, 'F');
   doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-  doc.text('EARNINGS', margin + 3, tableTop + 5.2); doc.text('AMOUNT', margin + 87, tableTop + 5.2, { align: 'right' });
-  doc.text('DEDUCTIONS', margin + 95, tableTop + 5.2); doc.text('AMOUNT', pageWidth - margin - 3, tableTop + 5.2, { align: 'right' });
-  const earnings: Array<[string, number]> = [['Basic Salary', payslip.basicSalary], ['House Rent Allowance (HRA)', payslip.hra], ['Special / Other Allowances', payslip.allowances], ['Gross Earnings', payslip.grossSalary]];
-  const deductions: Array<[string, number]> = [['Provident Fund (EPF)', payslip.providentFund], ['TDS / Income Tax', payslip.taxDeductions], ['Other Deductions', payslip.otherDeductions], ['Total Deductions', payslip.totalDeductions]];
+  doc.text('EARNINGS', margin + 3, tableTop + 5.2); doc.text('CURRENT', margin + 65, tableTop + 5.2, { align: 'right' }); doc.text('YTD', margin + 88, tableTop + 5.2, { align: 'right' });
+  doc.text('DEDUCTIONS', margin + 95, tableTop + 5.2); doc.text('CURRENT', margin + 156, tableTop + 5.2, { align: 'right' }); doc.text('YTD', pageWidth - margin - 3, tableTop + 5.2, { align: 'right' });
+  const values = payslip.breakdown || {};
+  const meta = payslip.componentMeta || {};
+  const rows = (kind: 'EARNING'|'DEDUCTION') => Object.entries(values).filter(([code, amount]) => amount !== 0 && meta[code]?.kind === kind).map(([code, amount]) => [meta[code]?.name || componentLabel(code), amount, payslip.ytdBreakdown?.[code] || 0] as [string, number, number]);
+  const compact = (items: Array<[string, number, number]>) => items.length <= 8 ? items : [...items.slice(0, 7), ['Other components', items.slice(7).reduce((sum, item) => sum + item[1], 0), items.slice(7).reduce((sum, item) => sum + item[2], 0)] as [string, number, number]];
+  const earningRows = rows('EARNING');
+  const deductionRows = rows('DEDUCTION');
+  const earnings: Array<[string, number, number]> = compact(earningRows.length ? earningRows : [['Basic Salary', payslip.basicSalary, payslip.ytdBreakdown?.BASIC || 0], ['House Rent Allowance', payslip.hra, payslip.ytdBreakdown?.HRA || 0], ['Other Allowances', payslip.allowances, 0]]);
+  const deductions: Array<[string, number, number]> = compact(deductionRows.length ? deductionRows : [['Provident Fund', payslip.providentFund, payslip.ytdBreakdown?.PF_EMPLOYEE || 0], ['Income Tax', payslip.taxDeductions, payslip.ytdBreakdown?.TDS || 0], ['Other Deductions', payslip.otherDeductions, 0]]);
+  earnings.push(['Gross Earnings', payslip.grossSalary, payslip.ytdGross || 0]);
+  deductions.push(['Total Deductions', payslip.totalDeductions, payslip.ytdDeductions || 0]);
   y = tableTop + 8;
-  earnings.forEach((item, index) => {
+  const rowCount = Math.max(earnings.length, deductions.length);
+  Array.from({ length: rowCount }).forEach((_, index) => {
     if (index % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentWidth, 8, 'F'); }
-    doc.setTextColor(...navy); doc.setFont('helvetica', index === 3 ? 'bold' : 'normal'); doc.setFontSize(8);
-    doc.text(item[0], margin + 3, y + 5.2); doc.text(money(item[1]), margin + 87, y + 5.2, { align: 'right' });
-    doc.text(deductions[index][0], margin + 95, y + 5.2); doc.text(money(deductions[index][1]), pageWidth - margin - 3, y + 5.2, { align: 'right' });
+    const earning = earnings[index], deduction = deductions[index];
+    doc.setTextColor(...navy); doc.setFont('helvetica', index === rowCount - 1 ? 'bold' : 'normal'); doc.setFontSize(7);
+    if (earning) { doc.text(earning[0], margin + 3, y + 5.2, { maxWidth: 40 }); doc.text(money(earning[1]), margin + 65, y + 5.2, { align: 'right' }); doc.text(money(earning[2]), margin + 88, y + 5.2, { align: 'right' }); }
+    if (deduction) { doc.text(deduction[0], margin + 95, y + 5.2, { maxWidth: 40 }); doc.text(money(deduction[1]), margin + 156, y + 5.2, { align: 'right' }); doc.text(money(deduction[2]), pageWidth - margin - 3, y + 5.2, { align: 'right' }); }
     y += 8;
   });
-  doc.setDrawColor(...line); doc.rect(margin, tableTop, contentWidth, 40);
-  doc.line(margin + 91, tableTop, margin + 91, tableTop + 40);
+  doc.setDrawColor(...line); doc.rect(margin, tableTop, contentWidth, 8 + rowCount * 8);
+  doc.line(margin + 91, tableTop, margin + 91, tableTop + 8 + rowCount * 8);
   y += 5;
 
   doc.setFillColor(236, 253, 245); doc.setDrawColor(110, 231, 183); doc.roundedRect(margin, y, contentWidth, 18, 2, 2, 'FD');
@@ -156,6 +168,13 @@ export async function downloadPayslipPdf({ company, settings, employee, departme
   doc.setFontSize(15); doc.text(money(payslip.netSalary), pageWidth - margin - 4, y + 8, { align: 'right' });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.text(`${numberToWords(payslip.netSalary)} Rupees Only`, margin + 4, y + 13);
   y += 25;
+
+  if ((payslip.reimbursements || 0) > 0 || (payslip.employerContributions || 0) > 0) {
+    doc.setTextColor(...grey); doc.setFontSize(7.5);
+    doc.text(`Reimbursements: ${money(payslip.reimbursements || 0)}`, margin, y);
+    doc.text(`Employer contributions: ${money(payslip.employerContributions || 0)}`, pageWidth - margin, y, { align: 'right' });
+    y += 7;
+  }
 
   doc.setTextColor(...grey); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
   doc.text('Payment Mode: NEFT / IMPS / Bank Transfer', margin, y);

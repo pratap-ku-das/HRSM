@@ -61,6 +61,30 @@ import javax.inject.Singleton
     suspend fun designations() = api.designations().data
     suspend fun employees(page: Int, search: String?) = api.employees(page, search = search).data
     suspend fun onboard(request: OnboardEmployeeRequest) = api.onboard(UUID.randomUUID().toString(), request).data
+    suspend fun salaryStructures() = api.payrollConfiguration().data.structures
+    suspend fun payrollConfiguration() = api.payrollConfiguration().data
+    suspend fun createPayrollRun(month:String) = api.createPayrollRun(CreatePayrollRunRequest(month)).data
+    suspend fun advancePayroll(run:PayrollRunMobileDto) {
+        when(run.status){
+            "DRAFT" -> api.payrollAttendance(run.id)
+            "ATTENDANCE_REVIEW" -> api.finalizePayrollAttendance(run.id)
+            "ATTENDANCE_FINALIZED","ATTENDANCE_LOCKED" -> api.calculatePayroll(run.id)
+            "CALCULATED","REJECTED" -> api.submitPayroll(run.id)
+            "PENDING_APPROVAL" -> api.approvePayroll(run.id)
+            "APPROVED" -> api.generatePayrollPayslips(run.id)
+            "PAYSLIP_GENERATED" -> api.publishPayroll(run.id)
+        }
+    }
+    suspend fun onboardStaged(request: MobileOnboardingRequest): OnboardingDto {
+        val draft = api.createOnboarding().data
+        api.saveOnboardingPersonal(draft.id, request.personal)
+        api.saveOnboardingDocuments(draft.id, DocumentsOnboardingSection())
+        api.saveOnboardingSalary(draft.id, request.salary)
+        api.saveOnboardingFace(draft.id, request.face)
+        api.saveOnboardingAdditional(draft.id, request.additional)
+        api.reviewOnboarding(draft.id)
+        return api.completeOnboarding(draft.id).data
+    }
 }
 
 fun Throwable.userMessage(): String = when (this) {

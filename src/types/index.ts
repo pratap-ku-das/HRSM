@@ -134,7 +134,11 @@ export interface AttendanceRequestItem { id: string; type: 'REGULARIZATION'|'WFH
 export interface AttendanceConfiguration { shifts: ShiftTemplate[]; policies: AttendancePolicy[]; assignments: Array<{ id: string; employeeId: string; startsOn: string; endsOn?: string; employee: Pick<Employee,'id'|'firstName'|'lastName'|'employeeCode'>; shiftTemplate: ShiftTemplate }>; locks: Array<{ id: string; periodStart: string; periodEnd: string; lockedAt: string; reason?: string }>; }
 export interface SalaryComponent { id: string; code: string; name: string; kind: 'EARNING'|'DEDUCTION'|'EMPLOYER_CONTRIBUTION'|'REIMBURSEMENT'; method: 'FIXED'|'PERCENT_BASIC'|'PERCENT_GROSS'; value: number; taxable: boolean; proratable: boolean; sequence: number; }
 export interface SalaryStructure { id: string; name: string; code: string; active: boolean; components: SalaryComponent[]; }
-export interface PayrollEngineRun { id: string; month: string; status: string; totalEmployees: number; totalGrossSalary: number; totalDeductions: number; totalNetPayout: number; lines: Array<{ id: string; employeeId: string; netPay: number; breakdown: Record<string,number>; calculationTrace: string[] }>; }
+export interface PayrollLineDetail { id: string; employeeId: string; workingDays: number; payableDays: number; unpaidDays: number; grossEarnings: number; employeeDeductions: number; employerContributions: number; reimbursements: number; netPay: number; breakdown: Record<string,number>; calculationTrace: string[]; employee?: Pick<Employee,'id'|'employeeCode'|'firstName'|'lastName'> & { bankReady?: boolean }; previousNetPay?: number; variancePercent?: number; exceptions?: string[]; }
+export interface PayrollEngineRun { id: string; month: string; status: string; totalEmployees: number; totalGrossSalary: number; totalDeductions: number; totalNetPayout: number; paymentDate?: string; paymentReference?: string; paymentRecordedAt?: string; publishedAt?: string; lines: PayrollLineDetail[]; }
+export type EmployeeOnboardingStatus = 'DRAFT'|'PERSONAL_DETAILS'|'DOCUMENT_DETAILS'|'SALARY_DETAILS'|'FACE_AUTHENTICATION'|'ADDITIONAL_DETAILS'|'REVIEW'|'COMPLETED'|'INVITED'|'ACTIVE'|'REJECTED';
+export interface EmployeeOnboardingDraft { id:string; companyId:string; employeeCode?:string; workEmail?:string; status:EmployeeOnboardingStatus; progress:number; personalDetails?:Record<string,unknown>; documentDetails?:{documents:Array<Record<string,unknown>>}; salaryDetails?:Record<string,unknown>; faceDetails?:Record<string,unknown>; additionalDetails?:Record<string,unknown>; createdEmployeeId?:string; rejectionReason?:string; createdAt:string; updatedAt:string; }
+export interface PayrollAttendanceReview { id:string; payrollRunId:string; employeeId:string; workingDays:number; presentDays:number; absentDays:number; paidLeaveDays:number; unpaidLeaveDays:number; halfDays:number; lateDays:number; earlyExitDays:number; holidays:number; weeklyOffDays:number; overtimeHours:number; missingAttendanceDays:number; exceptions?:string[]; adjustedAt?:string; changes:Array<{id:string;field:string;oldValue:number;newValue:number;reason:string;changedAt:string}>; }
 export interface PayrollConfiguration { structures: SalaryStructure[]; revisions: Array<{ id: string; employeeId: string; effectiveFrom: string; annualCtc: number; status: string; employee: Pick<Employee,'id'|'employeeCode'|'firstName'|'lastName'>; structure: SalaryStructure }>; rules: Array<{ id: string; type: string; stateCode?: string; effectiveFrom: string; configuration: Record<string,unknown>; sourceNote?: string }>; loans: Array<{ id: string; type: string; principal: number; outstanding: number; installment: number; status: string }>; runs: PayrollEngineRun[]; }
 export interface Employee360 { employee: Employee & { department?: Department; designation?: Designation; branch?: Branch; location?: WorkLocation; team?: Team; costCenter?: CostCenter; employeeGrade?: EmployeeGrade; reportingManager?: Pick<Employee,'id'|'firstName'|'lastName'|'employeeCode'> }; attendance: AttendanceRecord[]; leave: LeaveRequest[]; payslips: Payslip[]; assets: Asset[]; expenses: ExpenseClaim[]; goals: PerformanceGoal[]; revisions: Array<{id:string;effectiveFrom:string;annualCtc:number;status:string}>; requests: WorkflowInstance[]; timeline: Array<{id:string;at:string;type:string;title:string;detail:string}>; }
 export interface CommandCenterData { metrics: { activeEmployees:number; presentToday:number; absentToday:number; onLeaveToday:number }; alerts: Array<{key:string;severity:'INFO'|'WARNING'|'CRITICAL';count:number;message:string}>; }
@@ -256,6 +260,17 @@ export interface Payslip {
   unpaidDays: number;
   status: 'GENERATED' | 'PAID';
   paymentDate?: string;
+  reimbursements?: number;
+  employerContributions?: number;
+  breakdown?: Record<string, number>;
+  ytdBreakdown?: Record<string, number>;
+  ytdGross?: number;
+  ytdDeductions?: number;
+  ytdNet?: number;
+  componentMeta?: Record<string, { name: string; kind: 'EARNING'|'DEDUCTION'|'EMPLOYER_CONTRIBUTION'|'REIMBURSEMENT' }>;
+  employee?: Employee;
+  department?: Department;
+  designation?: Designation;
 }
 
 export type JobStage = 'APPLIED' | 'SCREENING' | 'INTERVIEW' | 'OFFER' | 'HIRED' | 'REJECTED';

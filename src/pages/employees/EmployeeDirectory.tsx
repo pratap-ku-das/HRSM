@@ -11,6 +11,7 @@ import type {
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { FaceEnrollmentPanel } from "./FaceEnrollmentPanel";
+import { EmployeeOnboardingWizard } from "./EmployeeOnboardingWizard";
 export const EmployeeDirectory: React.FC = () => {
   const toast = useToast(),
     [employees, setEmployees] = useState<Employee[]>([]),
@@ -22,6 +23,7 @@ export const EmployeeDirectory: React.FC = () => {
     [faceEmployeeId, setFaceEmployeeId] = useState<string | null>(null),
     [onboardingResult, setOnboardingResult] = useState<{ employeeId: string; email: string; emailStatus: string } | null>(null),
     [resendingId, setResendingId] = useState<string | null>(null),
+    [showWizard, setShowWizard] = useState(false),
     [exitDate, setExitDate] = useState<Record<string, string>>({}),
     [form, setForm] = useState({
       employeeCode: "",
@@ -174,8 +176,9 @@ export const EmployeeDirectory: React.FC = () => {
         <button onClick={() => void load()}>
           <RefreshCw className={`w-4 ${busy ? "animate-spin" : ""}`} />
         </button>
+        {canManage && <button onClick={()=>setShowWizard(true)} className="ml-3 flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold"><UserPlus className="h-4"/>Start onboarding</button>}
       </header>
-      {canManage && <form
+      {false && canManage && <form
         onSubmit={onboard}
         className="grid md:grid-cols-4 xl:grid-cols-8 gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-4"
       >
@@ -365,7 +368,7 @@ export const EmployeeDirectory: React.FC = () => {
               </tr>
               {faceEmployeeId === item.id && (
                 <tr className="border-t border-slate-800">
-                  <td colSpan={canManage ? 6 : 4} className="p-4 bg-slate-950/50"><FaceEnrollmentPanel employee={item}/></td>
+                  <td colSpan={canManage ? 6 : 4} className="bg-slate-50 p-4"><FaceEnrollmentPanel employee={item}/></td>
                 </tr>
               )}
               </React.Fragment>
@@ -376,6 +379,7 @@ export const EmployeeDirectory: React.FC = () => {
           </tbody>
         </table>
       </div>
+      {showWizard&&<EmployeeOnboardingWizard departments={departments} designations={designations} employees={employees} onClose={()=>setShowWizard(false)} onCompleted={load}/>}
     </div>
   );
 };
