@@ -893,6 +893,23 @@ button:disabled { cursor: not-allowed; }
 .neo-page form button { display:inline-flex;align-items:center;justify-content:center;padding:10px 14px!important;font-weight:700; }
 .neo-page input::placeholder,.neo-page textarea::placeholder { color:#9a93a5!important;opacity:1; }
 
+/* Attendance correction CTA: preserve readable text in both form states. */
+.neo-attendance > form > button {
+  color:#fff!important;
+  background:linear-gradient(135deg,#16a36a,#08764b)!important;
+  border:1px solid #0b8154!important;
+  box-shadow:0 10px 22px #08764b2b!important;
+  opacity:1!important;
+}
+.neo-attendance > form:invalid > button,
+.neo-attendance > form > button:disabled {
+  color:#514a5b!important;
+  background:#e9e5ee!important;
+  border-color:#d5cfdd!important;
+  box-shadow:none!important;
+  opacity:1!important;
+}
+
 /* Horizontal creation/filter bars used by directory, attendance, leave, assets and recruiting. */
 .neo-employees > form,
 .neo-attendance > form,
