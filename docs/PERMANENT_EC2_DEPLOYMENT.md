@@ -35,3 +35,23 @@ Create the GitHub environment production and repository variables:
 Run Deploy production once from GitHub Actions. After it succeeds, remove inbound TCP port 22 from the EC2 security group. Keep ports 80 and 443.
 
 Future pushes to main deploy automatically. Database migrations are forward-only and are not reversed during an application rollback.
+
+## Direct deployment without GitHub Actions
+
+AWS CLI v2 is installed for the current Windows user. Authenticate with temporary browser credentials:
+
+    aws login --profile orbithr-local --region eu-north-1
+
+From the repository root, run:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\deploy-production.ps1
+
+The command runs tests and the production build, creates an encrypted release artifact, uploads it to S3, deploys through Systems Manager, runs Prisma migrations, restarts the service, verifies health, and removes the temporary artifact.
+
+To redeploy an already verified local build:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\deploy-production.ps1 -SkipBuild
+
+End the temporary AWS session when deployment work is complete:
+
+    aws logout --profile orbithr-local
