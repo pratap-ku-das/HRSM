@@ -212,6 +212,8 @@ export const api = {
       body: JSON.stringify(emp),
     }),
   updateEmployeeLifecycle: async (id:string,body:{status:string;confirmationDate?:string|null;probationEndDate?:string|null;resignationDate?:string|null;lastWorkingDay?:string|null}) => (await fetchJSON<ApiEnvelope<Employee>>(`${API_BASE}/v1/employees/${id}/lifecycle`,{method:'PATCH',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  updateEmployee: async (id:string,body:Partial<Pick<Employee,'employeeCode'|'firstName'|'lastName'|'email'|'phone'|'departmentId'|'designationId'|'reportingManagerId'|'dateOfJoining'|'employmentType'|'workLocation'>>) => (await fetchJSON<ApiEnvelope<Employee>>(API_BASE + '/v1/employees/' + id,{method:'PATCH',headers:{Authorization:'Bearer ' + (localStorage.getItem(ACCESS_TOKEN_KEY)||'')},body:JSON.stringify(body)})).data,
+  deleteEmployeeV1: async (id:string) => (await fetchJSON<ApiEnvelope<{deleted:boolean}>>(API_BASE + '/v1/employees/' + id,{method:'DELETE',headers:{Authorization:'Bearer ' + (localStorage.getItem(ACCESS_TOKEN_KEY)||'')}})).data,
   onboardEmployee: (emp: Pick<Employee, 'employeeCode' | 'firstName' | 'lastName' | 'email' | 'departmentId' | 'designationId' | 'dateOfJoining' | 'employmentType'> & Partial<Pick<Employee, 'reportingManagerId' | 'workLocation' | 'phone'>>) =>
     fetchJSON<ApiEnvelope<{ employee: Employee; emailDelivery: { id: string; status: string } }>>(`${API_BASE}/v1/employees/onboard`, {
       method: 'POST',

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, CheckCircle2, Mail, Search, UserPlus, Users, RefreshCw } from "lucide-react";
+import { Camera, CheckCircle2, Mail, Pencil, Save, Search, Trash2, UserPlus, Users, RefreshCw, X } from "lucide-react";
 import { api } from "../../services/api";
 import type {
   Department,
@@ -24,6 +24,8 @@ export const EmployeeDirectory: React.FC = () => {
     [onboardingResult, setOnboardingResult] = useState<{ employeeId: string; email: string; emailStatus: string } | null>(null),
     [resendingId, setResendingId] = useState<string | null>(null),
     [showWizard, setShowWizard] = useState(false),
+    [editing, setEditing] = useState<Employee | null>(null),
+    [savingId, setSavingId] = useState<string | null>(null),
     [exitDate, setExitDate] = useState<Record<string, string>>({}),
     [form, setForm] = useState({
       employeeCode: "",
@@ -158,6 +160,47 @@ export const EmployeeDirectory: React.FC = () => {
         "Lifecycle update failed",
         error instanceof Error ? error.message : "Unknown error",
       );
+    }
+  };
+  const saveProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editing) return;
+    setSavingId(editing.id);
+    try {
+      await api.updateEmployee(editing.id, {
+        employeeCode: editing.employeeCode,
+        firstName: editing.firstName,
+        lastName: editing.lastName,
+        email: editing.email,
+        phone: editing.phone || "",
+        departmentId: editing.departmentId,
+        designationId: editing.designationId,
+        reportingManagerId: editing.reportingManagerId,
+        dateOfJoining: editing.dateOfJoining,
+        employmentType: editing.employmentType,
+        workLocation: editing.workLocation || "",
+      });
+      setEditing(null);
+      await load();
+      toast.success("Employee profile updated");
+    } catch (error) {
+      toast.error("Employee update failed", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSavingId(null);
+    }
+  };
+  const removeEmployee = async (item: Employee) => {
+    const confirmation = window.prompt("Permanently delete this new employee? Type " + item.employeeCode + " to confirm. Employees with attendance, leave, expense, or payroll history cannot be deleted.");
+    if (confirmation !== item.employeeCode) return;
+    setSavingId(item.id);
+    try {
+      await api.deleteEmployeeV1(item.id);
+      await load();
+      toast.success("Employee deleted", "The unused portal account and onboarding draft were removed.");
+    } catch (error) {
+      toast.error("Employee could not be deleted", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSavingId(null);
     }
   };
   return (
@@ -363,6 +406,12 @@ export const EmployeeDirectory: React.FC = () => {
                     <button type="button" disabled={resendingId === item.id} onClick={() => void resend(item)} className="px-2.5 py-2 rounded-lg bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 disabled:opacity-50">
                       {resendingId === item.id ? "Queuing..." : "Resend activation"}
                     </button>
+                    <button type="button" disabled={savingId === item.id} onClick={() => setEditing({...item})} className="flex items-center gap-1 rounded-lg bg-violet-500/10 px-2.5 py-2 text-violet-700 hover:bg-violet-500/20 disabled:opacity-50">
+                      <Pencil className="h-3.5 w-3.5"/>Edit
+                    </button>
+                    <button type="button" disabled={savingId === item.id} onClick={() => void removeEmployee(item)} className="flex items-center gap-1 rounded-lg bg-rose-500/10 px-2.5 py-2 text-rose-700 hover:bg-rose-500/20 disabled:opacity-50">
+                      <Trash2 className="h-3.5 w-3.5"/>Delete
+                    </button>
                   </div>
                 </td>}
               </tr>
@@ -379,7 +428,34 @@ export const EmployeeDirectory: React.FC = () => {
           </tbody>
         </table>
       </div>
+      {editing&&<EmployeeEditDialog employee={editing} employees={employees} departments={departments} designations={designations} busy={savingId===editing.id} onChange={setEditing} onClose={()=>setEditing(null)} onSave={saveProfile}/>}
       {showWizard&&<EmployeeOnboardingWizard departments={departments} designations={designations} employees={employees} onClose={()=>setShowWizard(false)} onCompleted={load}/>}
     </div>
   );
 };
+
+type EditDialogProps={employee:Employee;employees:Employee[];departments:Department[];designations:Designation[];busy:boolean;onChange:(employee:Employee)=>void;onClose:()=>void;onSave:(event:React.FormEvent)=>void};
+const EmployeeEditDialog:React.FC<EditDialogProps>=({employee,employees,departments,designations,busy,onChange,onClose,onSave})=>{
+  const set=<K extends keyof Employee>(key:K,value:Employee[K])=>onChange({...employee,[key]:value});
+  const available=designations.filter(item=>item.departmentId===employee.departmentId);
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-4">
+    <form onSubmit={onSave} className="w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
+      <header className="mb-5 flex items-start justify-between"><div><h2 className="text-xl font-bold">Edit employee</h2><p className="text-sm text-slate-500">Update profile and organization details. Changes are recorded in the audit log.</p></div><button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-600 hover:bg-slate-100"><X className="h-5 w-5"/></button></header>
+      <div className="grid gap-3 md:grid-cols-2">
+        <EditField label="Employee ID"><input required value={employee.employeeCode} onChange={e=>set("employeeCode",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="Work email"><input required type="email" value={employee.email} onChange={e=>set("email",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="First name"><input required value={employee.firstName} onChange={e=>set("firstName",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="Last name"><input required value={employee.lastName} onChange={e=>set("lastName",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="Phone"><input value={employee.phone||""} onChange={e=>set("phone",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="Joining date"><input required type="date" value={employee.dateOfJoining?.slice(0,10)||""} onChange={e=>set("dateOfJoining",e.target.value)} className="input w-full"/></EditField>
+        <EditField label="Department"><select required value={employee.departmentId} onChange={e=>{const departmentId=e.target.value;onChange({...employee,departmentId,designationId:designations.find(item=>item.departmentId===departmentId)?.id||""})}} className="input w-full">{departments.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></EditField>
+        <EditField label="Designation"><select required value={employee.designationId} onChange={e=>set("designationId",e.target.value)} className="input w-full">{available.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></EditField>
+        <EditField label="Reporting manager"><select value={employee.reportingManagerId||""} onChange={e=>set("reportingManagerId",e.target.value||undefined)} className="input w-full"><option value="">None</option>{employees.filter(item=>item.id!==employee.id).map(item=><option key={item.id} value={item.id}>{item.firstName} {item.lastName}</option>)}</select></EditField>
+        <EditField label="Employment type"><select value={employee.employmentType} onChange={e=>set("employmentType",e.target.value as EmploymentType)} className="input w-full">{["FULL_TIME","PART_TIME","CONTRACT","INTERN","CONSULTANT"].map(item=><option key={item}>{item.replace("_"," ")}</option>)}</select></EditField>
+        <EditField label="Work location"><input value={employee.workLocation||""} onChange={e=>set("workLocation",e.target.value)} className="input w-full"/></EditField>
+      </div>
+      <footer className="mt-6 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-4 py-2 text-slate-700">Cancel</button><button disabled={busy} className="flex items-center gap-2 rounded-xl bg-brand-500 px-5 py-2 font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4"/>{busy?"Saving...":"Save changes"}</button></footer>
+    </form>
+  </div>
+};
+const EditField=({label,children}:{label:string;children:React.ReactNode})=><label className="space-y-1 text-xs font-medium text-slate-600"><span>{label}</span>{children}</label>;

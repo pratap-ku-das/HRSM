@@ -377,6 +377,30 @@ export function createV1Router(prisma: PrismaClient) {
     next();
   });
   router.use(createMobileReleaseRouter());
+  const deleteEmployeeSafely=async(req:AuthedRequest)=>{
+    const companyId=req.auth!.companyId,e=await prisma.employee.findFirst({where:{id:String(req.params.id),companyId}});
+    if(!e)throw Object.assign(new Error("Employee was not found."),{status:404,code:"EMPLOYEE_NOT_FOUND"});
+    if(e.userId===req.auth!.id)throw Object.assign(new Error("You cannot delete your own employee profile."),{status:409,code:"SELF_DELETE_NOT_ALLOWED"});
+    const counts=await Promise.all([
+      prisma.attendanceRecord.count({where:{employeeId:e.id}}),
+      prisma.leaveRequest.count({where:{employeeId:e.id}}),
+      prisma.payslip.count({where:{employeeId:e.id}}),
+      prisma.expenseClaim.count({where:{employeeId:e.id}}),
+      prisma.payrollLine.count({where:{employeeId:e.id}}),
+    ]);
+    if(counts.some(Boolean))throw Object.assign(new Error("This employee has operational history. Mark them resigned or terminated instead."),{status:409,code:"EMPLOYEE_HAS_HISTORY"});
+    await prisma.employee.updateMany({where:{reportingManagerId:e.id,companyId},data:{reportingManagerId:null}});
+    await prisma.employeeOnboarding.deleteMany({where:{createdEmployeeId:e.id,companyId}});
+    await prisma.employee.delete({where:{id:e.id}});
+    if(e.userId){await prisma.user.delete({where:{id:e.userId}})}
+    await prisma.auditLog.create({data:{
+      companyId,userId:req.auth!.id,userName:req.auth!.id,userRole:req.auth!.role,
+      action:"DELETE_EMPLOYEE",category:"EMPLOYEE",
+      details:"Employee "+e.employeeCode+" permanently deleted before history was created.",
+      ipAddress:req.ip||"unknown"
+    }});
+    return{deleted:true};
+  };
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60_000,
@@ -2433,6 +2457,26 @@ export function createV1Router(prisma: PrismaClient) {
       }
     },
   );
+
+  router.patch("/employees/:id",authenticate,requirePermission("employee.manage"),async(req:AuthedRequest,res,next)=>{
+    try{
+      const body=z.object({employeeCode:z.string().trim().min(2).max(30),firstName:z.string().trim().min(1).max(80),lastName:z.string().trim().min(1).max(80),email:z.string().email(),phone:z.string().trim().max(30).nullable().optional(),departmentId:z.string().uuid(),designationId:z.string().uuid(),reportingManagerId:z.string().uuid().nullable().optional(),dateOfJoining:z.coerce.date(),employmentType:z.enum(["FULL_TIME","PART_TIME","CONTRACT","INTERN","CONSULTANT"]),workLocation:z.string().trim().max(120).nullable().optional()}).parse(req.body),companyId=req.auth!.companyId;
+      const employee=await prisma.employee.findFirst({where:{id:String(req.params.id),companyId}});
+      if(!employee)return fail(res,404,"EMPLOYEE_NOT_FOUND","Employee was not found.");
+      if(body.reportingManagerId===employee.id)return fail(res,400,"INVALID_REPORTING_MANAGER","An employee cannot report to themselves.");
+      const [department,designation,manager,duplicateCode,duplicateEmail]=await Promise.all([prisma.department.findFirst({where:{id:body.departmentId,companyId}}),prisma.designation.findFirst({where:{id:body.designationId,departmentId:body.departmentId,companyId}}),body.reportingManagerId?prisma.employee.findFirst({where:{id:body.reportingManagerId,companyId}}):Promise.resolve(null),prisma.employee.findFirst({where:{companyId,employeeCode:body.employeeCode,id:{not:employee.id}}}),prisma.user.findFirst({where:{email:body.email.toLowerCase(),id:employee.userId?{not:employee.userId}:undefined}})]);
+      if(!department||!designation)return fail(res,400,"ORGANIZATION_REFERENCE_INVALID","Department or designation is invalid.");
+      if(body.reportingManagerId&&!manager)return fail(res,400,"REPORTING_MANAGER_INVALID","Reporting manager is invalid.");
+      if(duplicateCode)return fail(res,409,"EMPLOYEE_CODE_EXISTS","Employee ID is already in use.");
+      if(duplicateEmail)return fail(res,409,"EMAIL_EXISTS","Email is already in use.");
+      const email=body.email.toLowerCase(),updated=await prisma.$transaction(async tx=>{const value=await tx.employee.update({where:{id:employee.id},data:{...body,email,phone:body.phone||null,reportingManagerId:body.reportingManagerId||null,workLocation:body.workLocation||null}});if(employee.userId)await tx.user.update({where:{id:employee.userId},data:{email,fullName:body.firstName+" "+body.lastName}});await tx.employeeOnboarding.updateMany({where:{createdEmployeeId:employee.id},data:{employeeCode:body.employeeCode,workEmail:email}});await tx.auditLog.create({data:{companyId,userId:req.auth!.id,userName:req.auth!.id,userRole:req.auth!.role,action:"UPDATE_EMPLOYEE_PROFILE",category:"EMPLOYEE",details:"Employee "+employee.employeeCode+" profile updated.",ipAddress:req.ip||"unknown"}});return value});
+      return ok(res,updated);
+    }catch(e){next(e)}
+  });
+
+  router.delete("/employees/:id", authenticate, requirePermission("employee.manage"), async (req: AuthedRequest, res, next) => {
+    try { return ok(res, await deleteEmployeeSafely(req)); } catch (e) { next(e); }
+  });
 
   router.patch(
     "/employees/:id/lifecycle",
