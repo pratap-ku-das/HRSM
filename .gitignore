@@ -2,6 +2,7 @@
 *.jks
 *.keystore
 keystore.properties
+*.pem.txt
 
 # Logs
 logs
