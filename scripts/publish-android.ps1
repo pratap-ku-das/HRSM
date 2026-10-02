@@ -15,16 +15,53 @@ $androidDir = Join-Path $repoRoot "android-app"
 $appGradle = Join-Path $androidDir "app\build.gradle.kts"
 $releaseApk = Join-Path $androidDir "app\build\outputs\apk\release\app-release.apk"
 $publicApk = Join-Path $repoRoot "public\downloads\OrbitHR.apk"
-$keystore = Join-Path $androidDir "orbithr-release.jks"
 $keystoreProperties = Join-Path $androidDir "keystore.properties"
-$expectedCertificate = "1abe732802772b0e2c42bdf21d21a046d21c1abbb184267dfb50771011eaaf84"
+$expectedCertificate = "5424c389fc525ade2347a70c9b63dfabc5064d30676a78f6c14645527fdf1e4b"
+
+# Automatically resolve JAVA_HOME if not configured
+if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath $env:JAVA_HOME)) {
+    $candidateJavas = @(
+        'D:\Program Files\Android Studio\jbr',
+        'C:\Program Files\Android\Android Studio\jbr',
+        'C:\Program Files\Java\jdk-21',
+        'C:\Program Files\Java\jdk-17'
+    )
+    foreach ($cand in $candidateJavas) {
+        if (Test-Path -LiteralPath $cand) {
+            $env:JAVA_HOME = $cand
+            $env:PATH = (Join-Path $cand 'bin') + ';' + $env:PATH
+            break
+        }
+    }
+}
+
+# Automatically resolve ANDROID_HOME if not configured
+if (-not $env:ANDROID_HOME -or -not (Test-Path -LiteralPath $env:ANDROID_HOME)) {
+    $candidateSdks = @(
+        (Join-Path $repoRoot ".toolchains\android-sdk"),
+        (Join-Path $env:LOCALAPPDATA "Android\Sdk"),
+        'C:\Android\Sdk'
+    )
+    foreach ($cand in $candidateSdks) {
+        if (Test-Path -LiteralPath $cand) {
+            $env:ANDROID_HOME = $cand
+            break
+        }
+    }
+}
 
 function Assert-LastExitCode([string]$message) {
     if ($LASTEXITCODE -ne 0) { throw $message }
 }
 
-if (-not (Test-Path -LiteralPath $keystore)) { throw "Missing permanent signing key: $keystore" }
 if (-not (Test-Path -LiteralPath $keystoreProperties)) { throw "Missing signing configuration: $keystoreProperties" }
+$signingProperties = ConvertFrom-StringData ([IO.File]::ReadAllText($keystoreProperties))
+$configuredKeystore = $signingProperties['RELEASE_STORE_FILE']
+if ([string]::IsNullOrWhiteSpace($configuredKeystore)) {
+    throw "RELEASE_STORE_FILE is missing from $keystoreProperties"
+}
+$keystore = Join-Path $androidDir $configuredKeystore
+if (-not (Test-Path -LiteralPath $keystore)) { throw "Missing permanent signing key: $keystore" }
 
 Push-Location $repoRoot
 try {
@@ -55,15 +92,23 @@ try {
     $updated = [regex]::Replace($updated, '(versionName\s*=\s*providers[^\r\n]*\?:\s*)"[^"]+"', "`${1}`"$VersionName`"", 1)
     [IO.File]::WriteAllText($appGradle, $updated, (New-Object Text.UTF8Encoding($false)))
 
-    $sdkRoot = Join-Path $repoRoot ".toolchains\android-sdk"
-    if (-not (Test-Path -LiteralPath $sdkRoot) -and $env:ANDROID_HOME) { $sdkRoot = $env:ANDROID_HOME }
-    if (-not (Test-Path -LiteralPath $sdkRoot)) { throw "Android SDK not found. Install it or set ANDROID_HOME." }
+    $mobileReleaseFile = Join-Path $repoRoot "server\v1\mobileRelease.ts"
+    if (Test-Path -LiteralPath $mobileReleaseFile) {
+        $mrContent = [IO.File]::ReadAllText($mobileReleaseFile)
+        $mrContent = [regex]::Replace($mrContent, 'versionCode:\s*\d+', "versionCode: $VersionCode")
+        $mrContent = [regex]::Replace($mrContent, 'versionName:\s*"[^"]+"', "versionName: `"$VersionName`"")
+        $todayStr = (Get-Date -Format 'yyyy-MM-dd')
+        $mrContent = [regex]::Replace($mrContent, 'publishedAt:\s*"[^"]+"', "publishedAt: `"$todayStr`"")
+        [IO.File]::WriteAllText($mobileReleaseFile, $mrContent, (New-Object Text.UTF8Encoding($false)))
+    }
+
+    $sdkRoot = $env:ANDROID_HOME
+    if (-not $sdkRoot -or -not (Test-Path -LiteralPath $sdkRoot)) { throw "Android SDK not found. Install it or set ANDROID_HOME." }
     $buildTools = Get-ChildItem (Join-Path $sdkRoot "build-tools") -Directory | Sort-Object Name -Descending | Select-Object -First 1
     if (-not $buildTools) { throw "Android SDK build-tools are missing." }
     $apkSigner = Join-Path $buildTools.FullName "apksigner.bat"
     $aapt = Join-Path $buildTools.FullName "aapt.exe"
 
-    $env:GRADLE_USER_HOME = Join-Path $androidDir "gradle-user-home"
     Push-Location $androidDir
     try {
         & .\gradlew.bat :app:testDebugUnitTest :app:assembleRelease --console=plain --no-daemon --max-workers=2
@@ -72,13 +117,25 @@ try {
         Pop-Location
     }
 
-    $signature = (& $apkSigner verify --verbose --print-certs $releaseApk 2>&1 | Out-String)
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $signature = (& $apkSigner verify --verbose --print-certs $releaseApk 2>&1 | Out-String)
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
     Assert-LastExitCode "APK signature verification failed."
     if (-not $signature.ToLowerInvariant().Contains("certificate sha-256 digest: $expectedCertificate")) {
         throw "Refusing to publish: APK is not signed by the permanent BalajiOne certificate."
     }
 
-    $badging = (& $aapt dump badging $releaseApk 2>&1 | Out-String)
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $badging = (& $aapt dump badging $releaseApk 2>&1 | Out-String)
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
     Assert-LastExitCode "Could not inspect APK metadata."
     if (-not $badging.Contains("versionCode='$VersionCode'") -or -not $badging.Contains("versionName='$VersionName'")) {
         throw "Built APK version does not match $VersionName ($VersionCode)."

@@ -8,6 +8,12 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// Local/dev builds remain possible before Firebase is configured. Production push
+// becomes active as soon as google-services.json is placed in this app directory.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.orbithr.app"
     compileSdk = 37
@@ -15,8 +21,8 @@ android {
         applicationId = "com.orbithr.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 14
-        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.1.9"
+        versionCode = providers.gradleProperty("ORBIT_VERSION_CODE").orNull?.toInt() ?: 27
+        versionName = providers.gradleProperty("ORBIT_VERSION_NAME").orNull ?: "1.4.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"${providers.gradleProperty("ORBIT_API_BASE_URL").orElse("http://10.0.2.2:3001/api/v1/").get()}\"")
     }
@@ -93,6 +99,8 @@ dependencies {
     implementation(libs.datastore)
     implementation(libs.work.runtime)
     implementation(libs.coil.compose)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

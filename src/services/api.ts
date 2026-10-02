@@ -34,6 +34,11 @@ async function renewAccessToken(): Promise<string> {
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
       return result.data.accessToken;
     }).catch(error => {
+      const latestRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+      const latestAccessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+      if (latestRefreshToken && latestRefreshToken !== refreshToken && latestAccessToken) {
+        return latestAccessToken;
+      }
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
       announceSessionExpiry();
@@ -59,14 +64,28 @@ async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true
   }
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({ error: 'Network request failed' }));
-    throw new Error(typeof errorData.error === 'string' ? errorData.error : errorData.error?.message || `HTTP ${res.status}: ${res.statusText}`);
+    const errorData = await res.json().catch(() => ({ error: 'Network request failed' })) as {
+      error?: string | {
+        message?: string;
+        fieldErrors?: Record<string, string[] | undefined>;
+      };
+    };
+    const message = typeof errorData.error === 'string'
+      ? errorData.error
+      : errorData.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+    const details = typeof errorData.error === 'object'
+      ? Object.entries(errorData.error.fieldErrors || {})
+          .flatMap(([field, errors]) => (errors || []).map(error => `${field}: ${error}`))
+          .join(' ')
+      : '';
+    throw new Error(details ? `${message} ${details}` : message);
   }
 
   return res.json();
 }
 
 async function downloadFile(url:string,options:RequestInit,retryAuth=true){const headers=new Headers(options.headers);const response=await fetch(url,{...options,headers});if(response.status===401&&retryAuth){headers.set('Authorization',`Bearer ${await renewAccessToken()}`);return downloadFile(url,{...options,headers},false)}if(!response.ok){const errorData=await response.json().catch(()=>null);throw new Error(errorData?.error?.message||`Export failed (${response.status})`)}const blob=await response.blob(),disposition=response.headers.get('content-disposition')||'',name=/filename="([^"]+)"/.exec(disposition)?.[1]||'orbithr-report';const href=URL.createObjectURL(blob),link=document.createElement('a');link.href=href;link.download=name;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(href)}
+async function fetchProtectedFile(url:string,retryAuth=true):Promise<{blob:Blob;fileName:string;mimeType:string}>{const headers=new Headers({Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`});const response=await fetch(url,{headers});if(response.status===401&&retryAuth){headers.set('Authorization',`Bearer ${await renewAccessToken()}`);const retry=await fetch(url,{headers});if(!retry.ok){const errorData=await retry.json().catch(()=>null);throw new Error(errorData?.error?.message||`Document could not be opened (${retry.status})`)}const disposition=retry.headers.get('content-disposition')||'';return{blob:await retry.blob(),fileName:decodeURIComponent(/filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]||'document'),mimeType:retry.headers.get('content-type')||'application/octet-stream'}}if(!response.ok){const errorData=await response.json().catch(()=>null);throw new Error(errorData?.error?.message||`Document could not be opened (${response.status})`)}const disposition=response.headers.get('content-disposition')||'';return{blob:await response.blob(),fileName:decodeURIComponent(/filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]||'document'),mimeType:response.headers.get('content-type')||'application/octet-stream'}}
 
 export const api = {
   // Health
@@ -182,8 +201,19 @@ export const api = {
   listEmployeeOnboardings: async() => (await fetchJSON<ApiEnvelope<import('../types').EmployeeOnboardingDraft[]>>(`${API_BASE}/v1/employees/onboarding`,{headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
   createEmployeeOnboarding: async(body:Record<string,unknown>={}) => (await fetchJSON<ApiEnvelope<import('../types').EmployeeOnboardingDraft>>(`${API_BASE}/v1/employees/onboarding`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   saveEmployeeOnboardingSection: async(id:string,section:'personal'|'documents'|'salary'|'face'|'additional',body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<import('../types').EmployeeOnboardingDraft>>(`${API_BASE}/v1/employees/onboarding/${id}/${section}`,{method:'PUT',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  uploadEmployeeOnboardingDocument: async(file:File) => {
+    const body = new FormData();
+    body.append('document', file);
+    return (await fetchJSON<ApiEnvelope<Record<string, unknown>>>(`${API_BASE}/v1/employees/onboarding/document-upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body,
+    })).data;
+  },
   reviewEmployeeOnboarding: async(id:string) => (await fetchJSON<ApiEnvelope<import('../types').EmployeeOnboardingDraft>>(`${API_BASE}/v1/employees/onboarding/${id}/review`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
   completeEmployeeOnboarding: async(id:string) => (await fetchJSON<ApiEnvelope<{employee:Employee;emailDelivery:{id:string;status:string};onboardingStatus:string}>>(`${API_BASE}/v1/employees/onboarding/${id}/complete`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
+  getEmployeeOnboardingRecord: async(employeeId:string) => (await fetchJSON<ApiEnvelope<import('../types').EmployeeOnboardingDraft>>(`${API_BASE}/v1/employees/${employeeId}/onboarding-record`,{headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
+  updateEmployeeOnboardingSection: async(employeeId:string,section:'personal'|'documents'|'salary'|'face'|'additional',body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<{employeeId:string;section:string;updated:boolean}>>(`${API_BASE}/v1/employees/${employeeId}/onboarding-record/${section}`,{method:'PUT',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   recordPayrollPayment: async (id: string, body: {paymentDate:string;paymentReference:string}) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/payroll/runs/${id}/record-payment`, { method:'POST', headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}, body:JSON.stringify(body) })).data,
   getBankExportPreview: async (id: string) => (await fetchJSON<ApiEnvelope<{month:string;deliveryRequired:boolean;rows:Array<{employeeCode:string;beneficiary:string;maskedAccount?:string;amount:number}>}>>(`${API_BASE}/v1/payroll/runs/${id}/bank-export-preview`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   getEmployee360: async (id: string) => (await fetchJSON<ApiEnvelope<Employee360>>(`${API_BASE}/v1/employees/${id}/360`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
@@ -212,7 +242,7 @@ export const api = {
       body: JSON.stringify(emp),
     }),
   updateEmployeeLifecycle: async (id:string,body:{status:string;confirmationDate?:string|null;probationEndDate?:string|null;resignationDate?:string|null;lastWorkingDay?:string|null}) => (await fetchJSON<ApiEnvelope<Employee>>(`${API_BASE}/v1/employees/${id}/lifecycle`,{method:'PATCH',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
-  updateEmployee: async (id:string,body:Partial<Pick<Employee,'employeeCode'|'firstName'|'lastName'|'email'|'phone'|'departmentId'|'designationId'|'reportingManagerId'|'dateOfJoining'|'employmentType'|'workLocation'>>) => (await fetchJSON<ApiEnvelope<Employee>>(API_BASE + '/v1/employees/' + id,{method:'PATCH',headers:{Authorization:'Bearer ' + (localStorage.getItem(ACCESS_TOKEN_KEY)||'')},body:JSON.stringify(body)})).data,
+  updateEmployee: async (id:string,body:Partial<Pick<Employee,'employeeCode'|'firstName'|'lastName'|'email'|'phone'|'departmentId'|'designationId'|'reportingManagerId'|'dateOfJoining'|'employmentType'|'workLocation'|'workdayGpsTrackingEnabled'>>) => (await fetchJSON<ApiEnvelope<Employee>>(API_BASE + '/v1/employees/' + id,{method:'PATCH',headers:{Authorization:'Bearer ' + (localStorage.getItem(ACCESS_TOKEN_KEY)||'')},body:JSON.stringify(body)})).data,
   deleteEmployeeV1: async (id:string) => (await fetchJSON<ApiEnvelope<{deleted:boolean}>>(API_BASE + '/v1/employees/' + id,{method:'DELETE',headers:{Authorization:'Bearer ' + (localStorage.getItem(ACCESS_TOKEN_KEY)||'')}})).data,
   onboardEmployee: (emp: Pick<Employee, 'employeeCode' | 'firstName' | 'lastName' | 'email' | 'departmentId' | 'designationId' | 'dateOfJoining' | 'employmentType'> & Partial<Pick<Employee, 'reportingManagerId' | 'workLocation' | 'phone'>>) =>
     fetchJSON<ApiEnvelope<{ employee: Employee; emailDelivery: { id: string; status: string } }>>(`${API_BASE}/v1/employees/onboard`, {
@@ -349,6 +379,19 @@ export const api = {
   createHolidayV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<Holiday>>(`${API_BASE}/v1/operations/holidays`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   createAnnouncementV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<Announcement>>(`${API_BASE}/v1/operations/announcements`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   createCompanyDocumentV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<CompanyDocument>>(`${API_BASE}/v1/operations/company-documents`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  uploadCompanyDocumentV1: async(file:File,category:string,title:string) => {
+    const body = new FormData();
+    body.append('document', file);
+    body.append('category', category);
+    body.append('title', title);
+    return (await fetchJSON<ApiEnvelope<CompanyDocument>>(`${API_BASE}/v1/operations/company-documents/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body,
+    })).data;
+  },
+  getAttendanceRoute: async (recordId:string) => (await fetchJSON<ApiEnvelope<import('../types').AttendanceRoute>>(`${API_BASE}/v1/attendance/${recordId}/route`,{headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
+  getCompanyDocumentFile: (id:string) => fetchProtectedFile(`${API_BASE}/v1/operations/company-documents/${id}/file`),
   getJobs: (companyId: string) => fetchJSON<JobPosting[]>(`${API_BASE}/recruitment/jobs?companyId=${companyId}`),
   saveJob: (job: any) => 
     fetchJSON<JobPosting>(`${API_BASE}/recruitment/jobs`, {
@@ -441,9 +484,20 @@ export const api = {
   confirmMfa: (code:string) => fetchJSON<ApiEnvelope<{enabled:boolean}>>(`${API_BASE}/v1/security/mfa/confirm`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body:JSON.stringify({code}) }),
   disableMfa: (code:string) => fetchJSON<ApiEnvelope<{enabled:boolean;reauthenticationRequired:boolean}>>(`${API_BASE}/v1/security/mfa/disable`, { method:'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body:JSON.stringify({code}) }),
   getEmployeeDocumentsV1: async () => (await fetchJSON<ApiEnvelope<Record<string, unknown>[]>>(`${API_BASE}/v1/employee-documents`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getEmployeeDocumentFile: (id:string) => fetchProtectedFile(`${API_BASE}/v1/employee-documents/${id}/file`),
   getPerformanceWorkspace: async () => (await fetchJSON<ApiEnvelope<PerformanceWorkspace>>(`${API_BASE}/v1/performance-engine`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   createPerformanceCycle: async (body:{name:string;startsAt:string;endsAt:string;status:string}) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/cycles`, { method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   createPerformanceReviewV1: async (body:{cycleId:string;employeeId:string;reviewerId:string}) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/reviews`, { method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   updatePerformanceReviewV1: async (id:string,body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/performance-engine/reviews/${id}`, { method:'PATCH',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   askOrbitAi: async (prompt: string) => (await fetchJSON<ApiEnvelope<{ id: string; intent: string; answer: string; sources: Array<{ type: string; id: string }>; readOnly: boolean }>>(`${API_BASE}/v1/ai/ask`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ prompt }) })).data,
+
+  // Payroll Compliance, Full & Final (F&F) Settlement & Form 16
+  getSettlements: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/payroll/compliance/settlements`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  calculateSettlement: async (body: any) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/calculate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  approveSettlement: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  paySettlement: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/${id}/pay`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getForm16List: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/payroll/compliance/form16`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  publishForm16: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/${id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  batchGenerateForm16: async (body: { financialYear: string; publishAll?: boolean }) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/generate-batch`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  getMyForm16List: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/me/payroll/form16`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
 };

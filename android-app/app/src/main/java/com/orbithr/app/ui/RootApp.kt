@@ -42,11 +42,18 @@ fun RootApp(
     verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit,
     availableUpdate: AndroidReleaseDto?,
     dismissUpdate: () -> Unit,
+    recoveryMessage:String?,
+    forgotPassword:(String)->Unit,
+    activateAccount:(String,String)->Unit,
+    resetPassword:(String,String)->Unit,
+    clearRecoveryMessage:()->Unit,
+    notificationRoute:String? = null,
+    notificationRouteConsumed:()->Unit = {},
 ) {
     when (state) {
         SessionState.Loading -> OrbitSplash()
-        SessionState.SignedOut -> LoginScreen(error, login)
-        is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance)
+        SessionState.SignedOut -> LoginScreen(error, login, recoveryMessage, forgotPassword, activateAccount, resetPassword, clearRecoveryMessage)
+        is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance, notificationRoute, notificationRouteConsumed)
     }
     availableUpdate?.let { release -> UpdateAvailableDialog(release, dismissUpdate) }
 }
@@ -88,11 +95,12 @@ private fun OrbitSplash() {
 }
 
 @Composable
-private fun LoginScreen(error: String?, login: (String, String, String?) -> Unit) {
+private fun LoginScreen(error: String?, login: (String, String, String?) -> Unit,recoveryMessage:String?,forgotPassword:(String)->Unit,activateAccount:(String,String)->Unit,resetPassword:(String,String)->Unit,clearRecoveryMessage:()->Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var mfaCode by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var recoveryMode by remember{mutableStateOf<String?>(null)}
     OrbitBackground {
         Column(
             Modifier
@@ -177,6 +185,10 @@ private fun LoginScreen(error: String?, login: (String, String, String?) -> Unit
                     Spacer(Modifier.width(10.dp))
                     Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, modifier = Modifier.size(18.dp))
                 }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
+                    TextButton(onClick={recoveryMode="FORGOT"}){Text("Forgot password?")}
+                    TextButton(onClick={recoveryMode="ACTIVATE"}){Text("Activate account")}
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Lock, null, tint = OrbitMint, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
@@ -185,6 +197,19 @@ private fun LoginScreen(error: String?, login: (String, String, String?) -> Unit
             }
         }
     }
+    recoveryMode?.let{mode->RecoveryDialog(mode,recoveryMessage,{recoveryMode=null;clearRecoveryMessage()},forgotPassword,activateAccount,resetPassword)}
+}
+
+@Composable
+private fun RecoveryDialog(mode:String,message:String?,dismiss:()->Unit,forgot:(String)->Unit,activate:(String,String)->Unit,reset:(String,String)->Unit){
+    var email by remember{mutableStateOf("")};var token by remember{mutableStateOf("")};var password by remember{mutableStateOf("")};var resetMode by remember{mutableStateOf(false)}
+    val forgotMode=mode=="FORGOT"&&!resetMode
+    AlertDialog(onDismissRequest=dismiss,title={Text(if(forgotMode)"Reset password" else if(mode=="ACTIVATE")"Activate account" else "Set new password")},text={Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
+        if(forgotMode)OutlinedTextField(email,{email=it.trim()},Modifier.fillMaxWidth(),label={Text("Work email")},singleLine=true)
+        else{OutlinedTextField(token,{token=it.trim()},Modifier.fillMaxWidth(),label={Text("Secure token from email")});OutlinedTextField(password,{password=it},Modifier.fillMaxWidth(),label={Text("New password")},visualTransformation=PasswordVisualTransformation())}
+        message?.let{Text(it,color=if(it.contains("completed")||it.contains("queued")||it.contains("activated"))OrbitMint else OrbitRose,style=MaterialTheme.typography.bodySmall)}
+        if(forgotMode)TextButton(onClick={resetMode=true}){Text("I already have a reset token")}
+    }},confirmButton={Button(onClick={if(forgotMode)forgot(email) else if(mode=="ACTIVATE")activate(token,password) else reset(token,password)},enabled=if(forgotMode)email.contains('@') else token.length>=16&&password.length>=8){Text(if(forgotMode)"Send reset email" else "Confirm")}},dismissButton={TextButton(onClick=dismiss){Text("Cancel")}})
 }
 
 @Composable
@@ -200,8 +225,24 @@ private fun RowScope.LoginTrustChip(icon: ImageVector, label: String) {
 private data class Destination(val route: String, val label: String, val icon: ImageVector, val activeIcon: ImageVector)
 
 @Composable
-private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit) {
+private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit, notificationRoute: String?, notificationRouteConsumed: () -> Unit) {
     val nav = rememberNavController()
+    LaunchedEffect(notificationRoute) {
+        if (notificationRoute.isNullOrBlank()) return@LaunchedEffect
+        val destination = when {
+            notificationRoute.startsWith("/attendance") -> "attendance"
+            notificationRoute.startsWith("/leave") -> "leave"
+            notificationRoute.startsWith("/self-service") && notificationRoute.contains("pay") -> "pay"
+            notificationRoute.startsWith("/pay") -> "pay"
+            notificationRoute.startsWith("/expenses") -> "expenses"
+            notificationRoute.startsWith("/approvals") -> "approvals"
+            notificationRoute.startsWith("/profile") -> "profile"
+            notificationRoute.startsWith("/workspace") || notificationRoute.startsWith("/documents") -> "workspace"
+            else -> "notifications"
+        }
+        nav.navigate(destination) { launchSingleTop = true }
+        notificationRouteConsumed()
+    }
     val destinations = listOf(
         Destination("home", "Home", Icons.Outlined.Home, Icons.Outlined.Home),
         Destination("attendance", "Time", Icons.Outlined.Schedule, Icons.Outlined.Timer),
@@ -267,7 +308,7 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 composable("attendance") { AttendanceScreen(verifyAttendance) }
                 composable("leave") { LeaveScreen() }
                 composable("pay") { PayslipScreen() }
-                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }, { nav.navigate("payrollAdmin") }) }
+                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }, { nav.navigate("payrollAdmin") }, { nav.navigate("profile") }, { nav.navigate("company") }, { nav.navigate("security") }, { nav.navigate("operations") }, { nav.navigate("settings") }) }
                 composable("expenses") { ExpenseScreen(back = { nav.popBackStack() }) }
                 composable("employees") { EmployeeScreen(back = { nav.popBackStack() }, canManage = "employee.manage" in me.user.permissions) }
                 composable("attendanceRequests") { AttendanceRequestsScreen(back = { nav.popBackStack() }) }
@@ -275,6 +316,11 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 composable("notifications") { NotificationCenterScreen(back = { nav.popBackStack() }) }
                 composable("workspace") { EmployeeHubScreen(back = { nav.popBackStack() }) }
                 composable("payrollAdmin") { PayrollAdminScreen(back = { nav.popBackStack() }) }
+                composable("profile") { NativeProfileScreen(me, back = { nav.popBackStack() }) }
+                composable("company") { NativeCompanyScreen(me, back = { nav.popBackStack() }) }
+                composable("security") { NativeSecurityScreen(back = { nav.popBackStack() }, signedOut = logout) }
+                composable("operations") { NativeOperationsScreen(back = { nav.popBackStack() }) }
+                composable("settings") { NativeSettingsScreen(back = { nav.popBackStack() }) }
             }
         }
     }

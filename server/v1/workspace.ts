@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
+import { reconcileMidnightAbsentMissingClockOut } from './attendancePolicies.js';
 
 type Req=Request&{auth?:{id:string;companyId:string;role:string;employeeId?:string;permissions:string[];accessScopes?:Array<{scope:string;scopeEntityId?:string|null;permissions:string[]}>};requestId?:string};
 export function createWorkspaceRouter(prisma:PrismaClient,authenticate:RequestHandler){
@@ -29,6 +30,162 @@ export function createWorkspaceRouter(prisma:PrismaClient,authenticate:RequestHa
     const timeline=[...attendance.flatMap(item=>[{id:`attendance-${item.id}-in`,at:item.clockInTime||item.date,type:'ATTENDANCE',title:item.clockInTime?'Clocked in':item.status,detail:item.status},...(item.clockOutTime?[{id:`attendance-${item.id}-out`,at:item.clockOutTime,type:'ATTENDANCE',title:'Clocked out',detail:item.status}]:[])]),...leave.map(item=>({id:`leave-${item.id}`,at:item.appliedAt,type:'LEAVE',title:`${item.leaveType.name} leave`,detail:item.status})),...expenses.map(item=>({id:`expense-${item.id}`,at:item.submittedAt,type:'EXPENSE',title:item.title,detail:item.status})),...revisions.map(item=>({id:`salary-${item.id}`,at:item.effectiveFrom,type:'SALARY',title:'Salary revision',detail:item.status})),...requests.map(item=>({id:`request-${item.id}`,at:item.submittedAt,type:'REQUEST',title:item.title,detail:item.status}))].sort((a,b)=>new Date(b.at).getTime()-new Date(a.at).getTime()).slice(0,200);
     return ok(res,{employee,attendance,leave,payslips,assets,expenses,goals,revisions,requests,timeline});
   }catch(error){next(error)}});
-  router.get('/command-center',async(req:Req,res,next)=>{try{const auth=req.auth!;if(!auth.permissions.includes('employee.read.all'))return fail(res,403,'FORBIDDEN','Company-wide workforce access is required.');const now=new Date(),today=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())),month=`${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}`;const[active,present,onLeave,pendingApprovals,missingPunches,expiringDocuments,payroll]=await prisma.$transaction([prisma.employee.count({where:{companyId:auth.companyId,status:{in:['ACTIVE','ON_PROBATION']}}}),prisma.attendanceRecord.count({where:{companyId:auth.companyId,date:today,clockInTime:{not:null}}}),prisma.leaveRequest.count({where:{companyId:auth.companyId,status:'APPROVED',startDate:{lte:today},endDate:{gte:today}}}),prisma.workflowInstance.count({where:{companyId:auth.companyId,status:'PENDING'}}),prisma.attendanceRecord.count({where:{companyId:auth.companyId,date:today,clockInTime:{not:null},clockOutTime:null}}),prisma.employeeDocument.count({where:{companyId:auth.companyId,expiryDate:{gte:today,lte:new Date(today.getTime()+7*86_400_000)}}}),prisma.payrollRun.findFirst({where:{companyId:auth.companyId,month},orderBy:{createdAt:'desc'}})]);return ok(res,{metrics:{activeEmployees:active,presentToday:present,absentToday:Math.max(0,active-present-onLeave),onLeaveToday:onLeave},alerts:[{key:'MISSING_PUNCH',severity:'WARNING',count:missingPunches,message:`${missingPunches} employees have an incomplete punch today.`},{key:'DOCUMENT_EXPIRY',severity:'WARNING',count:expiringDocuments,message:`${expiringDocuments} employee documents expire within seven days.`},{key:'PENDING_APPROVAL',severity:'INFO',count:pendingApprovals,message:`${pendingApprovals} requests are awaiting approval.`},{key:'PAYROLL',severity:payroll?'INFO':'WARNING',count:payroll?1:0,message:payroll?`Payroll ${month} is ${payroll.status}.`:`Payroll ${month} has not been started.`}]})}catch(error){next(error)}});
+  router.get('/command-center', async (req: Req, res, next) => {
+    try {
+      const auth = req.auth!;
+      if (!auth.permissions.includes('employee.read.all')) return fail(res, 403, 'FORBIDDEN', 'Company-wide workforce access is required.');
+      const now = new Date();
+      const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+      
+      const preSettings = await prisma.companySettings.findUnique({ where: { companyId: auth.companyId } });
+      const rawTz = preSettings?.timezone || 'Asia/Kolkata';
+      const tz = rawTz.split(/[\s(]/)[0] || 'Asia/Kolkata';
+      const localDateStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now);
+      const today = new Date(`${localDateStr}T00:00:00.000Z`);
+
+      await reconcileMidnightAbsentMissingClockOut(prisma, auth.companyId);
+
+      const [active, attendanceToday, onLeave, pendingApprovals, missingPunches, expiringDocuments, payroll, policy] = await prisma.$transaction([
+        prisma.employee.count({ where: { companyId: auth.companyId, status: { in: ['ACTIVE', 'ON_PROBATION'] } } }),
+        prisma.attendanceRecord.findMany({
+          where: { companyId: auth.companyId, date: today, clockInTime: { not: null } },
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                employeeCode: true,
+                avatarUrl: true,
+                department: { select: { name: true } },
+              },
+            },
+          },
+          orderBy: { clockInTime: 'asc' },
+        }),
+        prisma.leaveRequest.count({ where: { companyId: auth.companyId, status: 'APPROVED', startDate: { lte: today }, endDate: { gte: today } } }),
+        prisma.workflowInstance.count({ where: { companyId: auth.companyId, status: 'PENDING' } }),
+        prisma.attendanceRecord.count({ where: { companyId: auth.companyId, date: today, clockInTime: { not: null }, clockOutTime: null } }),
+        prisma.employeeDocument.count({ where: { companyId: auth.companyId, expiryDate: { gte: today, lte: new Date(today.getTime() + 7 * 86_400_000) } } }),
+        prisma.payrollRun.findFirst({ where: { companyId: auth.companyId, month }, orderBy: { createdAt: 'desc' } }),
+        prisma.attendancePolicy.findFirst({ where: { companyId: auth.companyId }, orderBy: { effectiveFrom: 'desc' } }),
+      ]);
+
+      const [startH, startM] = (preSettings?.businessHoursStart || '10:00').split(':').map(Number);
+      const startTotalMinutes = (isNaN(startH) ? 10 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+      const graceMinutes = policy?.graceInMinutes ?? 60;
+      const cutoffMinutes = startTotalMinutes + graceMinutes;
+
+      const lateCutoffH = Math.floor(cutoffMinutes / 60) % 24;
+      const lateCutoffM = cutoffMinutes % 60;
+      const lateThresholdFormatted = `${String(lateCutoffH).padStart(2, '0')}:${String(lateCutoffM).padStart(2, '0')}`;
+
+      const lateEntries: Array<{
+        id: string;
+        employeeId: string;
+        employeeName: string;
+        employeeCode: string;
+        department: string;
+        avatarUrl?: string | null;
+        clockInTime: string;
+        clockInFormatted: string;
+        lateMinutes: number;
+        status: string;
+      }> = [];
+
+      let lateCount = 0;
+      let onTimeCount = 0;
+
+      for (const record of attendanceToday) {
+        let isLate = record.status === 'LATE';
+        let lateMinutes = 0;
+        let formattedTime = '';
+
+        if (record.clockInTime) {
+          const clockInDate = new Date(record.clockInTime);
+          const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            hour: 'numeric',
+            minute: 'numeric',
+            hour12: false,
+          }).formatToParts(clockInDate);
+          const inH = Number(parts.find(p => p.type === 'hour')?.value ?? clockInDate.getHours());
+          const inM = Number(parts.find(p => p.type === 'minute')?.value ?? clockInDate.getMinutes());
+          const inTotalMinutes = inH * 60 + inM;
+
+          if (inTotalMinutes > cutoffMinutes) {
+            isLate = true;
+          }
+          if (inTotalMinutes > startTotalMinutes) {
+            lateMinutes = inTotalMinutes - startTotalMinutes;
+          }
+
+          formattedTime = new Intl.DateTimeFormat('en-IN', {
+            timeZone: tz,
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          }).format(clockInDate);
+        }
+
+        if (isLate) {
+          lateCount++;
+          lateEntries.push({
+            id: record.id,
+            employeeId: record.employeeId,
+            employeeName: `${record.employee.firstName} ${record.employee.lastName}`,
+            employeeCode: record.employee.employeeCode,
+            department: record.employee.department?.name || 'General',
+            avatarUrl: record.employee.avatarUrl,
+            clockInTime: record.clockInTime ? record.clockInTime.toISOString() : '',
+            clockInFormatted: formattedTime || 'Late entry',
+            lateMinutes: lateMinutes > 0 ? lateMinutes : Math.max(1, cutoffMinutes - startTotalMinutes),
+            status: 'LATE',
+          });
+        } else {
+          onTimeCount++;
+        }
+      }
+
+      const totalPresent = attendanceToday.length;
+      const totalAbsent = Math.max(0, active - totalPresent - onLeave);
+
+      const alerts = [
+        ...(lateCount > 0 ? [{
+          key: 'LATE_ENTRY',
+          severity: 'WARNING' as const,
+          count: lateCount,
+          message: `${lateCount} ${lateCount === 1 ? 'employee clocked in late today' : 'employees clocked in late today'} (after ${lateThresholdFormatted}).`,
+        }] : []),
+        { key: 'MISSING_PUNCH', severity: 'WARNING' as const, count: missingPunches, message: `${missingPunches} employees have an incomplete punch today.` },
+        { key: 'DOCUMENT_EXPIRY', severity: 'WARNING' as const, count: expiringDocuments, message: `${expiringDocuments} employee documents expire within seven days.` },
+        { key: 'PENDING_APPROVAL', severity: 'INFO' as const, count: pendingApprovals, message: `${pendingApprovals} requests are awaiting approval.` },
+        { key: 'PAYROLL', severity: payroll ? ('INFO' as const) : ('WARNING' as const), count: payroll ? 1 : 0, message: payroll ? `Payroll ${month} is ${payroll.status}.` : `Payroll ${month} has not been started.` },
+      ];
+
+      return ok(res, {
+        metrics: {
+          activeEmployees: active,
+          presentToday: totalPresent,
+          onTimeToday: onTimeCount,
+          lateToday: lateCount,
+          absentToday: totalAbsent,
+          onLeaveToday: onLeave,
+        },
+        alerts,
+        lateEntries,
+        workSchedule: {
+          businessHoursStart: preSettings?.businessHoursStart || '10:00',
+          lateThresholdTime: lateThresholdFormatted,
+          timezone: tz,
+        },
+      });
+    } catch (error) { next(error); }
+  });
   return router;
 }

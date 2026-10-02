@@ -18,6 +18,7 @@ sealed interface SessionState { data object Loading : SessionState; data object 
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading); val state: StateFlow<SessionState> = _state.asStateFlow()
     private val _error = MutableStateFlow<String?>(null); val error: StateFlow<String?> = _error.asStateFlow()
     private val _availableUpdate = MutableStateFlow<AndroidReleaseDto?>(null); val availableUpdate: StateFlow<AndroidReleaseDto?> = _availableUpdate.asStateFlow()
+    private val _recoveryMessage=MutableStateFlow<String?>(null);val recoveryMessage:StateFlow<String?> = _recoveryMessage.asStateFlow()
     init {
         viewModelScope.launch { _state.value = repository.restore()?.let(SessionState::SignedIn) ?: SessionState.SignedOut }
         viewModelScope.launch {
@@ -28,6 +29,10 @@ sealed interface SessionState { data object Loading : SessionState; data object 
     fun dismissUpdate() { _availableUpdate.value = null }
     fun login(email: String, password: String, mfaCode:String?) = viewModelScope.launch { _error.value = null; _state.value = SessionState.Loading; runCatching { repository.login(email, password, mfaCode) }.onSuccess { _state.value = SessionState.SignedIn(it) }.onFailure { _error.value = it.userMessage(); _state.value = SessionState.SignedOut } }
     fun logout() = viewModelScope.launch { repository.logout(); _state.value = SessionState.SignedOut }
+    fun forgotPassword(email:String)=viewModelScope.launch{runCatching{repository.forgotPassword(email)}.onSuccess{_recoveryMessage.value="If the account exists, a password-reset email has been queued."}.onFailure{_recoveryMessage.value=it.userMessage()}}
+    fun activateAccount(token:String,password:String)=viewModelScope.launch{runCatching{repository.activateAccount(token,password)}.onSuccess{_recoveryMessage.value="Account activated. You can sign in now."}.onFailure{_recoveryMessage.value=it.userMessage()}}
+    fun resetPassword(token:String,password:String)=viewModelScope.launch{runCatching{repository.resetPassword(token,password)}.onSuccess{_recoveryMessage.value="Password reset completed. You can sign in now."}.onFailure{_recoveryMessage.value=it.userMessage()}}
+    fun clearRecoveryMessage(){_recoveryMessage.value=null}
 }
 
 internal fun shouldOfferUpdate(installedVersionCode: Int, latestVersionCode: Int) = latestVersionCode > installedVersionCode

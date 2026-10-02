@@ -20,11 +20,11 @@ import {
 import { createFoundationRouter } from "./foundation.js";
 import { employeeScopeFilters, type AccessScope } from "./accessScope.js";
 import { createWorkflowRouter, startConfiguredWorkflow } from "./workflows.js";
-import { createAttendancePolicyRouter } from "./attendancePolicies.js";
+import { createAttendancePolicyRouter, reconcileMidnightAbsentMissingClockOut } from "./attendancePolicies.js";
 import { createPayrollRouter } from "./payroll.js";
 import { createPayrollComplianceRouter } from "./payrollCompliance.js";
 import { createWorkspaceRouter } from "./workspace.js";
-import { createNotificationRouter } from "./notifications.js";
+import { createNotificationRouter, emitNotification } from "./notifications.js";
 import { createGovernanceRouter } from "./governance.js";
 import { createReportRouter } from "./reports.js";
 import { createPerformanceRouter } from "./performance.js";
@@ -66,6 +66,7 @@ const rolePermissions: Record<UserRole, string[]> = {
     "employee.manage",
     "face.enroll",
     "attendance.read.team",
+    "attendance.route.read",
     "attendance.manage",
     "leave.review",
     "leave.policy.manage",
@@ -89,6 +90,7 @@ const rolePermissions: Record<UserRole, string[]> = {
     "employee.manage",
     "face.enroll",
     "attendance.read.team",
+    "attendance.route.read",
     "attendance.manage",
     "leave.review",
     "leave.policy.manage",
@@ -109,6 +111,7 @@ const rolePermissions: Record<UserRole, string[]> = {
     "employee.manage",
     "face.enroll",
     "attendance.read.team",
+    "attendance.route.read",
     "attendance.manage",
     "leave.review",
     "expense.review",
@@ -484,6 +487,12 @@ export function createV1Router(prisma: PrismaClient) {
             "FORBIDDEN",
             "You do not have permission to perform this action.",
           );
+  const requireAnyPermission =
+    (permissions: string[]) =>
+    (req: AuthedRequest, res: Response, next: NextFunction) =>
+      req.auth?.permissions.some(permission => permissions.includes(permission))
+        ? next()
+        : fail(res, 403, "FORBIDDEN", "You do not have permission to view attendance routes.");
 
   router.post("/auth/login", loginLimiter, async (req, res, next) => {
     try {
@@ -621,6 +630,13 @@ export function createV1Router(prisma: PrismaClient) {
           "Refresh token is invalid or expired.",
         );
       if (stored.revokedAt) {
+        if (stored.lastUsedAt && Date.now() - stored.lastUsedAt.getTime() < 60_000)
+          return fail(
+            res,
+            401,
+            'REFRESH_ALREADY_ROTATED',
+            'Refresh token was already rotated by another browser tab.',
+          );
         await prisma.refreshToken.updateMany({
           where: { familyId: stored.familyId, revokedAt: null },
           data: { revokedAt: new Date() },
@@ -657,6 +673,43 @@ export function createV1Router(prisma: PrismaClient) {
       next(e);
     }
   });
+
+  router.post(
+    "/auth/web-session",
+    authenticate,
+    async (req: AuthedRequest, res, next) => {
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: req.auth!.id },
+          include: { employee: true },
+        });
+        if (!user)
+          return fail(res, 401, "AUTH_REQUIRED", "The authenticated user was not found.");
+        const session = await issueSession(
+          prisma,
+          user,
+          "OrbitHR Android complete workspace",
+          crypto.randomUUID(),
+          { ipAddress: clientIp(req), userAgent: req.header("user-agent") },
+        );
+        await prisma.auditLog.create({
+          data: {
+            companyId: user.companyId,
+            userId: user.id,
+            userName: user.fullName,
+            userRole: user.role,
+            action: "ANDROID_WEB_SESSION_CREATED",
+            category: "AUTH",
+            details: "A separate web workspace session was created inside the Android app.",
+            ipAddress: clientIp(req),
+          },
+        });
+        return ok(res, session, 201);
+      } catch (e) {
+        next(e);
+      }
+    },
+  );
 
   router.post(
     "/auth/logout",
@@ -929,21 +982,40 @@ export function createV1Router(prisma: PrismaClient) {
   router.get(
     "/attendance",
     authenticate,
-    requirePermission("attendance.read.team"),
+    requireAnyPermission(["attendance.read.team", "attendance.route.read"]),
     async (req: AuthedRequest, res, next) => {
       try {
+        const auth = req.auth!;
         const from = req.query.from
           ? new Date(String(req.query.from))
           : undefined;
+        const routeOnly = auth.permissions.includes("attendance.route.read") && !auth.permissions.includes("attendance.read.team");
+        const scopes = employeeScopeFilters(auth, rolePermissions, routeOnly ? "attendance.route.read" : "employee.read");
+        if (!scopes.length)
+          return fail(res, 403, "ATTENDANCE_SCOPE_FORBIDDEN", "Your attendance access has no valid employee scope.");
+        await reconcileMidnightAbsentMissingClockOut(prisma, auth.companyId);
         const records = await prisma.attendanceRecord.findMany({
           where: {
-            companyId: req.auth!.companyId,
+            companyId: auth.companyId,
+            employee: { is: { OR: scopes } },
             ...(from ? { date: { gte: from } } : {}),
+          },
+          include: {
+            employee: {
+              select: {
+                id: true,
+                employeeCode: true,
+                firstName: true,
+                lastName: true,
+                avatarUrl: true,
+                department: { select: { name: true } },
+              },
+            },
           },
           orderBy: { date: "desc" },
         });
         const linkedEmployees = await prisma.employee.findMany({
-          where: { companyId: req.auth!.companyId, userId: { not: null } },
+          where: { companyId: auth.companyId, id: { in: records.map(record => record.employeeId) }, userId: { not: null } },
           select: { id: true, userId: true },
         });
         const employeeByUserId = new Map(
@@ -954,7 +1026,7 @@ export function createV1Router(prisma: PrismaClient) {
         const punchLogs = linkedEmployees.length
           ? await prisma.auditLog.findMany({
               where: {
-                companyId: req.auth!.companyId,
+                companyId: auth.companyId,
                 category: "ATTENDANCE",
                 action: { in: ["CLOCK_IN", "CLOCK_OUT"] },
                 userId: {
@@ -1007,6 +1079,51 @@ export function createV1Router(prisma: PrismaClient) {
     },
   );
 
+  router.get('/attendance/:recordId/route',authenticate,requirePermission('attendance.route.read'),async(req:AuthedRequest,res,next)=>{
+    try{
+      const auth=req.auth!;
+      const record=await prisma.attendanceRecord.findFirst({where:{id:String(req.params.recordId),companyId:auth.companyId},include:{employee:{select:{id:true,employeeCode:true,firstName:true,lastName:true,workdayGpsTrackingEnabled:true}},locationPoints:{orderBy:{capturedAt:'asc'}}}});
+      if(!record)return fail(res,404,'ATTENDANCE_NOT_FOUND','Attendance record was not found.');
+      const scopes=employeeScopeFilters(auth,rolePermissions,'attendance.route.read');
+      const allowed=scopes.length&&await prisma.employee.findFirst({where:{id:record.employeeId,companyId:auth.companyId,OR:scopes},select:{id:true}});
+      if(!allowed)return fail(res,403,'ATTENDANCE_ROUTE_FORBIDDEN','This employee is outside your access scope.');
+      let distanceMetersTravelled=0;
+      for(let index=1;index<record.locationPoints.length;index++){
+        const previous=record.locationPoints[index-1],current=record.locationPoints[index];
+        distanceMetersTravelled+=distanceMeters(previous.latitude,previous.longitude,current.latitude,current.longitude);
+      }
+      return ok(res,{attendance:{id:record.id,date:record.date,clockInTime:record.clockInTime,clockOutTime:record.clockOutTime},employee:record.employee,trackingEnabled:record.employee.workdayGpsTrackingEnabled,active:Boolean(record.employee.workdayGpsTrackingEnabled&&record.clockInTime&&!record.clockOutTime),distanceMeters:Math.round(distanceMetersTravelled),points:record.locationPoints});
+    }catch(e){next(e)}
+  });
+
+  router.get('/me/attendance/tracking-status',authenticate,requirePermission('attendance.punch'),async(req:AuthedRequest,res,next)=>{
+    try{
+      if(!req.auth!.employeeId)return fail(res,409,'EMPLOYEE_NOT_LINKED','No employee profile is linked to this account.');
+      const employee=await prisma.employee.findFirst({where:{id:req.auth!.employeeId,companyId:req.auth!.companyId},select:{workdayGpsTrackingEnabled:true}});
+      const today = indiaDate();
+      const record=await prisma.attendanceRecord.findFirst({where:{companyId:req.auth!.companyId,employeeId:req.auth!.employeeId,date:today,status:{not:"ABSENT"},clockInTime:{not:null},clockOutTime:null},orderBy:{clockInTime:'desc'},select:{id:true,clockInTime:true,clockOutTime:true,deviceId:true}});
+      return ok(res,{enabled:employee?.workdayGpsTrackingEnabled===true,active:Boolean(employee?.workdayGpsTrackingEnabled&&record?.clockInTime&&!record.clockOutTime),attendanceRecordId:record?.id,deviceId:record?.deviceId});
+    }catch(e){next(e)}
+  });
+
+  router.post('/me/attendance/location-batch',authenticate,requirePermission('attendance.punch'),async(req:AuthedRequest,res,next)=>{
+    try{
+      if(!req.auth!.employeeId)return fail(res,409,'EMPLOYEE_NOT_LINKED','No employee profile is linked to this account.');
+      const body=z.object({deviceId:z.string().trim().min(16).max(200),points:z.array(z.object({id:z.string().uuid(),latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracyMeters:z.number().positive().max(200),speedMetersPerSecond:z.number().min(0).max(150).nullable().optional(),bearingDegrees:z.number().min(0).max(360).nullable().optional(),capturedAt:z.coerce.date()})).min(1).max(100)}).parse(req.body);
+      const employee=await prisma.employee.findFirst({where:{id:req.auth!.employeeId,companyId:req.auth!.companyId},select:{workdayGpsTrackingEnabled:true}});
+      if(!employee?.workdayGpsTrackingEnabled)return fail(res,403,'GPS_TRACKING_DISABLED','Workday GPS tracking is not enabled for this employee.');
+      const today = indiaDate();
+      const record=await prisma.attendanceRecord.findFirst({where:{companyId:req.auth!.companyId,employeeId:req.auth!.employeeId,date:today,status:{not:"ABSENT"},clockInTime:{not:null},clockOutTime:null},orderBy:{clockInTime:'desc'}});
+      if(!record?.clockInTime||record.clockOutTime)return fail(res,409,'ATTENDANCE_SESSION_CLOSED','Location is accepted only between clock-in and clock-out.');
+      if(record.deviceId&&record.deviceId!==body.deviceId)return fail(res,403,'ATTENDANCE_DEVICE_MISMATCH','Location must come from the device used to clock in.');
+      const oldest=new Date(record.clockInTime.getTime()-120000),newest=new Date(Date.now()+120000);
+      const points=body.points.filter(point=>point.capturedAt>=oldest&&point.capturedAt<=newest);
+      if(!points.length)return ok(res,{accepted:0});
+      const result=await prisma.attendanceLocationPoint.createMany({data:points.map(point=>({id:point.id,companyId:req.auth!.companyId,employeeId:req.auth!.employeeId!,attendanceRecordId:record.id,latitude:point.latitude,longitude:point.longitude,accuracyMeters:point.accuracyMeters,speedMetersPerSecond:point.speedMetersPerSecond,bearingDegrees:point.bearingDegrees,capturedAt:point.capturedAt})),skipDuplicates:true});
+      return ok(res,{accepted:result.count});
+    }catch(e){next(e)}
+  });
+
   router.get(
     "/me/attendance",
     authenticate,
@@ -1023,6 +1140,7 @@ export function createV1Router(prisma: PrismaClient) {
         const from = req.query.from
           ? new Date(String(req.query.from))
           : new Date(Date.now() - 31 * 86_400_000);
+        await reconcileMidnightAbsentMissingClockOut(prisma, req.auth!.companyId);
         const records = await prisma.attendanceRecord.findMany({
           where: {
             companyId: req.auth!.companyId,
@@ -1231,6 +1349,7 @@ export function createV1Router(prisma: PrismaClient) {
             locationAccuracyMeters: z.number().positive().max(200),
             deviceId: z.string().trim().min(16).max(200),
             faceVerificationToken: z.string().min(32).max(500),
+            recordedAt: z.string().datetime().optional(),
           })
           .parse(req.body);
         if (!req.auth!.employeeId)
@@ -1240,8 +1359,15 @@ export function createV1Router(prisma: PrismaClient) {
             "EMPLOYEE_NOT_LINKED",
             "No employee profile is linked to this account.",
           );
-        const now = new Date();
-        const date = indiaDate(now);
+        const serverNow = new Date();
+        const punchTime = body.recordedAt ? new Date(body.recordedAt) : serverNow;
+        const effectivePunchTime =
+          !isNaN(punchTime.getTime()) &&
+          punchTime.getTime() <= serverNow.getTime() + 120_000 &&
+          punchTime.getTime() >= serverNow.getTime() - 7 * 86400_000
+            ? punchTime
+            : serverNow;
+        const date = indiaDate(effectivePunchTime);
         const proofHash = hashToken(body.faceVerificationToken);
         const result = await prisma.$transaction(async (tx) => {
           const verification = await tx.faceVerificationSession.findFirst({
@@ -1253,22 +1379,42 @@ export function createV1Router(prisma: PrismaClient) {
               proofTokenHash: proofHash,
               status: "VERIFIED",
               consumedAt: null,
-              expiresAt: { gt: now },
+              expiresAt: body.recordedAt ? { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } : { gt: serverNow },
             },
           });
-          if (!verification)
+          if (!verification) {
+            // Idempotent check for offline retry: if already consumed for this device/token, return the record
+            const alreadyConsumed = await tx.faceVerificationSession.findFirst({
+              where: {
+                companyId: req.auth!.companyId,
+                employeeId: req.auth!.employeeId,
+                action: body.action,
+                deviceId: body.deviceId,
+                proofTokenHash: proofHash,
+                status: "CONSUMED",
+              },
+            });
+            if (alreadyConsumed) {
+              const existingRecord = await tx.attendanceRecord.findFirst({
+                where: { companyId: req.auth!.companyId, employeeId: req.auth!.employeeId!, date },
+              });
+              if (existingRecord) {
+                return { record: existingRecord, existed: true, trackingEnabled: false };
+              }
+            }
             throw Object.assign(
               new Error(
                 "Complete a fresh employee face match before recording attendance.",
               ),
               { status: 401, code: "FACE_VERIFICATION_REQUIRED" },
             );
+          }
           const employeeLocation = await tx.employee.findFirst({
             where: {
               id: req.auth!.employeeId!,
               companyId: req.auth!.companyId,
             },
-            select: { location: true },
+            select: { location: true, workdayGpsTrackingEnabled: true },
           });
           if (
             employeeLocation?.location?.latitude != null &&
@@ -1300,23 +1446,22 @@ export function createV1Router(prisma: PrismaClient) {
               status: "VERIFIED",
               consumedAt: null,
             },
-            data: { status: "CONSUMED", consumedAt: now },
+            data: { status: "CONSUMED", consumedAt: serverNow },
           });
           if (consumed.count !== 1)
             throw Object.assign(
               new Error("Face verification was already used. Verify again."),
               { status: 409, code: "FACE_PROOF_ALREADY_USED" },
             );
-          const existing = await tx.attendanceRecord.findUnique({
-            where: {
-              employeeId_date: { employeeId: req.auth!.employeeId!, date },
-            },
-          });
+          const existing = body.action === "CLOCK_OUT"
+            ? await tx.attendanceRecord.findFirst({where:{companyId:req.auth!.companyId,employeeId:req.auth!.employeeId!,date,status:{not:"ABSENT"},clockInTime:{not:null},clockOutTime:null},orderBy:{clockInTime:"desc"}})
+            : await tx.attendanceRecord.findUnique({where:{employeeId_date:{employeeId:req.auth!.employeeId!,date}}});
+          const attendanceDate=existing?.date||date;
           const locked = await tx.attendancePeriodLock.findFirst({
             where: {
               companyId: req.auth!.companyId,
-              periodStart: { lte: date },
-              periodEnd: { gte: date },
+              periodStart: { lte: attendanceDate },
+              periodEnd: { gte: attendanceDate },
             },
           });
           if (locked)
@@ -1324,9 +1469,9 @@ export function createV1Router(prisma: PrismaClient) {
               new Error("Attendance is locked for payroll for this date."),
               { status: 423, code: "ATTENDANCE_PERIOD_LOCKED" },
             );
-          if (body.action === "CLOCK_IN" && existing?.clockInTime)
+          if (body.action === "CLOCK_IN" && existing?.clockInTime && !existing?.clockOutTime)
             throw Object.assign(
-              new Error("You have already clocked in today."),
+              new Error("You are already clocked in. Clock out before clocking in again."),
               { status: 409, code: "ALREADY_CLOCKED_IN" },
             );
           if (body.action === "CLOCK_OUT" && !existing?.clockInTime)
@@ -1336,14 +1481,58 @@ export function createV1Router(prisma: PrismaClient) {
             });
           if (body.action === "CLOCK_OUT" && existing?.clockOutTime)
             throw Object.assign(
-              new Error("You have already clocked out today."),
+              new Error("You have already clocked out."),
               { status: 409, code: "ALREADY_CLOCKED_OUT" },
             );
+          let clockInStatus: "PRESENT" | "LATE" = "PRESENT";
+          if (body.action === "CLOCK_IN") {
+            const [companySettings, policy, shiftAssignment] = await Promise.all([
+              tx.companySettings.findUnique({ where: { companyId: req.auth!.companyId } }),
+              tx.attendancePolicy.findFirst({
+                where: { companyId: req.auth!.companyId },
+                orderBy: { effectiveFrom: "desc" },
+              }),
+              tx.shiftAssignment.findFirst({
+                where: {
+                  companyId: req.auth!.companyId,
+                  employeeId: req.auth!.employeeId!,
+                  startsOn: { lte: date },
+                  OR: [{ endsOn: null }, { endsOn: { gte: date } }],
+                },
+                include: { shiftTemplate: true },
+                orderBy: { startsOn: "desc" },
+              }),
+            ]);
+
+            const rawTz = companySettings?.timezone || "Asia/Kolkata";
+            const tz = rawTz.split(/[\s(]/)[0] || "Asia/Kolkata";
+            const [startH, startM] = (companySettings?.businessHoursStart || "10:00").split(":").map(Number);
+            const defaultStartMinute = (isNaN(startH) ? 10 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+            const startMinute = shiftAssignment?.shiftTemplate?.startMinute ?? defaultStartMinute;
+            const grace = policy?.graceInMinutes ?? 60;
+            const lateCutoffMinute = startMinute + grace;
+
+            const parts = new Intl.DateTimeFormat("en-US", {
+              timeZone: tz,
+              hour: "numeric",
+              minute: "numeric",
+              hour12: false,
+            }).formatToParts(effectivePunchTime);
+            const inH = Number(parts.find((p) => p.type === "hour")?.value ?? effectivePunchTime.getHours());
+            const inM = Number(parts.find((p) => p.type === "minute")?.value ?? effectivePunchTime.getMinutes());
+            const punchMinuteOfDay = inH * 60 + inM;
+
+            if (punchMinuteOfDay > lateCutoffMinute) {
+              clockInStatus = "LATE";
+            }
+          }
+
           const data =
             body.action === "CLOCK_IN"
               ? {
-                  clockInTime: now,
-                  status: "PRESENT" as const,
+                  clockInTime: effectivePunchTime,
+                  clockOutTime: null,
+                  status: clockInStatus,
                   locationLat: body.latitude,
                   locationLng: body.longitude,
                   deviceId: body.deviceId,
@@ -1351,8 +1540,8 @@ export function createV1Router(prisma: PrismaClient) {
                   faceConfidenceScore: verification.similarity,
                   source: "MOBILE_FACE" as const,
                 }
-              : { clockOutTime: now };
-          const record = await tx.attendanceRecord.upsert({
+              : { clockOutTime: effectivePunchTime };
+          const record = body.action === "CLOCK_OUT" ? await tx.attendanceRecord.update({where:{id:existing!.id},data}) : await tx.attendanceRecord.upsert({
             where: {
               employeeId_date: { employeeId: req.auth!.employeeId!, date },
             },
@@ -1361,8 +1550,8 @@ export function createV1Router(prisma: PrismaClient) {
               companyId: req.auth!.companyId,
               employeeId: req.auth!.employeeId!,
               date,
-              status: "PRESENT",
-              clockInTime: now,
+              status: clockInStatus,
+              clockInTime: effectivePunchTime,
               locationLat: body.latitude,
               locationLng: body.longitude,
               deviceId: body.deviceId,
@@ -1371,6 +1560,9 @@ export function createV1Router(prisma: PrismaClient) {
               source: "MOBILE_FACE",
             },
           });
+          if(employeeLocation?.workdayGpsTrackingEnabled){
+            await tx.attendanceLocationPoint.create({data:{id:crypto.randomUUID(),companyId:req.auth!.companyId,employeeId:req.auth!.employeeId!,attendanceRecordId:record.id,latitude:body.latitude,longitude:body.longitude,accuracyMeters:body.locationAccuracyMeters,capturedAt:effectivePunchTime}});
+          }
           await tx.auditLog.create({
             data: {
               companyId: req.auth!.companyId,
@@ -1383,9 +1575,21 @@ export function createV1Router(prisma: PrismaClient) {
               ipAddress: clientIp(req),
             },
           });
-          return { record, existed: Boolean(existing) };
+          return { record, existed: Boolean(existing), trackingEnabled: employeeLocation?.workdayGpsTrackingEnabled===true };
         });
-        return ok(res, result.record, result.existed ? 200 : 201);
+        await emitNotification(prisma, {
+          companyId: req.auth!.companyId,
+          userId: req.auth!.id,
+          eventKey: body.action === "CLOCK_IN" ? "ATTENDANCE_CLOCK_IN" : "ATTENDANCE_CLOCK_OUT",
+          title: body.action === "CLOCK_IN" ? "Clock-in recorded" : "Clock-out recorded",
+          body: body.action === "CLOCK_IN"
+            ? `Your workday started at ${effectivePunchTime.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}.`
+            : `Your workday ended at ${effectivePunchTime.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })}.`,
+          entityType: "AttendanceRecord",
+          entityId: result.record.id,
+          actionUrl: "/attendance",
+        });
+        return ok(res, { ...result.record, workdayGpsTrackingEnabled: result.trackingEnabled }, result.existed ? 200 : 201);
       } catch (e) {
         next(e);
       }
@@ -2194,6 +2398,7 @@ export function createV1Router(prisma: PrismaClient) {
               .default("FULL_TIME"),
             workLocation: z.string().max(120).optional(),
             phone: z.string().max(30).optional(),
+            workdayGpsTrackingEnabled: z.boolean().default(false),
           })
           .parse(req.body);
         const idempotencyKey = req.header("idempotency-key");
@@ -2319,6 +2524,7 @@ export function createV1Router(prisma: PrismaClient) {
               employmentType: body.employmentType,
               status: "ON_PROBATION",
               workLocation: body.workLocation,
+              workdayGpsTrackingEnabled: body.workdayGpsTrackingEnabled,
               phone: body.phone,
               skills: [],
             },
@@ -2460,7 +2666,7 @@ export function createV1Router(prisma: PrismaClient) {
 
   router.patch("/employees/:id",authenticate,requirePermission("employee.manage"),async(req:AuthedRequest,res,next)=>{
     try{
-      const body=z.object({employeeCode:z.string().trim().min(2).max(30),firstName:z.string().trim().min(1).max(80),lastName:z.string().trim().min(1).max(80),email:z.string().email(),phone:z.string().trim().max(30).nullable().optional(),departmentId:z.string().uuid(),designationId:z.string().uuid(),reportingManagerId:z.string().uuid().nullable().optional(),dateOfJoining:z.coerce.date(),employmentType:z.enum(["FULL_TIME","PART_TIME","CONTRACT","INTERN","CONSULTANT"]),workLocation:z.string().trim().max(120).nullable().optional()}).parse(req.body),companyId=req.auth!.companyId;
+        const body=z.object({employeeCode:z.string().trim().min(2).max(30),firstName:z.string().trim().min(1).max(80),lastName:z.string().trim().min(1).max(80),email:z.string().email(),phone:z.string().trim().max(30).nullable().optional(),departmentId:z.string().uuid(),designationId:z.string().uuid(),reportingManagerId:z.string().uuid().nullable().optional(),dateOfJoining:z.coerce.date(),employmentType:z.enum(["FULL_TIME","PART_TIME","CONTRACT","INTERN","CONSULTANT"]),workLocation:z.string().trim().max(120).nullable().optional(),workdayGpsTrackingEnabled:z.boolean().optional()}).parse(req.body),companyId=req.auth!.companyId;
       const employee=await prisma.employee.findFirst({where:{id:String(req.params.id),companyId}});
       if(!employee)return fail(res,404,"EMPLOYEE_NOT_FOUND","Employee was not found.");
       if(body.reportingManagerId===employee.id)return fail(res,400,"INVALID_REPORTING_MANAGER","An employee cannot report to themselves.");
@@ -2592,10 +2798,10 @@ export function createV1Router(prisma: PrismaClient) {
         return fail(
           res,
           400,
-          "FACE_UPLOAD_INVALID",
+          "FILE_UPLOAD_INVALID",
           error.code === "LIMIT_FILE_SIZE"
-            ? "Face photo must be smaller than 5 MB."
-            : "Face photo upload is invalid.",
+            ? "The uploaded file exceeds the permitted size."
+            : "The file upload is invalid.",
         );
       const typed = error as {
         status?: number;

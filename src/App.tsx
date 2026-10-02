@@ -22,6 +22,7 @@ import { RecruitmentPage } from './pages/recruitment/RecruitmentPage';
 import { PerformanceEnginePage } from './pages/performance/PerformanceEnginePage';
 import { AssetsPage } from './pages/assets/AssetsPage';
 import { DocumentsPage } from './pages/documents/DocumentsPage';
+import { EmployeeDocumentsPage } from './pages/documents/EmployeeDocumentsPage';
 import { HolidaysPage } from './pages/holidays/HolidaysPage';
 import { ExpensesPage } from './pages/expenses/ExpensesPage';
 import { AuditLogsPage } from './pages/audit/AuditLogsPage';
@@ -164,6 +165,8 @@ const MainApp: React.FC = () => {
         return <AssetsPage />;
       case 'documents':
         return <DocumentsPage />;
+      case 'employee-documents':
+        return <EmployeeDocumentsPage />;
       case 'holidays':
         return <HolidaysPage />;
       case 'expenses':

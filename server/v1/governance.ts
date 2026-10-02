@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
@@ -23,6 +25,9 @@ export function employeeWhere(auth: NonNullable<Req['auth']>) {
 
 export function createGovernanceRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
+  const documentStorageRoot = path.resolve(
+    process.env.DOCUMENT_STORAGE_DIR || 'storage/employee-documents',
+  );
   const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ data, meta: { requestId: (res.req as Req).requestId } });
   const fail = (res: Response, status: number, code: string, message: string) => res.status(status).json({ error: { code, message } });
   router.use(authenticate);
@@ -64,6 +69,33 @@ export function createGovernanceRouter(prisma: PrismaClient, authenticate: Reque
   } catch (e) { next(e); } });
 
   router.get('/employee-documents', async (req: Req, res, next) => { try { const auth = req.auth!; const employeeIds = (await prisma.employee.findMany({ where: employeeWhere(auth), select: { id: true } })).map(e => e.id); return ok(res, await prisma.employeeDocument.findMany({ where: { companyId: auth.companyId, employeeId: { in: employeeIds } }, select: { id: true, employeeId: true, documentType: true, title: true, fileName: true, mimeType: true, sizeBytes: true, issueDate: true, expiryDate: true, verificationStatus: true, verifiedAt: true, rejectionReason: true, retentionUntil: true, createdAt: true }, orderBy: { createdAt: 'desc' } })); } catch (e) { next(e); } });
+  router.get('/employee-documents/:id/file', async (req: Req, res, next) => {
+    try {
+      const auth = req.auth!;
+      const document = await prisma.employeeDocument.findFirst({
+        where: { id: String(req.params.id), companyId: auth.companyId },
+      });
+      if (!document) return fail(res, 404, 'DOCUMENT_NOT_FOUND', 'Document was not found.');
+      const employee = await prisma.employee.findFirst({
+        where: { ...employeeWhere(auth), id: document.employeeId },
+        select: { id: true },
+      });
+      if (!employee) return fail(res, 403, 'DOCUMENT_FORBIDDEN', 'This document is outside your employee access scope.');
+      const [companyId, storageName] = document.objectKey.split('/');
+      if (companyId !== auth.companyId || !storageName || storageName !== path.basename(storageName)) {
+        return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
+      }
+      const contents = await readFile(path.join(documentStorageRoot, companyId, storageName));
+      res.setHeader('Content-Type', document.mimeType);
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
+      return res.send(contents);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return fail(res, 404, 'DOCUMENT_FILE_NOT_FOUND', 'The stored document file was not found.');
+      }
+      next(error);
+    }
+  });
   router.post('/employee-documents', async (req: Req, res, next) => { try { const auth = req.auth!; const body = z.object({ employeeId: z.string().uuid(), documentType: z.string().trim().min(2).max(60), title: z.string().trim().min(2).max(160), fileName: z.string().trim().min(1).max(200), mimeType: z.string().max(100), sizeBytes: z.number().int().positive().max(20_000_000), issueDate: z.coerce.date().optional(), expiryDate: z.coerce.date().optional() }).parse(req.body); const allowed = await prisma.employee.findFirst({ where: { ...employeeWhere(auth), id: body.employeeId } }); if (!allowed) return fail(res, 403, 'DOCUMENT_FORBIDDEN', 'Employee is outside your access scope.'); const objectKey = `${auth.companyId}/employees/${body.employeeId}/${crypto.randomUUID()}`; return ok(res, await prisma.employeeDocument.create({ data: { companyId: auth.companyId, objectKey, ...body } }), 201); } catch (e) { next(e); } });
   router.post('/employee-documents/:id/review', async (req: Req, res, next) => { try { const auth = req.auth!; if (!auth.permissions.includes('employee.manage')) return fail(res, 403, 'FORBIDDEN', 'Employee management permission is required.'); const body = z.object({ status: z.enum(['VERIFIED', 'REJECTED']), reason: z.string().max(500).optional() }).parse(req.body); const doc = await prisma.employeeDocument.findFirst({ where: { id: String(req.params.id), companyId: auth.companyId } }); if (!doc) return fail(res, 404, 'DOCUMENT_NOT_FOUND', 'Document was not found.'); return ok(res, await prisma.employeeDocument.update({ where: { id: doc.id }, data: { verificationStatus: body.status, rejectionReason: body.status === 'REJECTED' ? body.reason : null, verifiedById: auth.id, verifiedAt: new Date() } })); } catch (e) { next(e); } });
 

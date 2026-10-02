@@ -4,8 +4,13 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
+import crypto from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
+import multer from "multer";
 import { z } from "zod";
+import { emitNotification } from "./notifications.js";
 
 type Req = Request & {
   auth?: {
@@ -17,6 +22,36 @@ type Req = Request & {
   };
   requestId?: string;
 };
+
+export async function notifyAnnouncementAudience(
+  prisma: PrismaClient,
+  announcement: { id: string; companyId: string; title: string; content: string },
+) {
+  const recipients = await prisma.user.findMany({
+    where: { companyId: announcement.companyId },
+    select: { id: true },
+  });
+  let queued = 0;
+  for (let offset = 0; offset < recipients.length; offset += 50) {
+    const batch = await Promise.allSettled(
+      recipients.slice(offset, offset + 50).map((recipient) =>
+        emitNotification(prisma, {
+          companyId: announcement.companyId,
+          userId: recipient.id,
+          eventKey: "ANNOUNCEMENT_PUBLISHED",
+          title: announcement.title,
+          body: announcement.content.slice(0, 500),
+          entityType: "Announcement",
+          entityId: announcement.id,
+          actionUrl: "/notifications",
+        }),
+      ),
+    );
+    queued += batch.filter((result) => result.status === "fulfilled" && result.value).length;
+  }
+  return { recipients: recipients.length, queued };
+}
+
 export function createOperationsRouter(
   prisma: PrismaClient,
   authenticate: RequestHandler,
@@ -52,6 +87,22 @@ export function createOperationsRouter(
           ipAddress: req.ip || "unknown",
         },
       });
+  const companyDocumentUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 8 },
+  });
+  const companyDocumentStorage = path.resolve(
+    process.env.DOCUMENT_STORAGE_DIR
+      ? path.join(process.env.DOCUMENT_STORAGE_DIR, "..", "company-documents")
+      : "storage/company-documents",
+  );
+  const allowedDocumentTypes = new Set([
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ]);
   router.use("/operations", authenticate);
   router.get("/operations/workspace", async (req: Req, res, next) => {
     try {
@@ -333,8 +384,82 @@ export function createOperationsRouter(
           "ANNOUNCEMENT",
           `Announcement ${item.id} created.`,
         );
+        const notificationResult = await notifyAnnouncementAudience(prisma, item);
+        if (notificationResult.queued < notificationResult.recipients) {
+          console.warn(
+            `Announcement ${item.id}: queued notifications for ${notificationResult.queued}/${notificationResult.recipients} users.`,
+          );
+        }
         return ok(res, item, 201);
       } catch (error) {
+        next(error);
+      }
+    },
+  );
+  router.post(
+    "/operations/company-documents/upload",
+    permit("operations.manage"),
+    companyDocumentUpload.single("document"),
+    async (req: Req, res, next) => {
+      try {
+        if (!req.file)
+          return fail(res, 400, "DOCUMENT_REQUIRED", "Choose a company document to upload.");
+        if (!allowedDocumentTypes.has(req.file.mimetype))
+          return fail(res, 415, "DOCUMENT_TYPE_INVALID", "Upload a PDF, JPG, PNG, DOC, or DOCX file.");
+        const body = z.object({
+          category: z.string().trim().min(2).max(100),
+          title: z.string().trim().min(2).max(200),
+        }).parse(req.body);
+        const id = crypto.randomUUID();
+        const extension = path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, "");
+        const storageName = `${id}${extension}`;
+        const companyDirectory = path.join(companyDocumentStorage, req.auth!.companyId);
+        await mkdir(companyDirectory, { recursive: true });
+        await writeFile(path.join(companyDirectory, storageName), req.file.buffer, { flag: "wx" });
+        const objectKey = `${req.auth!.companyId}/${storageName}`;
+        const item = await prisma.companyDocument.create({
+          data: {
+            id,
+            companyId: req.auth!.companyId,
+            title: body.title,
+            category: body.category,
+            fileSize: `${req.file.size}`,
+            fileType: req.file.mimetype,
+            downloadUrl: `/api/v1/operations/company-documents/${id}/file`,
+            objectKey,
+            fileName: req.file.originalname.slice(0, 255),
+            mimeType: req.file.mimetype,
+            sizeBytes: req.file.size,
+          },
+        });
+        await audit(req, "UPLOAD_COMPANY_DOCUMENT", "DOCUMENT", `Company document ${item.id} uploaded.`);
+        return ok(res, item, 201);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+  router.get(
+    "/operations/company-documents/:id/file",
+    async (req: Req, res, next) => {
+      try {
+        const document = await prisma.companyDocument.findFirst({
+          where: { id: String(req.params.id), companyId: req.auth!.companyId },
+        });
+        if (!document)
+          return fail(res, 404, "DOCUMENT_NOT_FOUND", "Company document was not found.");
+        if (!document.objectKey || !document.fileName || !document.mimeType)
+          return fail(res, 409, "DOCUMENT_FILE_UNAVAILABLE", "This legacy record contains a URL only and has no uploaded file.");
+        const [companyId, storageName] = document.objectKey.split("/");
+        if (companyId !== req.auth!.companyId || !storageName || storageName !== path.basename(storageName))
+          return fail(res, 400, "DOCUMENT_KEY_INVALID", "Document storage reference is invalid.");
+        const contents = await readFile(path.join(companyDocumentStorage, companyId, storageName));
+        res.setHeader("Content-Type", document.mimeType);
+        res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
+        return res.send(contents);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          return fail(res, 404, "DOCUMENT_FILE_NOT_FOUND", "The stored company document file was not found.");
         next(error);
       }
     },

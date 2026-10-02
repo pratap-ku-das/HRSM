@@ -1,5 +1,7 @@
 package com.orbithr.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
@@ -28,6 +30,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,7 +69,7 @@ private fun AttendanceDto.workedTime(): String {
 }
 
 @Composable
-private fun OrbitListItem(
+fun OrbitListItem(
     headline: @Composable () -> Unit,
     supporting: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -96,7 +99,7 @@ private fun OrbitListItem(
 }
 
 @Composable
-private fun Page(
+fun Page(
     eyebrow: String,
     title: String,
     subtitle: String? = null,
@@ -110,7 +113,7 @@ private fun Page(
 }
 
 @Composable
-private fun <T> StateBody(state: LoadState<T>, retry: () -> Unit, body: @Composable (T) -> Unit) {
+fun <T> StateBody(state: LoadState<T>, retry: () -> Unit, body: @Composable (T) -> Unit) {
     when {
         state.loading && state.data == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -282,6 +285,7 @@ private fun QuickAction(icon: ImageVector, label: String, color: Color, onClick:
 @Composable
 fun AttendanceScreen(verifyAttendance: (String, (AttendanceVerificationResult) -> Unit) -> Unit, vm: AttendanceViewModel = hiltViewModel()) {
     val state by vm.state.collectAsState()
+    val tracking by vm.tracking.collectAsState()
     var confirmation by remember { mutableStateOf<String?>(null) }
     var proof by remember { mutableStateOf<AttendanceVerificationProof?>(null) }
     var verificationInProgress by remember { mutableStateOf(false) }
@@ -291,7 +295,7 @@ fun AttendanceScreen(verifyAttendance: (String, (AttendanceVerificationResult) -
     val todayRecord = state.data.orEmpty().firstOrNull { it.date.take(10) == today }
     val hasClockedIn = todayRecord?.clockInTime != null
     val hasClockedOut = todayRecord?.clockOutTime != null
-    val canClockIn = !state.loading && !hasClockedIn
+    val canClockIn = !state.loading && (!hasClockedIn || hasClockedOut)
     val canClockOut = !state.loading && hasClockedIn && !hasClockedOut
     val canVerify = canClockIn || canClockOut
     val nextAction = if (canClockOut) "CLOCK_OUT" else "CLOCK_IN"
@@ -304,8 +308,25 @@ fun AttendanceScreen(verifyAttendance: (String, (AttendanceVerificationResult) -
         }
     }
 
+    val pendingOfflineCount by vm.pendingOfflineCount.collectAsState()
+
     Page("SECURE ATTENDANCE", "Your time, verified", "Face + GPS protected", action = { OrbitIconButton(Icons.Outlined.Refresh, "Refresh", vm::refresh) }) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+            if (pendingOfflineCount > 0) {
+                item {
+                    Surface(shape = RoundedCornerShape(16.dp), color = OrbitAmber.copy(alpha = .12f)) {
+                        Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CloudQueue, null, tint = OrbitAmber)
+                            Spacer(Modifier.width(9.dp))
+                            Column {
+                                Text("$pendingOfflineCount offline ${if (pendingOfflineCount == 1) "punch" else "punches"} queued", fontWeight = FontWeight.Bold)
+                                Text("Saved securely on this phone. Syncs automatically as soon as internet reconnects.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+                            }
+                        }
+                    }
+                }
+            }
+            item{Surface(shape=RoundedCornerShape(16.dp),color=if(tracking?.enabled==true)OrbitAmber.copy(alpha=.12f)else Color.White){Row(Modifier.fillMaxWidth().padding(13.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Outlined.Route,null,tint=if(tracking?.enabled==true)OrbitAmber else OrbitMuted);Spacer(Modifier.width(9.dp));Column{Text(if(tracking?.active==true)"Workday route tracking is active" else if(tracking?.enabled==true)"Workday route tracking is enabled" else "Workday route tracking is off",fontWeight=FontWeight.Bold);Text(if(tracking?.active==true)"A persistent notification remains until clock-out." else "Tracking can run only between clock-in and clock-out.",style=MaterialTheme.typography.bodySmall,color=OrbitMuted)}}}}
             state.error?.let { message -> item {
                 Surface(shape = RoundedCornerShape(16.dp), color = OrbitRose.copy(alpha = .1f)) {
                     Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -363,13 +384,13 @@ fun AttendanceScreen(verifyAttendance: (String, (AttendanceVerificationResult) -
                 ) {
                     if (verificationInProgress) CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp) else Icon(Icons.Outlined.CenterFocusStrong, null)
                     Spacer(Modifier.width(9.dp))
-                    Text(if (hasClockedOut) "Attendance completed for today" else if (verificationInProgress) "Matching employee face securely…" else if (proof != null) "Verified — ready to ${if (nextAction == "CLOCK_IN") "clock in" else "clock out"}" else "Verify face & location for ${if (nextAction == "CLOCK_IN") "clock-in" else "clock-out"}")
+                    Text(if (verificationInProgress) "Matching employee face securely…" else if (proof != null) "Verified — ready to ${if (nextAction == "CLOCK_IN") (if (hasClockedOut) "clock in again" else "clock in") else "clock out"}" else if (hasClockedIn && !hasClockedOut) "Verify face & location for clock-out" else if (hasClockedOut) "Verify face & location to clock in again" else "Verify face & location for clock-in")
                 }
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                     Button(onClick = { confirmation = "CLOCK_IN" }, enabled = proof?.action == "CLOCK_IN" && canClockIn, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = OrbitInk)) {
-                        Icon(Icons.AutoMirrored.Outlined.Login, null); Spacer(Modifier.width(7.dp)); Text(if (hasClockedIn) "Clocked in" else "Clock in")
+                        Icon(Icons.AutoMirrored.Outlined.Login, null); Spacer(Modifier.width(7.dp)); Text(if (hasClockedIn && !hasClockedOut) "Clocked in" else if (hasClockedOut) "Clock in again" else "Clock in")
                     }
                     OutlinedButton(onClick = { confirmation = "CLOCK_OUT" }, enabled = proof?.action == "CLOCK_OUT" && canClockOut, modifier = Modifier.weight(1f).height(54.dp), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, OrbitInk)) {
                         Icon(Icons.AutoMirrored.Outlined.Logout, null); Spacer(Modifier.width(7.dp)); Text(if (hasClockedOut) "Clocked out" else "Clock out")
@@ -435,7 +456,14 @@ private fun AttendanceHistoryCard(record: AttendanceDto) {
                 Text(record.workedTime(), style = MaterialTheme.typography.labelMedium, color = OrbitInk)
             }
         }
-        if (record.faceAuthVerified) {
+        if (record.status == "PENDING_SYNC") {
+            Spacer(Modifier.height(11.dp)); HorizontalDivider(color = Color(0xFFEEEFF5)); Spacer(Modifier.height(9.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.CloudQueue, null, tint = OrbitAmber, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp))
+                Text("Queued offline · Syncs automatically", style = MaterialTheme.typography.bodySmall, color = OrbitAmber)
+                Spacer(Modifier.weight(1f)); Text(record.source.replace('_', ' '), style = MaterialTheme.typography.labelMedium, color = OrbitMuted)
+            }
+        } else if (record.faceAuthVerified) {
             Spacer(Modifier.height(11.dp)); HorizontalDivider(color = Color(0xFFEEEFF5)); Spacer(Modifier.height(9.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.VerifiedUser, null, tint = OrbitMint, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp))
@@ -670,7 +698,7 @@ private fun ExpenseDialog(dismiss: () -> Unit, submit: (SubmitExpenseRequest) ->
 }
 
 @Composable
-fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit, payroll:()->Unit) {
+fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit, payroll:()->Unit, profile:()->Unit, company:()->Unit, security:()->Unit, operations:()->Unit, settings:()->Unit) {
     Page(me.user.mobileWorkspaceTitle(), "More from OrbitHR", "Profile and permitted tools") {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
@@ -686,6 +714,12 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
                     }
                 }
             }
+            item { OrbitSectionTitle("My account", "Native account and company controls") }
+            item { MoreAction(Icons.Outlined.Person, "Profile", "Personal and employment information", OrbitCyan, profile) }
+            item { MoreAction(Icons.Outlined.Business, "Company", "Your organization details", OrbitViolet, company) }
+            item { MoreAction(Icons.Outlined.Security, "Security", "MFA, sessions and login history", OrbitMint, security) }
+            item { MoreAction(Icons.Outlined.Domain, "Company workspace", "Documents, holidays, news, assets and audit", OrbitAmber, operations) }
+            if(me.user.hasPermission("company.manage"))item{MoreAction(Icons.Outlined.Settings,"Workspace settings","Legal registration, business hours and policy defaults",OrbitViolet,settings)}
             item { OrbitSectionTitle("Work tools", "Everything else in one place") }
             item { MoreAction(Icons.AutoMirrored.Outlined.ReceiptLong, "Expenses", "Submit and track claims", OrbitAmber, expenses) }
             item { MoreAction(Icons.Outlined.EditCalendar, "Attendance requests", "Regularization, WFH, duty, travel and overtime", OrbitViolet, attendanceRequests) }
@@ -756,11 +790,12 @@ fun MobileWorkspaceScreen(back:()->Unit,vm:MobileWorkspaceViewModel=hiltViewMode
 
 @Composable
 fun EmployeeHubScreen(back:()->Unit,vm:MobileWorkspaceViewModel=hiltViewModel()){
-    val state by vm.state.collectAsState();var tab by remember{mutableStateOf("DOCUMENTS")};var showRequest by remember{mutableStateOf(false)}
+    val state by vm.state.collectAsState();val opened by vm.opened.collectAsState();val context=LocalContext.current;var tab by remember{mutableStateOf("DOCUMENTS")};var showRequest by remember{mutableStateOf(false)}
+    LaunchedEffect(opened){opened?.let{document->runCatching{context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(document.uri)).apply{setDataAndType(Uri.parse(document.uri),document.mimeType);addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)})};vm.consumeOpened()}}
     Page("MY WORKSPACE","Employee self service","Documents, assets, goals, reviews and requests",action={Row{OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack,"Back",back);Spacer(Modifier.width(6.dp));OrbitIconButton(Icons.Outlined.Add,"New request"){showRequest=true}}}){
         LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){items(listOf("DOCUMENTS","ASSETS","GOALS","REVIEWS","REQUESTS")){value->FilterChip(selected=tab==value,onClick={tab=value},label={Text(value)})}}
         Spacer(Modifier.height(10.dp));StateBody(state,vm::refresh){data->LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),contentPadding=PaddingValues(bottom=20.dp)){when(tab){
-            "DOCUMENTS"->items(data.documents,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.documentType} · ${item.fileName}")},leading={Icon(Icons.Outlined.Description,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.verificationStatus,orbitStatusColor(item.verificationStatus))})}
+                "DOCUMENTS"->items(data.documents,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.documentType} · ${item.fileName}")},leading={Icon(Icons.Outlined.Description,null,tint=OrbitViolet)},trailing={OrbitStatusBadge(item.verificationStatus,orbitStatusColor(item.verificationStatus))},onClick={vm.openDocument(item.id)})}
             "ASSETS"->items(data.assets,key={it.id}){item->OrbitListItem(headline={Text(item.name,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.serialNumber}\n${item.condition}")},leading={Icon(Icons.Outlined.Devices,null,tint=OrbitCyan)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
             "GOALS"->items(data.goals,key={it.id}){item->OrbitListItem(headline={Text(item.title,fontWeight=FontWeight.Bold)},supporting={Text("${item.category} · ${item.progress.toInt()}% · due ${item.targetDate.take(10)}")},leading={Icon(Icons.Outlined.TrackChanges,null,tint=OrbitRose)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
             "REVIEWS"->items(data.reviews,key={it.id}){item->OrbitListItem(headline={Text(item.cycle.name,fontWeight=FontWeight.Bold)},supporting={Text("Overall ${item.overallRating?:"—"} · Goals ${item.goalRating?:"—"} · Skills ${item.competencyRating?:"—"}")},leading={Icon(Icons.Outlined.StarRate,null,tint=OrbitAmber)},trailing={OrbitStatusBadge(item.status,orbitStatusColor(item.status))})}
@@ -777,8 +812,10 @@ fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel =
     val state by vm.state.collectAsState()
     val organization by vm.organization.collectAsState()
     val onboarding by vm.onboarding.collectAsState()
+    val mutationError by vm.mutationError.collectAsState()
     var search by remember { mutableStateOf("") }
     var showOnboarding by remember { mutableStateOf(false) }
+    var selectedEmployee by remember { mutableStateOf<EmployeeDto?>(null) }
     LaunchedEffect(onboarding.data?.employee?.id) { if (onboarding.data != null) showOnboarding = false }
     Page("PEOPLE", "Employee directory", "Your connected workforce", action = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OrbitIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", back); if (canManage) OrbitIconButton(Icons.Outlined.PersonAdd, "Onboard employee") { vm.clearOnboardingResult(); showOnboarding = true } } }) {
         onboarding.data?.let { result ->
@@ -787,6 +824,7 @@ fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel =
             }
             Spacer(Modifier.height(10.dp))
         }
+        mutationError?.let { Text(it, color = OrbitRose, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(8.dp)) }
         OutlinedTextField(search, { search = it; vm.search(it.takeIf(String::isNotBlank)) }, Modifier.fillMaxWidth(), label = { Text("Search people") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, shape = RoundedCornerShape(17.dp), singleLine = true)
         Spacer(Modifier.height(12.dp))
         StateBody(state, { vm.search(search) }) { employees -> LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
@@ -795,6 +833,7 @@ fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel =
                 supporting = { Text("${employee.employeeCode} · ${employee.designation?.title ?: "No designation"}") },
                 leading = { Box(Modifier.size(42.dp).background(OrbitViolet.copy(alpha = .1f), CircleShape), contentAlignment = Alignment.Center) { Text(employee.firstName.firstOrNull()?.toString().orEmpty() + employee.lastName.firstOrNull()?.toString().orEmpty(), color = OrbitViolet, fontWeight = FontWeight.Bold) } },
                 trailing = { OrbitStatusBadge(employee.status, orbitStatusColor(employee.status)) },
+                onClick = if (canManage) ({ selectedEmployee = employee }) else null,
             ) }
         } }
     }
@@ -804,11 +843,53 @@ fun EmployeeScreen(back: () -> Unit, canManage: Boolean, vm: EmployeeViewModel =
         dismiss = { showOnboarding = false },
         retryOrganization = vm::loadOrganization,
     ) { vm.onboardStaged(it) }
+    selectedEmployee?.let { employee ->
+        EmployeeEditDialog(
+            employee = employee,
+            organization = organization,
+            dismiss = { selectedEmployee = null },
+            save = { vm.update(employee.id, it); selectedEmployee = null },
+            lifecycle = { vm.lifecycle(employee.id, it); selectedEmployee = null },
+            delete = { vm.delete(employee.id); selectedEmployee = null },
+        )
+    }
 }
 
+@Composable
+private fun EmployeeEditDialog(employee:EmployeeDto,organization:LoadState<OrganizationOptions>,dismiss:()->Unit,save:(UpdateEmployeeRequest)->Unit,lifecycle:(EmployeeLifecycleRequest)->Unit,delete:()->Unit){
+    var code by remember{mutableStateOf(employee.employeeCode)};var first by remember{mutableStateOf(employee.firstName)};var last by remember{mutableStateOf(employee.lastName)}
+    var email by remember{mutableStateOf(employee.email)};var phone by remember{mutableStateOf(employee.phone.orEmpty())};var location by remember{mutableStateOf(employee.workLocation.orEmpty())}
+    var gpsTrackingEnabled by remember{mutableStateOf(employee.workdayGpsTrackingEnabled)}
+    var joining by remember{mutableStateOf(employee.dateOfJoining?.take(10)?:LocalDate.now().toString())};var employmentType by remember{mutableStateOf(employee.employmentType)}
+    var departmentId by remember{mutableStateOf(employee.departmentId?:employee.department?.id.orEmpty())};var designationId by remember{mutableStateOf(employee.designationId?:employee.designation?.id.orEmpty())}
+    var status by remember{mutableStateOf(employee.status)};var lastDay by remember{mutableStateOf("")};var deleteConfirm by remember{mutableStateOf(false)}
+    val departments=organization.data?.departments.orEmpty();val designations=organization.data?.designations.orEmpty().filter{it.departmentId==departmentId}
+    AlertDialog(onDismissRequest=dismiss,title={Text("Edit complete employee")},text={
+        LazyColumn(Modifier.heightIn(max=560.dp),verticalArrangement=Arrangement.spacedBy(9.dp)){
+            item{Text("Profile and employment",fontWeight=FontWeight.Bold)}
+            item{OutlinedTextField(code,{code=it},Modifier.fillMaxWidth(),label={Text("Employee ID")},singleLine=true)}
+            item{OutlinedTextField(first,{first=it},Modifier.fillMaxWidth(),label={Text("First name")},singleLine=true)}
+            item{OutlinedTextField(last,{last=it},Modifier.fillMaxWidth(),label={Text("Last name")},singleLine=true)}
+            item{OutlinedTextField(email,{email=it},Modifier.fillMaxWidth(),label={Text("Work email")},singleLine=true)}
+            item{OutlinedTextField(phone,{phone=it},Modifier.fillMaxWidth(),label={Text("Phone")},singleLine=true)}
+            item{OutlinedTextField(location,{location=it},Modifier.fillMaxWidth(),label={Text("Work location")},singleLine=true)}
+            item{Surface(shape=RoundedCornerShape(16.dp),color=OrbitViolet.copy(alpha=.08f)){Row(Modifier.fillMaxWidth().padding(13.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text("Workday GPS route",fontWeight=FontWeight.Bold);Text("Only from clock-in until clock-out",style=MaterialTheme.typography.bodySmall,color=OrbitMuted)};Switch(checked=gpsTrackingEnabled,onCheckedChange={gpsTrackingEnabled=it})}}}
+            item{OutlinedTextField(joining,{joining=it},Modifier.fillMaxWidth(),label={Text("Joining date YYYY-MM-DD")},singleLine=true)}
+            item{Text("Employment type",style=MaterialTheme.typography.labelMedium);LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(listOf("FULL_TIME","PART_TIME","CONTRACT","INTERN","CONSULTANT")){value->FilterChip(selected=employmentType==value,onClick={employmentType=value},label={Text(value.replace('_',' '))})}}}
+            item{Text("Department",style=MaterialTheme.typography.labelMedium);LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(departments,key={it.id}){value->FilterChip(selected=departmentId==value.id,onClick={departmentId=value.id;designationId=""},label={Text(value.name)})}}}
+            item{Text("Designation",style=MaterialTheme.typography.labelMedium);LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(designations,key={it.id}){value->FilterChip(selected=designationId==value.id,onClick={designationId=value.id},label={Text(value.title)})}}}
+            item{Text("Lifecycle status",style=MaterialTheme.typography.labelMedium);LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)){items(listOf("ACTIVE","ON_PROBATION","ON_LEAVE","RESIGNED","TERMINATED")){value->FilterChip(selected=status==value,onClick={status=value},label={Text(value.replace('_',' '))})}}}
+            if(status=="RESIGNED"||status=="TERMINATED")item{OutlinedTextField(lastDay,{lastDay=it},Modifier.fillMaxWidth(),label={Text("Last working day YYYY-MM-DD")},singleLine=true)}
+            item{OutlinedButton(onClick={lifecycle(EmployeeLifecycleRequest(status,lastWorkingDay=lastDay.takeIf{it.isNotBlank()}))},enabled=status!=employee.status&&(status!="RESIGNED"&&status!="TERMINATED"||runCatching{LocalDate.parse(lastDay)}.isSuccess)){Text("Update lifecycle")}}
+            item{OutlinedButton(onClick={if(deleteConfirm)delete() else deleteConfirm=true},colors=ButtonDefaults.outlinedButtonColors(contentColor=OrbitRose)){Text(if(deleteConfirm)"Tap again to permanently delete" else "Delete employee")}}
+        }
+    },confirmButton={Button(onClick={save(UpdateEmployeeRequest(code.trim(),first.trim(),last.trim(),email.trim(),phone.trim().takeIf{it.isNotBlank()},departmentId,designationId,dateOfJoining=joining,employmentType=employmentType,workLocation=location.trim().takeIf{it.isNotBlank()},workdayGpsTrackingEnabled=gpsTrackingEnabled))},enabled=code.length>=2&&first.isNotBlank()&&last.isNotBlank()&&email.contains('@')&&departmentId.isNotBlank()&&designationId.isNotBlank()&&runCatching{LocalDate.parse(joining)}.isSuccess){Text("Save changes")}},dismissButton={TextButton(onClick=dismiss){Text("Cancel")}})
+}
+
+/*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OnboardWizardDialog(
+private fun LegacyOnboardWizardDialog(
     organization: LoadState<OrganizationOptions>,
     onboarding: LoadState<OnboardingDto>,
     dismiss: () -> Unit,
@@ -839,6 +920,7 @@ private fun OnboardWizardDialog(
     },confirmButton={Button(enabled=!onboarding.loading&&when(step){0->personalReady;1->employmentReady;else->true},onClick={if(step<2)step++ else submit(MobileOnboardingRequest(PersonalOnboardingSection(firstName=first,lastName=last,gender=gender,dateOfBirth=dob,personalEmail=personalEmail,mobileNumber=mobile,currentAddress=address,permanentAddress=address,city=city,state=region,pinCode=pin,emergencyContactName=emergencyName,emergencyContactNumber=emergencyPhone,emergencyContactRelationship=emergencyRelation),SalaryOnboardingSection(structureId,annualCtc.toDouble(),LocalDate.now().toString()),additional=AdditionalOnboardingSection(code,workEmail,departmentId,designationId,dateOfJoining=LocalDate.now().toString())))} ){Text(if(onboarding.loading)"Creating…" else if(step<2)"Continue" else "Create & invite")}},dismissButton={TextButton(onClick={if(step>0)step-- else dismiss()}){Text(if(step>0)"Back" else "Cancel")}})
 }
 
+*/
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OnboardDialog(

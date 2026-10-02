@@ -344,6 +344,7 @@ model Company {
   departments              Department[]
   designations             Designation[]
   attendanceRecords        AttendanceRecord[]
+  attendanceLocationPoints AttendanceLocationPoint[]
   leaveTypes               LeaveType[]
   leaveRequests            LeaveRequest[]
   payrollRuns              PayrollRun[]
@@ -520,33 +521,34 @@ model IdempotencyRecord {
 // EMPLOYEE PROFILE (360-DEGREE LIFECYCLE)
 // --------------------------------------------------------
 model Employee {
-  id                 String         @id @default(uuid())
-  companyId          String
-  userId             String?        @unique
-  employeeCode       String
-  firstName          String
-  lastName           String
-  email              String
-  phone              String?
-  avatarUrl          String?
-  dateOfBirth        DateTime?      @db.Date
-  gender             String?
-  departmentId       String
-  designationId      String
-  reportingManagerId String?
-  branchId           String?
-  workLocationId     String?
-  teamId             String?
-  costCenterId       String?
-  employeeGradeId    String?
-  dateOfJoining      DateTime       @db.Date
-  confirmationDate   DateTime?      @db.Date
-  probationEndDate   DateTime?      @db.Date
-  resignationDate    DateTime?      @db.Date
-  lastWorkingDay     DateTime?      @db.Date
-  employmentType     EmploymentType @default(FULL_TIME)
-  status             EmployeeStatus @default(ACTIVE)
-  workLocation       String?
+  id                        String         @id @default(uuid())
+  companyId                 String
+  userId                    String?        @unique
+  employeeCode              String
+  firstName                 String
+  lastName                  String
+  email                     String
+  phone                     String?
+  avatarUrl                 String?
+  dateOfBirth               DateTime?      @db.Date
+  gender                    String?
+  departmentId              String
+  designationId             String
+  reportingManagerId        String?
+  branchId                  String?
+  workLocationId            String?
+  teamId                    String?
+  costCenterId              String?
+  employeeGradeId           String?
+  dateOfJoining             DateTime       @db.Date
+  confirmationDate          DateTime?      @db.Date
+  probationEndDate          DateTime?      @db.Date
+  resignationDate           DateTime?      @db.Date
+  lastWorkingDay            DateTime?      @db.Date
+  employmentType            EmploymentType @default(FULL_TIME)
+  status                    EmployeeStatus @default(ACTIVE)
+  workLocation              String?
+  workdayGpsTrackingEnabled Boolean        @default(false)
 
   // Compensation breakdown
   basicSalary   Float  @default(0)
@@ -571,38 +573,39 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company            Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user               User?                     @relation(fields: [userId], references: [id])
-  department         Department                @relation(fields: [departmentId], references: [id])
-  designation        Designation               @relation(fields: [designationId], references: [id])
-  attendanceRecords  AttendanceRecord[]
-  leaveRequests      LeaveRequest[]
-  payslips           Payslip[]
-  goals              PerformanceGoal[]
-  assets             Asset[]
-  expenses           ExpenseClaim[]
-  faceEnrollment     FaceEnrollment?
-  faceSessions       FaceVerificationSession[]
-  branch             Branch?                   @relation(fields: [branchId], references: [id])
-  location           WorkLocation?             @relation(fields: [workLocationId], references: [id])
-  team               Team?                     @relation(fields: [teamId], references: [id])
-  costCenter         CostCenter?               @relation(fields: [costCenterId], references: [id])
-  employeeGrade      EmployeeGrade?            @relation(fields: [employeeGradeId], references: [id])
-  reportingManager   Employee?                 @relation("EmployeeReportingLine", fields: [reportingManagerId], references: [id])
-  directReports      Employee[]                @relation("EmployeeReportingLine")
-  shiftAssignments   ShiftAssignment[]
-  breakSessions      BreakSession[]
-  attendanceRequests AttendanceRequest[]
-  salaryRevisions    EmployeeSalaryRevision[]
-  employeeLoans      EmployeeLoan[]
-  documents          EmployeeDocument[]
-  performanceReviews PerformanceReview[]
-  serviceRequests    EmployeeServiceRequest[]
-  payrollAdjustments PayrollAdjustment[]
-  taxDeclarations    TaxDeclaration[]
-  form16Documents    Form16Document[]
-  settlements        FullFinalSettlement[]
-  onboarding         EmployeeOnboarding?
+  company                  Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user                     User?                     @relation(fields: [userId], references: [id])
+  department               Department                @relation(fields: [departmentId], references: [id])
+  designation              Designation               @relation(fields: [designationId], references: [id])
+  attendanceRecords        AttendanceRecord[]
+  leaveRequests            LeaveRequest[]
+  payslips                 Payslip[]
+  goals                    PerformanceGoal[]
+  assets                   Asset[]
+  expenses                 ExpenseClaim[]
+  faceEnrollment           FaceEnrollment?
+  faceSessions             FaceVerificationSession[]
+  branch                   Branch?                   @relation(fields: [branchId], references: [id])
+  location                 WorkLocation?             @relation(fields: [workLocationId], references: [id])
+  team                     Team?                     @relation(fields: [teamId], references: [id])
+  costCenter               CostCenter?               @relation(fields: [costCenterId], references: [id])
+  employeeGrade            EmployeeGrade?            @relation(fields: [employeeGradeId], references: [id])
+  reportingManager         Employee?                 @relation("EmployeeReportingLine", fields: [reportingManagerId], references: [id])
+  directReports            Employee[]                @relation("EmployeeReportingLine")
+  shiftAssignments         ShiftAssignment[]
+  breakSessions            BreakSession[]
+  attendanceRequests       AttendanceRequest[]
+  salaryRevisions          EmployeeSalaryRevision[]
+  employeeLoans            EmployeeLoan[]
+  documents                EmployeeDocument[]
+  performanceReviews       PerformanceReview[]
+  serviceRequests          EmployeeServiceRequest[]
+  payrollAdjustments       PayrollAdjustment[]
+  taxDeclarations          TaxDeclaration[]
+  form16Documents          Form16Document[]
+  settlements              FullFinalSettlement[]
+  onboarding               EmployeeOnboarding?
+  attendanceLocationPoints AttendanceLocationPoint[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId])
@@ -1047,13 +1050,37 @@ model AttendanceRecord {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  company    Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee   Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  evaluation AttendanceEvaluation?
+  company        Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee       Employee                  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  evaluation     AttendanceEvaluation?
+  locationPoints AttendanceLocationPoint[]
 
   @@unique([employeeId, date])
   @@index([companyId, date])
 }
+
+model AttendanceLocationPoint {
+  id                   String   @id
+  companyId            String
+  employeeId           String
+  attendanceRecordId   String
+  latitude             Float
+  longitude            Float
+  accuracyMeters       Float
+  speedMetersPerSecond Float?
+  bearingDegrees       Float?
+  capturedAt           DateTime
+  createdAt            DateTime @default(now())
+
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee         Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, capturedAt])
+  @@index([employeeId, capturedAt])
+  @@index([attendanceRecordId, capturedAt])
+}
+
 
 model ShiftTemplate {
   id              String             @id @default(uuid())
@@ -1629,6 +1656,8 @@ model PushDevice {
   token      String
   platform   String   @default("ANDROID")
   deviceName String?
+  appVersionCode Int?
+  appVersionName String?
   active     Boolean  @default(true)
   lastSeenAt DateTime @default(now())
   createdAt  DateTime @default(now())
@@ -1826,6 +1855,10 @@ model CompanyDocument {
   fileSize    String
   fileType    String
   downloadUrl String
+  objectKey   String?
+  fileName    String?
+  mimeType    String?
+  sizeBytes   Int?
   uploadedAt  DateTime @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2029,20 +2062,41 @@ model AuditLog {
 }
 
 model CompanySettings {
-  id                           String  @id @default(uuid())
-  companyId                    String  @unique
+  id                           String    @id @default(uuid())
+  companyId                    String    @unique
   companyName                  String
   legalEntityName              String
   taxRegistrationNumber        String
-  currency                     String  @default("INR")
-  currencySymbol               String  @default("₹")
-  timezone                     String  @default("UTC")
-  workDays                     Int[]   @default([1, 2, 3, 4, 5])
-  businessHoursStart           String  @default("09:00")
-  businessHoursEnd             String  @default("18:00")
-  enableAutomaticOvertime      Boolean @default(true)
-  enableAuditLogging           Boolean @default(true)
-  defaultProbationPeriodMonths Int     @default(3)
+  companyType                  String    @default("PRIVATE_LIMITED")
+  registrationNumber           String    @default("")
+  incorporationDate            DateTime? @db.Date
+  panNumber                    String    @default("")
+  tanNumber                    String    @default("")
+  udyamRegistrationNumber      String    @default("")
+  pfRegistrationNumber         String    @default("")
+  esiRegistrationNumber        String    @default("")
+  professionalTaxNumber        String    @default("")
+  labourLicenseNumber          String    @default("")
+  officialEmail                String    @default("")
+  officialPhone                String    @default("")
+  website                      String    @default("")
+  registeredAddress            String    @default("")
+  city                         String    @default("")
+  state                        String    @default("")
+  country                      String    @default("India")
+  postalCode                   String    @default("")
+  industry                     String    @default("")
+  companySize                  String    @default("")
+  financialYearStartMonth      Int       @default(4)
+  currency                     String    @default("INR")
+  currencySymbol               String    @default("₹")
+  timezone                     String    @default("UTC")
+  workDays                     Int[]     @default([1, 2, 3, 4, 5])
+  businessHoursStart           String    @default("09:00")
+  businessHoursEnd             String    @default("18:00")
+  enableAutomaticOvertime      Boolean   @default(true)
+  enableAuditLogging           Boolean   @default(true)
+  defaultProbationPeriodMonths Int       @default(3)
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }

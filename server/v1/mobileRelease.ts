@@ -1,13 +1,13 @@
 import { Router } from "express";
 
 export const androidRelease = Object.freeze({
-  versionCode: 14,
-  versionName: "1.1.9",
+  versionCode: 27,
+  versionName: "1.4.7",
   downloadUrl:
-    "https://hr.balajione.dev/downloads/orbithr-android.apk?v=1.1.9-14",
+    "https://hr.balajione.dev/downloads/OrbitHR.apk",
   releaseNotes:
-    "Staged employee onboarding and controlled payroll processing with attendance review, approval, payslip generation and publication.",
-  publishedAt: "2026-09-24",
+    "Attendance re-clock-in support, streamlined punch flow, single-row analytics, and optimized GPS workday route tracking.",
+  publishedAt: "2026-10-02",
 });
 
 export function createMobileReleaseRouter() {

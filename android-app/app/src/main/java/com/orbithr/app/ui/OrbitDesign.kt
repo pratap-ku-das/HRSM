@@ -119,7 +119,7 @@ fun OrbitStatusBadge(label: String, color: Color) {
 
 fun orbitStatusColor(status: String): Color = when (status.uppercase()) {
     "PRESENT", "APPROVED", "PAID", "PUBLISHED", "ACTIVE" -> OrbitMint
-    "LATE", "PENDING", "ON_PROBATION" -> OrbitAmber
+    "LATE", "PENDING", "PENDING_SYNC", "ON_PROBATION" -> OrbitAmber
     "ABSENT", "REJECTED", "FAILED" -> OrbitRose
     else -> OrbitViolet
 }

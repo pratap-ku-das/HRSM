@@ -76,6 +76,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       section: 'WORKFORCE'
     },
     {
+      id: 'employee-documents',
+      label: 'Employee Documents',
+      icon: FileText,
+      badge: null,
+      section: 'WORKFORCE'
+    },
+    {
       id: 'departments',
       label: 'Departments',
       icon: GitBranch,

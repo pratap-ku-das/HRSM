@@ -11,6 +11,7 @@ import { createV1Router } from './v1/api.js';
 import { ensureDefaultLeaveWorkflow } from './v1/workflows.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
 import { normalizeDatabaseUrl } from './databaseUrl.js';
+import { startNotificationWorkers } from './v1/pushNotifications.js';
 
 dotenv.config();
 
@@ -116,7 +117,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const settings = await prisma.companySettings.update({
       where: { companyId: user.companyId },
-      data: { currency: 'INR', currencySymbol: '₹', timezone: 'Asia/Kolkata (IST - UTC+5:30)' },
+      data: { currency: 'INR', currencySymbol: '₹', timezone: 'Asia/Kolkata' },
     });
 
     // Log login audit
@@ -185,7 +186,7 @@ app.post('/api/auth/register-company', async (req, res) => {
         taxRegistrationNumber: `GSTIN: 29AABCA${Math.floor(1000 + Math.random() * 9000)}F1Z8`,
         currency: 'INR',
         currencySymbol: '₹',
-        timezone: 'Asia/Kolkata (IST - UTC+5:30)',
+        timezone: 'Asia/Kolkata',
         workDays: [1, 2, 3, 4, 5],
         businessHoursStart: '09:30',
         businessHoursEnd: '18:30',
@@ -1237,6 +1238,7 @@ if (existsSync(path.join(distPath, 'index.html'))) {
 const startServer = async () => {
   try {
     await prisma.$connect();
+    const stopNotificationWorkers = startNotificationWorkers(prisma);
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`HRMS PostgreSQL backend running on port ${PORT}`);
     });
@@ -1245,6 +1247,7 @@ const startServer = async () => {
     const shutdown = (signal: string) => {
       if (shuttingDown) return;
       shuttingDown = true;
+      stopNotificationWorkers();
       console.log(`${signal} received; shutting down.`);
       server.close(async () => {
         await prisma.$disconnect();

@@ -46,6 +46,14 @@ const approverTypes = [
   "FINANCE",
 ] as const;
 
+function workflowResultNotification(instance: { subjectType: string; title: string }, approved: boolean) {
+  const result = approved ? "approved" : "rejected";
+  if (instance.subjectType === "LeaveRequest") return { eventKey: approved ? "LEAVE_APPROVED" : "LEAVE_REJECTED", title: `Leave request ${result}`, body: `Your leave request has been ${result}.`, actionUrl: "/leave" };
+  if (instance.subjectType === "ExpenseClaim") return { eventKey: approved ? "EXPENSE_APPROVED" : "EXPENSE_REJECTED", title: `Expense claim ${result}`, body: `Your expense claim has been ${result}.`, actionUrl: "/expenses" };
+  if (instance.subjectType === "EmployeeServiceRequest") return { eventKey: approved ? "SERVICE_REQUEST_APPROVED" : "SERVICE_REQUEST_REJECTED", title: `Service request ${result}`, body: `Your employee service request has been ${result}.`, actionUrl: "/workspace" };
+  return { eventKey: approved ? "WORKFLOW_APPROVED" : "WORKFLOW_REJECTED", title: `Request ${result}`, body: `${instance.title} has been ${result}.`, actionUrl: "/notifications" };
+}
+
 type WorkflowDb = PrismaClient | Prisma.TransactionClient;
 type WorkflowStepSeed = { stepId: string; sequence: number; status: 'PENDING' | 'WAITING'; approverUserIds: string[]; minimumApprovals: number; startedAt?: Date; dueAt?: Date };
 
@@ -821,6 +829,14 @@ export function createWorkflowRouter(
               }) as never,
             );
           await prisma.$transaction(operations);
+          const notice = workflowResultNotification(instance, false);
+          await emitNotification(prisma, {
+            companyId,
+            userId: instance.requesterUserId,
+            ...notice,
+            entityType: instance.subjectType,
+            entityId: instance.subjectId,
+          });
           return ok(res, { status: "REJECTED" });
         }
         const approvalPrincipal = actingForUserId || req.auth!.id;
@@ -931,6 +947,29 @@ export function createWorkflowRouter(
             );
         }
         await prisma.$transaction(operations);
+        if (nextStep) {
+          for (const userId of nextStep.approverUserIds) {
+            await emitNotification(prisma, {
+              companyId,
+              userId,
+              eventKey: "WORKFLOW_APPROVAL_REQUIRED",
+              title: "Approval required",
+              body: instance.title,
+              entityType: "WorkflowInstance",
+              entityId: instance.id,
+              actionUrl: "/approvals",
+            });
+          }
+        } else {
+          const notice = workflowResultNotification(instance, true);
+          await emitNotification(prisma, {
+            companyId,
+            userId: instance.requesterUserId,
+            ...notice,
+            entityType: instance.subjectType,
+            entityId: instance.subjectId,
+          });
+        }
         await audit(
           req,
           "APPROVE_WORKFLOW_STEP",

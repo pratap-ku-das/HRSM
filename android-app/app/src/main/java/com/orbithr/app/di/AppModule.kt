@@ -26,5 +26,8 @@ import javax.inject.Singleton
         val client = OkHttpClient.Builder().addInterceptor(interceptor).authenticator(authenticator).addInterceptor(logger).build()
         return Retrofit.Builder().baseUrl(BuildConfig.API_BASE_URL).client(client).addConverterFactory(json.asConverterFactory("application/json".toMediaType())).build().create(OrbitApi::class.java)
     }
-    @Provides @Singleton fun db(@ApplicationContext context: Context) = Room.databaseBuilder(context, OrbitDatabase::class.java, "orbithr-cache.db").fallbackToDestructiveMigration(false).build()
+    @Provides @Singleton fun db(@ApplicationContext context: Context) = Room.databaseBuilder(context, OrbitDatabase::class.java, "orbithr-cache.db")
+        .addMigrations(com.orbithr.app.core.database.MIGRATION_1_2)
+        .fallbackToDestructiveMigration(true)
+        .build()
 }

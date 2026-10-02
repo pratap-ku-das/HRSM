@@ -6,7 +6,7 @@ import { canAccessView } from '../../config/workspaceAccess';
 
 interface Props { isOpen: boolean; onClose: () => void; setActiveView: (view: string) => void; onOpenRoleSwitcher: () => void; }
 const navigation = [
-  ['dashboard', 'Dashboard'], ['my-attendance', 'My attendance'], ['my-leave', 'My leave'], ['my-pay', 'My pay'], ['my-expenses', 'My expenses'], ['employees', 'Employees'], ['departments', 'Departments'], ['attendance', 'Attendance'],
+  ['dashboard', 'Dashboard'], ['my-attendance', 'My attendance'], ['my-leave', 'My leave'], ['my-pay', 'My pay'], ['my-expenses', 'My expenses'], ['employees', 'Employees'], ['employee-documents', 'Employee Documents'], ['departments', 'Departments'], ['attendance', 'Attendance'],
   ['leaves', 'Leave administration'], ['payroll', 'Payroll'], ['recruitment', 'Recruitment'], ['performance', 'Performance'],
   ['assets', 'Assets'], ['documents', 'Documents'], ['expenses', 'Expenses'], ['approvals', 'Approval inbox'],
   ['governance', 'Reports & governance'], ['security-center', 'Security center'], ['settings', 'Workspace settings'],

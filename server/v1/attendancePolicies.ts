@@ -24,6 +24,43 @@ const day = (value: Date) =>
   new Date(
     Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
   );
+
+export async function reconcileMidnightAbsentMissingClockOut(prisma: PrismaClient, companyId?: string): Promise<number> {
+  try {
+    if (!prisma?.attendanceRecord?.updateMany) return 0;
+    const tz = 'Asia/Kolkata';
+    const localDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const today = new Date(`${localDateStr}T00:00:00.000Z`);
+
+    const whereClause: Record<string, unknown> = {
+      date: { lt: today },
+      clockInTime: { not: null },
+      clockOutTime: null,
+      status: { not: 'ABSENT' },
+    };
+    if (companyId) {
+      whereClause.companyId = companyId;
+    }
+
+    const result = await prisma.attendanceRecord.updateMany({
+      where: whereClause as never,
+      data: {
+        status: 'ABSENT',
+        correctionNote: 'Automatically marked absent: missed clock-out by 12:00 AM midnight.',
+      },
+    });
+    return result.count;
+  } catch (err) {
+    console.error('Failed to auto-reconcile midnight missing clock-outs:', err);
+    return 0;
+  }
+}
+
 export function createAttendancePolicyRouter(
   prisma: PrismaClient,
   authenticate: RequestHandler,

@@ -20,6 +20,7 @@ android-app/.gradle/
 android-app/gradle-user-home/
 .gradle-home/
 android-app/app/build/
+android-app/app/google-services.json
 dist
 dist-ssr
 # Environment Variables

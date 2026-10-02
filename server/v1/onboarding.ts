@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
+import multer from 'multer';
 import { z } from 'zod';
 import { createOpaqueToken, deliverOnboardingEmail } from './email.js';
 
@@ -35,7 +38,31 @@ const personalSchema = z.object({
   emergencyContactRelationship: z.string().trim().min(2).max(80),
 });
 
+const optionalEditDate = z.preprocess(
+  value => value === '' || value == null ? undefined : value,
+  z.coerce.date().optional(),
+);
+const personalEditSchema = personalSchema.partial().extend({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  gender: z.string().trim().max(30).optional(),
+  dateOfBirth: optionalEditDate,
+  personalEmail: z.union([z.literal(''), z.string().email()]).optional(),
+  mobileNumber: z.string().trim().max(30).optional(),
+  nationality: z.string().trim().max(80).optional(),
+  currentAddress: z.string().trim().max(1000).optional(),
+  permanentAddress: z.string().trim().max(1000).optional(),
+  city: z.string().trim().max(100).optional(),
+  state: z.string().trim().max(100).optional(),
+  country: z.string().trim().max(100).optional(),
+  pinCode: z.string().trim().max(20).optional(),
+  emergencyContactName: z.string().trim().max(160).optional(),
+  emergencyContactNumber: z.string().trim().max(30).optional(),
+  emergencyContactRelationship: z.string().trim().max(80).optional(),
+});
+
 const documentSchema = z.object({
+  id: uuid.optional(),
   documentType: z.enum(['AADHAAR','PAN','PASSPORT','DRIVING_LICENCE','VOTER_ID','ADDRESS_PROOF','EDUCATION_CERTIFICATE','EXPERIENCE_CERTIFICATE','BANK_DOCUMENT','JOINING_DOCUMENT','OTHER']),
   documentNumber: z.string().trim().max(120).optional(),
   title: z.string().trim().min(2).max(180),
@@ -70,6 +97,7 @@ const additionalSchema = z.object({
   reportingManagerId: uuid.optional(),
   employmentType: z.enum(['FULL_TIME','PART_TIME','CONTRACT','INTERN','CONSULTANT']).default('FULL_TIME'),
   workLocation: z.string().trim().max(120).optional(),
+  workdayGpsTrackingEnabled: z.boolean().default(false),
   workLocationId: uuid.optional(),
   branchId: uuid.optional(),
   teamId: uuid.optional(),
@@ -101,6 +129,20 @@ const sectionConfig = {
 
 export function createOnboardingRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
+  const documentUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 4 },
+  });
+  const documentStorageRoot = path.resolve(
+    process.env.DOCUMENT_STORAGE_DIR || 'storage/employee-documents',
+  );
+  const allowedDocumentTypes = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ]);
   const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ data, meta: { requestId: (res.req as Req).requestId } });
   const fail = (res: Response, status: number, code: string, message: string) => res.status(status).json({ error: { code, message }, meta: { requestId: (res.req as Req).requestId } });
   const manage: RequestHandler = (req: Req, res, next) => req.auth?.permissions.includes('employee.manage') ? next() : fail(res, 403, 'FORBIDDEN', 'Employee management permission is required.');
@@ -127,6 +169,64 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
       } }), 201);
     } catch (error) { next(error); }
   });
+
+  router.post(
+    '/employees/onboarding/document-upload',
+    documentUpload.single('document'),
+    async (req: Req, res, next) => {
+      try {
+        if (!req.file) return fail(res, 400, 'DOCUMENT_REQUIRED', 'Choose a document to upload.');
+        if (!allowedDocumentTypes.has(req.file.mimetype)) {
+          return fail(res, 415, 'DOCUMENT_TYPE_INVALID', 'Upload a PDF, JPG, PNG, DOC, or DOCX file.');
+        }
+        const extension = path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '');
+        const storageName = `${crypto.randomUUID()}${extension}`;
+        const companyDirectory = path.join(documentStorageRoot, req.auth!.companyId);
+        await mkdir(companyDirectory, { recursive: true });
+        await writeFile(path.join(companyDirectory, storageName), req.file.buffer, { flag: 'wx' });
+        const title = path.basename(req.file.originalname, path.extname(req.file.originalname)).trim() || 'Document';
+        return ok(res, {
+          documentType: 'OTHER',
+          title: title.length < 2 ? 'Document' : title.slice(0, 180),
+          objectKey: `${req.auth!.companyId}/${storageName}`,
+          fileName: req.file.originalname.slice(0, 255),
+          mimeType: req.file.mimetype,
+          sizeBytes: req.file.size,
+        }, 201);
+      } catch (error) { next(error); }
+    },
+  );
+
+  router.get(
+    '/employees/:employeeId/onboarding-documents/:documentId/file',
+    authenticate,
+    manage,
+    async (req: Req, res, next) => {
+      try {
+        const document = await prisma.employeeDocument.findFirst({
+          where: {
+            id: String(req.params.documentId),
+            employeeId: String(req.params.employeeId),
+            companyId: req.auth!.companyId,
+          },
+        });
+        if (!document) return fail(res, 404, 'DOCUMENT_NOT_FOUND', 'Document was not found.');
+        const [companyId, storageName] = document.objectKey.split('/');
+        if (companyId !== req.auth!.companyId || !storageName || storageName !== path.basename(storageName)) {
+          return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
+        }
+        const contents = await readFile(path.join(documentStorageRoot, companyId, storageName));
+        res.setHeader('Content-Type', document.mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
+        return res.send(contents);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return fail(res, 404, 'DOCUMENT_FILE_NOT_FOUND', 'The stored document file was not found.');
+        }
+        next(error);
+      }
+    },
+  );
 
   router.get('/employees/onboarding/:id', async (req: Req, res, next) => {
     try {
@@ -224,6 +324,7 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
           employmentType: additional.employmentType,
           status: additional.probationPeriodMonths > 0 ? 'ON_PROBATION' : 'ACTIVE',
           workLocation: additional.workLocation,
+          workdayGpsTrackingEnabled: additional.workdayGpsTrackingEnabled,
           bankName: additional.bankName,
           accountNumber: additional.accountNumber,
           routingOrIfsc: additional.ifsc,
@@ -280,6 +381,181 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
       });
       void deliverOnboardingEmail(prisma, result.emailDelivery.id, activation.token);
       return ok(res, result, 201);
+    } catch (error) { next(error); }
+  });
+
+  router.get('/employees/:employeeId/onboarding-record', authenticate, manage, async (req: Req, res, next) => {
+    try {
+      const companyId = req.auth!.companyId;
+      const employee = await prisma.employee.findFirst({
+        where: { id: String(req.params.employeeId), companyId },
+        include: {
+          onboarding: true,
+          documents: { orderBy: { createdAt: 'asc' } },
+          salaryRevisions: { where: { status: 'APPROVED' }, orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }], take: 1 },
+          faceEnrollment: true,
+        },
+      });
+      if (!employee) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found.');
+      const storedPersonal = (employee.onboarding?.personalDetails || {}) as Record<string, unknown>;
+      const storedAdditional = (employee.onboarding?.additionalDetails || {}) as Record<string, unknown>;
+      const storedFace = (employee.onboarding?.faceDetails || {}) as Record<string, unknown>;
+      const salary = employee.salaryRevisions[0];
+      const isoDate = (value?: Date | null) => value ? value.toISOString().slice(0, 10) : '';
+      return ok(res, {
+        id: employee.onboarding?.id || `employee:${employee.id}`,
+        companyId,
+        employeeCode: employee.employeeCode,
+        workEmail: employee.email,
+        status: 'ACTIVE',
+        progress: 100,
+        createdEmployeeId: employee.id,
+        personalDetails: {
+          ...storedPersonal,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          dateOfBirth: isoDate(employee.dateOfBirth),
+          gender: employee.gender || '',
+          mobileNumber: employee.phone || '',
+          emergencyContactName: employee.emergencyName || '',
+          emergencyContactNumber: employee.emergencyPhone || '',
+          emergencyContactRelationship: employee.emergencyRelation || '',
+        },
+        documentDetails: { documents: employee.documents.map(document => ({
+          id: document.id,
+          documentType: document.documentType,
+          title: document.title,
+          objectKey: document.objectKey,
+          fileName: document.fileName,
+          mimeType: document.mimeType,
+          sizeBytes: document.sizeBytes,
+          issueDate: isoDate(document.issueDate) || undefined,
+          expiryDate: isoDate(document.expiryDate) || undefined,
+        })) },
+        salaryDetails: salary ? {
+          structureId: salary.structureId,
+          annualCtc: salary.annualCtc,
+          effectiveFrom: isoDate(salary.effectiveFrom),
+          componentValues: salary.componentValues || {},
+          reason: salary.reason || 'Employee record update',
+        } : (employee.onboarding?.salaryDetails || {}),
+        faceDetails: {
+          ...storedFace,
+          status: employee.faceEnrollment?.status === 'ACTIVE' ? 'REGISTERED' : 'NOT_REGISTERED',
+        },
+        additionalDetails: {
+          ...storedAdditional,
+          employeeCode: employee.employeeCode,
+          workEmail: employee.email,
+          departmentId: employee.departmentId,
+          designationId: employee.designationId,
+          reportingManagerId: employee.reportingManagerId || '',
+          branchId: employee.branchId || undefined,
+          workLocationId: employee.workLocationId || undefined,
+          teamId: employee.teamId || undefined,
+          costCenterId: employee.costCenterId || undefined,
+          employeeGradeId: employee.employeeGradeId || undefined,
+          employmentType: employee.employmentType,
+          workLocation: employee.workLocation || '',
+          workdayGpsTrackingEnabled: employee.workdayGpsTrackingEnabled,
+          dateOfJoining: isoDate(employee.dateOfJoining),
+          accountHolderName: storedAdditional.accountHolderName || `${employee.firstName} ${employee.lastName}`,
+          bankName: employee.bankName || '',
+          accountNumber: employee.accountNumber || '',
+          ifsc: employee.routingOrIfsc || '',
+          skills: employee.skills,
+        },
+        createdAt: employee.onboarding?.createdAt || employee.createdAt,
+        updatedAt: employee.onboarding?.updatedAt || employee.updatedAt,
+      });
+    } catch (error) { next(error); }
+  });
+
+  router.put('/employees/:employeeId/onboarding-record/:section', authenticate, manage, async (req: Req, res, next) => {
+    try {
+      const companyId = req.auth!.companyId;
+      const employeeId = String(req.params.employeeId);
+      const section = String(req.params.section) as keyof typeof sectionConfig;
+      const config = sectionConfig[section];
+      if (!config) return fail(res, 404, 'ONBOARDING_SECTION_NOT_FOUND', 'Onboarding section was not found.');
+      const employee = await prisma.employee.findFirst({ where: { id: employeeId, companyId }, include: { user: true, faceEnrollment: true } });
+      if (!employee) return fail(res, 404, 'EMPLOYEE_NOT_FOUND', 'Employee was not found.');
+      const value = section === 'personal'
+        ? personalEditSchema.parse(req.body)
+        : config.schema.parse(req.body);
+
+      if (section === 'additional') {
+        const additional = value as z.infer<typeof additionalSchema>;
+        if (additional.reportingManagerId === employee.id) return fail(res, 400, 'INVALID_REPORTING_MANAGER', 'An employee cannot report to themselves.');
+        const [department, designation, manager, duplicateCode, duplicateEmail] = await Promise.all([
+          prisma.department.findFirst({ where: { id: additional.departmentId, companyId } }),
+          prisma.designation.findFirst({ where: { id: additional.designationId, departmentId: additional.departmentId, companyId } }),
+          additional.reportingManagerId ? prisma.employee.findFirst({ where: { id: additional.reportingManagerId, companyId } }) : Promise.resolve(null),
+          prisma.employee.findFirst({ where: { companyId, employeeCode: additional.employeeCode, id: { not: employee.id } } }),
+          prisma.user.findFirst({ where: { email: additional.workEmail.toLowerCase(), id: employee.userId ? { not: employee.userId } : undefined } }),
+        ]);
+        if (!department || !designation) return fail(res, 400, 'ORGANIZATION_REFERENCE_INVALID', 'Department or designation is invalid.');
+        if (additional.reportingManagerId && !manager) return fail(res, 400, 'REPORTING_MANAGER_INVALID', 'Reporting manager is invalid.');
+        if (duplicateCode) return fail(res, 409, 'EMPLOYEE_CODE_EXISTS', 'Employee ID is already in use.');
+        if (duplicateEmail) return fail(res, 409, 'EMAIL_EXISTS', 'Email is already in use.');
+      }
+      if (section === 'salary') {
+        const salary = value as z.infer<typeof salarySchema>;
+        const structure = await prisma.salaryStructure.findFirst({ where: { id: salary.structureId, companyId, active: true } });
+        if (!structure) return fail(res, 400, 'SALARY_STRUCTURE_INVALID', 'Salary structure is invalid for this company.');
+      }
+      if (section === 'face') {
+        const face = value as z.infer<typeof faceSchema>;
+        const actualStatus = employee.faceEnrollment?.status === 'ACTIVE' ? 'REGISTERED' : 'NOT_REGISTERED';
+        if (face.status !== actualStatus) return fail(res, 409, 'FACE_STATUS_MANAGED_SEPARATELY', 'Use face enrollment controls to change face registration status.');
+      }
+
+      await prisma.$transaction(async tx => {
+        if (section === 'personal') {
+          const personal = value as z.infer<typeof personalEditSchema>;
+          await tx.employee.update({ where: { id: employee.id }, data: {
+            firstName: personal.firstName,
+            lastName: personal.lastName,
+            phone: personal.mobileNumber || null,
+            dateOfBirth: personal.dateOfBirth || null,
+            gender: personal.gender || null,
+            emergencyName: personal.emergencyContactName || null,
+            emergencyPhone: personal.emergencyContactNumber || null,
+            emergencyRelation: personal.emergencyContactRelationship || null,
+          } });
+          if (employee.userId) await tx.user.update({ where: { id: employee.userId }, data: { fullName: [personal.firstName, personal.middleName, personal.lastName].filter(Boolean).join(' ') } });
+        }
+        if (section === 'documents') {
+          const documents = (value as z.infer<typeof sectionConfig.documents.schema>).documents;
+          const retainedIds = documents.flatMap(document => document.id ? [document.id] : []);
+          await tx.employeeDocument.deleteMany({ where: { employeeId: employee.id, companyId, ...(retainedIds.length ? { id: { notIn: retainedIds } } : {}) } });
+          for (const document of documents) {
+            const data = { documentType: document.documentType, title: document.title, objectKey: document.objectKey, fileName: document.fileName, mimeType: document.mimeType, sizeBytes: document.sizeBytes, issueDate: document.issueDate, expiryDate: document.expiryDate };
+            if (document.id) await tx.employeeDocument.updateMany({ where: { id: document.id, employeeId: employee.id, companyId }, data });
+            else await tx.employeeDocument.create({ data: { ...data, companyId, employeeId: employee.id } });
+          }
+        }
+        if (section === 'salary') {
+          const salary = value as z.infer<typeof salarySchema>;
+          const current = await tx.employeeSalaryRevision.findFirst({ where: { employeeId: employee.id, companyId, status: 'APPROVED' }, orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }] });
+          const components = salary.componentValues || {};
+          if (!current || current.structureId !== salary.structureId || current.annualCtc !== salary.annualCtc || current.effectiveFrom.getTime() !== salary.effectiveFrom.getTime() || JSON.stringify(current.componentValues || {}) !== JSON.stringify(components)) {
+            await tx.employeeSalaryRevision.create({ data: { companyId, employeeId: employee.id, structureId: salary.structureId, effectiveFrom: salary.effectiveFrom, annualCtc: salary.annualCtc, componentValues: components, reason: salary.reason || 'Employee onboarding record update', status: 'APPROVED', approvedById: req.auth!.id, approvedAt: new Date() } });
+          }
+        }
+        if (section === 'additional') {
+          const additional = value as z.infer<typeof additionalSchema>;
+          const probationEndDate = new Date(additional.dateOfJoining);
+          probationEndDate.setUTCMonth(probationEndDate.getUTCMonth() + additional.probationPeriodMonths);
+          const email = additional.workEmail.toLowerCase();
+          await tx.employee.update({ where: { id: employee.id }, data: { employeeCode: additional.employeeCode, email, departmentId: additional.departmentId, designationId: additional.designationId, reportingManagerId: additional.reportingManagerId || null, branchId: additional.branchId || null, workLocationId: additional.workLocationId || null, teamId: additional.teamId || null, costCenterId: additional.costCenterId || null, employeeGradeId: additional.employeeGradeId || null, dateOfJoining: additional.dateOfJoining, probationEndDate, employmentType: additional.employmentType, workLocation: additional.workLocation || null, workdayGpsTrackingEnabled: additional.workdayGpsTrackingEnabled, bankName: additional.bankName || null, accountNumber: additional.accountNumber || null, routingOrIfsc: additional.ifsc || null, skills: additional.skills } });
+          if (employee.userId) await tx.user.update({ where: { id: employee.userId }, data: { email } });
+        }
+        const additional = section === 'additional' ? value as z.infer<typeof additionalSchema> : null;
+        await tx.employeeOnboarding.upsert({ where: { createdEmployeeId: employee.id }, create: { companyId, createdById: req.auth!.id, createdEmployeeId: employee.id, employeeCode: additional?.employeeCode || employee.employeeCode, workEmail: (additional?.workEmail || employee.email).toLowerCase(), status: 'ACTIVE', progress: 100, completedAt: new Date(), [config.field]: value as Prisma.InputJsonValue }, update: { [config.field]: value as Prisma.InputJsonValue, ...(additional ? { employeeCode: additional.employeeCode, workEmail: additional.workEmail.toLowerCase() } : {}) } });
+        await tx.auditLog.create({ data: { companyId, userId: req.auth!.id, userName: req.auth!.id, userRole: req.auth!.role, action: 'UPDATE_EMPLOYEE_ONBOARDING', category: 'EMPLOYEE', details: `Employee ${employee.employeeCode} ${section} onboarding section updated.`, ipAddress: req.ip || 'unknown' } });
+      });
+      return ok(res, { employeeId: employee.id, section, updated: true });
     } catch (error) { next(error); }
   });
 

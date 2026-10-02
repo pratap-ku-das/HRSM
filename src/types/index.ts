@@ -80,6 +80,7 @@ export interface Employee {
   employmentType: EmploymentType;
   status: EmployeeStatus;
   workLocation: string;
+  workdayGpsTrackingEnabled: boolean;
   salary: SalaryBreakdown;
   bankDetails: BankDetails;
   emergencyContact: EmergencyContact;
@@ -141,7 +142,34 @@ export interface EmployeeOnboardingDraft { id:string; companyId:string; employee
 export interface PayrollAttendanceReview { id:string; payrollRunId:string; employeeId:string; workingDays:number; presentDays:number; absentDays:number; paidLeaveDays:number; unpaidLeaveDays:number; halfDays:number; lateDays:number; earlyExitDays:number; holidays:number; weeklyOffDays:number; overtimeHours:number; missingAttendanceDays:number; exceptions?:string[]; adjustedAt?:string; changes:Array<{id:string;field:string;oldValue:number;newValue:number;reason:string;changedAt:string}>; }
 export interface PayrollConfiguration { structures: SalaryStructure[]; revisions: Array<{ id: string; employeeId: string; effectiveFrom: string; annualCtc: number; status: string; employee: Pick<Employee,'id'|'employeeCode'|'firstName'|'lastName'>; structure: SalaryStructure }>; rules: Array<{ id: string; type: string; stateCode?: string; effectiveFrom: string; configuration: Record<string,unknown>; sourceNote?: string }>; loans: Array<{ id: string; type: string; principal: number; outstanding: number; installment: number; status: string }>; runs: PayrollEngineRun[]; }
 export interface Employee360 { employee: Employee & { department?: Department; designation?: Designation; branch?: Branch; location?: WorkLocation; team?: Team; costCenter?: CostCenter; employeeGrade?: EmployeeGrade; reportingManager?: Pick<Employee,'id'|'firstName'|'lastName'|'employeeCode'> }; attendance: AttendanceRecord[]; leave: LeaveRequest[]; payslips: Payslip[]; assets: Asset[]; expenses: ExpenseClaim[]; goals: PerformanceGoal[]; revisions: Array<{id:string;effectiveFrom:string;annualCtc:number;status:string}>; requests: WorkflowInstance[]; timeline: Array<{id:string;at:string;type:string;title:string;detail:string}>; }
-export interface CommandCenterData { metrics: { activeEmployees:number; presentToday:number; absentToday:number; onLeaveToday:number }; alerts: Array<{key:string;severity:'INFO'|'WARNING'|'CRITICAL';count:number;message:string}>; }
+export interface CommandCenterData {
+  metrics: {
+    activeEmployees: number;
+    presentToday: number;
+    absentToday: number;
+    onLeaveToday: number;
+    onTimeToday?: number;
+    lateToday?: number;
+  };
+  alerts: Array<{ key: string; severity: 'INFO' | 'WARNING' | 'CRITICAL'; count: number; message: string }>;
+  lateEntries?: Array<{
+    id: string;
+    employeeId: string;
+    employeeName: string;
+    employeeCode: string;
+    department?: string;
+    avatarUrl?: string | null;
+    clockInTime: string;
+    clockInFormatted?: string;
+    lateMinutes: number;
+    status: string;
+  }>;
+  workSchedule?: {
+    businessHoursStart: string;
+    lateThresholdTime: string;
+    timezone: string;
+  };
+}
 export interface OrbitNotification { id:string; eventKey:string; title:string; body:string; entityType?:string; entityId?:string; actionUrl?:string; readAt?:string; expiresAt?:string; createdAt:string; }
 export interface NotificationPreference { id?:string; eventKey:string; channel:'IN_APP'|'EMAIL'|'PUSH'; enabled:boolean; }
 
@@ -175,9 +203,18 @@ export interface AttendanceRecord {
   correctedBy?: string;
   createdAt: string;
   updatedAt: string;
+  employee?: {
+    id: string;
+    employeeCode: string;
+    firstName: string;
+    lastName: string;
+    avatarUrl?: string | null;
+    department?: { name: string } | null;
+  };
 }
 
 export interface AttendanceCorrectionRequest {
+  // Route points are stored separately from payroll attendance corrections.
   id: string;
   companyId: string;
   employeeId: string;
@@ -216,6 +253,25 @@ export interface LeaveRequest {
   approvedBy?: string;
   reviewerComment?: string;
   appliedAt: string;
+}
+
+export interface AttendanceLocationPoint {
+  id: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  speedMetersPerSecond?: number;
+  bearingDegrees?: number;
+  capturedAt: string;
+}
+
+export interface AttendanceRoute {
+  attendance: Pick<AttendanceRecord, 'id' | 'date' | 'clockInTime' | 'clockOutTime'>;
+  employee: Pick<Employee, 'id' | 'employeeCode' | 'firstName' | 'lastName' | 'workdayGpsTrackingEnabled'>;
+  trackingEnabled: boolean;
+  active: boolean;
+  distanceMeters: number;
+  points: AttendanceLocationPoint[];
 }
 
 export interface LeaveBalance {
@@ -366,10 +422,14 @@ export interface CompanyDocument {
   id: string;
   companyId: string;
   title: string;
-  category: 'POLICY' | 'HANDBOOK' | 'TEMPLATE' | 'COMPLIANCE' | 'BENEFITS';
+  category: string;
   fileSize: string;
   fileType: string;
   downloadUrl: string;
+  objectKey?: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
   uploadedAt: string;
 }
 
@@ -428,6 +488,27 @@ export interface CompanySettings {
   companyName: string;
   legalEntityName: string;
   taxRegistrationNumber: string;
+  companyType: 'PRIVATE_LIMITED' | 'PUBLIC_LIMITED' | 'LLP' | 'PARTNERSHIP' | 'PROPRIETORSHIP' | 'TRUST' | 'SOCIETY' | 'OTHER';
+  registrationNumber: string;
+  incorporationDate?: string;
+  panNumber: string;
+  tanNumber: string;
+  udyamRegistrationNumber: string;
+  pfRegistrationNumber: string;
+  esiRegistrationNumber: string;
+  professionalTaxNumber: string;
+  labourLicenseNumber: string;
+  officialEmail: string;
+  officialPhone: string;
+  website: string;
+  registeredAddress: string;
+  city: string;
+  state: string;
+  country: string;
+  postalCode: string;
+  industry: string;
+  companySize: string;
+  financialYearStartMonth: number;
   currency: string;
   currencySymbol: string;
   timezone: string;
