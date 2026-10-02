@@ -34,6 +34,9 @@ import { createAiAssistantRouter } from "./aiAssistant.js";
 import { createRecruitmentRouter } from "./recruitment.js";
 import { createOperationsRouter } from "./operations.js";
 import { createLeaveAdminRouter } from "./leaveAdmin.js";
+import { createLeaveEncashmentRouter } from "./leaveEncashment.js";
+import { createBankExportRouter } from "./bankExport.js";
+import { createTaxSimulatorRouter } from "./taxSimulator.js";
 import { createSettingsRouter } from "./settings.js";
 import { verifyMfaCode } from "./mfa.js";
 import { createMobileReleaseRouter } from "./mobileRelease.js";
@@ -1609,7 +1612,7 @@ export function createV1Router(prisma: PrismaClient) {
             "EMPLOYEE_NOT_LINKED",
             "No employee profile is linked.",
           );
-        const [requests, types, employee] = await prisma.$transaction([
+        const [requests, types, employee, encashments] = await prisma.$transaction([
           prisma.leaveRequest.findMany({
             where: {
               companyId: req.auth!.companyId,
@@ -1624,6 +1627,14 @@ export function createV1Router(prisma: PrismaClient) {
           prisma.employee.findUnique({
             where: { id: req.auth!.employeeId! },
             select: { dateOfJoining: true },
+          }),
+          prisma.employeeServiceRequest.findMany({
+            where: {
+              companyId: req.auth!.companyId,
+              employeeId: req.auth!.employeeId,
+              type: "LEAVE_ENCASHMENT",
+              status: { in: ["PENDING", "APPROVED"] },
+            },
           }),
         ]);
         const year = new Date().getUTCFullYear();
@@ -1648,14 +1659,24 @@ export function createV1Router(prisma: PrismaClient) {
                 r.endDate >= yearStart,
             )
             .reduce((sum, r) => sum + r.totalDays, 0);
+          const encashed = (encashments || [])
+            .filter((e) => {
+              const p = e.payload as Record<string, unknown> | null;
+              return p?.leaveTypeId === type.id;
+            })
+            .reduce((sum, e) => {
+              const p = e.payload as Record<string, unknown> | null;
+              return sum + (Number(p?.days) || 0);
+            }, 0);
+          const totalDeducted = used + encashed;
           const available = Math.max(
             type.allowNegative ? -Infinity : 0,
             Math.min(
               type.maximumBalance ?? Infinity,
               entitlement + type.carryForwardDays,
-            ) - used,
+            ) - totalDeducted,
           );
-          return { leaveTypeId: type.id, year, entitlement, used, available };
+          return { leaveTypeId: type.id, year, entitlement, used, encashed, available };
         });
         return ok(res, { requests, types, balances });
       } catch (e) {
@@ -1751,6 +1772,24 @@ export function createV1Router(prisma: PrismaClient) {
             select: { totalDays: true },
           })
         ).reduce((sum, item) => sum + item.totalDays, 0);
+        const existingEncashed = (
+          await prisma.employeeServiceRequest.findMany({
+            where: {
+              companyId: req.auth!.companyId,
+              employeeId: req.auth!.employeeId,
+              type: "LEAVE_ENCASHMENT",
+              status: { in: ["PENDING", "APPROVED"] },
+            },
+          })
+        )
+          .filter((e) => {
+            const p = e.payload as Record<string, unknown> | null;
+            return p?.leaveTypeId === type.id;
+          })
+          .reduce((sum, e) => {
+            const p = e.payload as Record<string, unknown> | null;
+            return sum + (Number(p?.days) || 0);
+          }, 0);
         const serviceStart =
             employee.dateOfJoining > yearStart
               ? employee.dateOfJoining
@@ -1764,7 +1803,7 @@ export function createV1Router(prisma: PrismaClient) {
             Math.min(
               type.maximumBalance ?? Infinity,
               entitlement + type.carryForwardDays,
-            ) - existingUsed;
+            ) - (existingUsed + existingEncashed);
         if (!type.allowNegative && totalDays > available)
           return fail(
             res,
@@ -2778,6 +2817,9 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createRecruitmentRouter(prisma, authenticate));
   router.use(createOperationsRouter(prisma, authenticate));
   router.use(createLeaveAdminRouter(prisma, authenticate));
+  router.use(createLeaveEncashmentRouter(prisma, authenticate));
+  router.use(createBankExportRouter(prisma, authenticate));
+  router.use(createTaxSimulatorRouter(prisma, authenticate));
   router.use(createOnboardingRouter(prisma, authenticate));
   router.use(createSettingsRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));

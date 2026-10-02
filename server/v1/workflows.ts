@@ -945,13 +945,48 @@ export function createWorkflowRouter(
                 },
               }) as never,
             );
-          if (instance.subjectType === "EmployeeServiceRequest")
+          if (instance.subjectType === "EmployeeServiceRequest") {
             operations.push(
               prisma.employeeServiceRequest.updateMany({
                 where: { id: instance.subjectId, companyId },
                 data: { status: "APPROVED" },
               }) as never,
             );
+            const svcReq = await prisma.employeeServiceRequest.findFirst({
+              where: { id: instance.subjectId, companyId },
+            });
+            if (svcReq && svcReq.type === "LEAVE_ENCASHMENT") {
+              const p = (svcReq.payload || {}) as Record<string, unknown>;
+              const targetMonth = String(p.payrollMonth || new Date().toISOString().slice(0, 7));
+              const amount = Number(svcReq.amount || 0);
+              const existingAdj = await prisma.payrollAdjustment.findFirst({
+                where: {
+                  companyId,
+                  employeeId: svcReq.employeeId,
+                  month: targetMonth,
+                  code: "LEAVE_ENCASHMENT",
+                  reason: { contains: svcReq.id },
+                },
+              });
+              if (!existingAdj) {
+                operations.push(
+                  prisma.payrollAdjustment.create({
+                    data: {
+                      companyId,
+                      employeeId: svcReq.employeeId,
+                      month: targetMonth,
+                      code: "LEAVE_ENCASHMENT",
+                      name: "Leave Encashment",
+                      kind: "EARNING",
+                      amount,
+                      reason: `Leave encashment payout (${p.days || 0} days of ${p.leaveTypeName || 'Leave'}) [${svcReq.id}]`,
+                      createdById: req.auth!.id,
+                    },
+                  }) as never,
+                );
+              }
+            }
+          }
           if (instance.subjectType === "AttendanceRequest")
             operations.push(
               prisma.attendanceRequest.updateMany({
@@ -1043,5 +1078,150 @@ export function createWorkflowRouter(
       }
     },
   );
+
+  router.post(
+    "/workflows/jobs/escalate-sla",
+    permitted("workflow.review"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const result = await escalateOverdueWorkflowSteps(
+          prisma as unknown as PrismaClient,
+          req.auth!.companyId,
+        );
+        return ok(res, result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   return router;
+}
+
+export async function escalateOverdueWorkflowSteps(
+  prisma: PrismaClient,
+  companyId?: string,
+  now = new Date(),
+) {
+  const overdueSteps = await prisma.workflowStepInstance.findMany({
+    where: {
+      status: "PENDING",
+      dueAt: { lte: now },
+      instance: {
+        status: "PENDING",
+        ...(companyId ? { companyId } : {}),
+      },
+    },
+    include: {
+      instance: true,
+      step: true,
+    },
+  });
+
+  const escalated: Array<{
+    stepInstanceId: string;
+    instanceId: string;
+    title: string;
+    sequence: number;
+    escalatedToUserIds: string[];
+  }> = [];
+
+  for (const stepInstance of overdueSteps) {
+    const compId = stepInstance.instance.companyId;
+
+    const escalationUsers = await prisma.user.findMany({
+      where: {
+        companyId: compId,
+        role: { in: ["COMPANY_ADMIN", "HR_MANAGER"] },
+      },
+      select: { id: true },
+    });
+    const escalationUserIds = escalationUsers.map((u) => u.id);
+    const combinedApprovers = Array.from(
+      new Set([...stepInstance.approverUserIds, ...escalationUserIds]),
+    );
+
+    const bufferHours = stepInstance.step.slaHours || 24;
+    const nextDueAt = new Date(now.getTime() + bufferHours * 3_600_000);
+
+    // Multi-instance atomic claim: prevents concurrent workers from escalating the same step
+    const claim = await prisma.workflowStepInstance.updateMany({
+      where: {
+        id: stepInstance.id,
+        status: "PENDING",
+        dueAt: { lte: now },
+      },
+      data: {
+        approverUserIds: combinedApprovers,
+        dueAt: nextDueAt,
+      },
+    });
+
+    if (claim.count === 0) {
+      // Another worker/server process already escalated this step; skip.
+      continue;
+    }
+
+    await prisma.$transaction([
+      prisma.workflowAction.create({
+        data: {
+          instanceId: stepInstance.instanceId,
+          stepInstanceId: stepInstance.id,
+          actorUserId: stepInstance.approverUserIds[0] || stepInstance.instance.requesterUserId,
+          action: "COMMENT",
+          comment: `[AUTOMATIC SLA ESCALATION] Step ${stepInstance.sequence} exceeded SLA deadline. Escalated to HR Administration.`,
+        },
+      }),
+      prisma.auditLog.create({
+        data: {
+          companyId: compId,
+          userId: stepInstance.instance.requesterUserId,
+          userName: "SYSTEM_SLA_WORKER",
+          userRole: "SYSTEM",
+          action: "WORKFLOW_SLA_ESCALATED",
+          category: "WORKFLOW",
+          details: `Workflow '${stepInstance.instance.title}' (Step ${stepInstance.sequence}) SLA breached. Escalated to HR.`,
+          ipAddress: "127.0.0.1",
+        },
+      }),
+    ]);
+
+    for (const approverId of stepInstance.approverUserIds) {
+      await emitNotification(prisma, {
+        companyId: compId,
+        userId: approverId,
+        eventKey: "WORKFLOW_SLA_BREACHED",
+        title: "SLA Overdue: Action Required",
+        body: `Approval for '${stepInstance.instance.title}' has breached its SLA deadline.`,
+        entityType: "WorkflowInstance",
+        entityId: stepInstance.instanceId,
+        actionUrl: "/workflows",
+      }).catch(() => {});
+    }
+
+    for (const hrId of escalationUserIds) {
+      if (!stepInstance.approverUserIds.includes(hrId)) {
+        await emitNotification(prisma, {
+          companyId: compId,
+          userId: hrId,
+          eventKey: "WORKFLOW_SLA_ESCALATED",
+          title: "Escalated Workflow Pending",
+          body: `Overdue workflow '${stepInstance.instance.title}' has been escalated to HR.`,
+          entityType: "WorkflowInstance",
+          entityId: stepInstance.instanceId,
+          actionUrl: "/workflows",
+        }).catch(() => {});
+      }
+    }
+
+    escalated.push({
+      stepInstanceId: stepInstance.id,
+      instanceId: stepInstance.instanceId,
+      title: stepInstance.instance.title,
+      sequence: stepInstance.sequence,
+      escalatedToUserIds: escalationUserIds,
+    });
+  }
+
+  return { checked: overdueSteps.length, escalated };
 }

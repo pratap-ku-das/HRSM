@@ -179,6 +179,144 @@ export const api = {
   getLeaveAdministration: async() => (await fetchJSON<ApiEnvelope<{types:LeaveType[];requests:Array<LeaveRequest&{employee:{employeeCode:string;firstName:string;lastName:string};leaveType:LeaveType;workflowInstanceId?:string;workflowStatus?:string;canReview:boolean}>}>>(`${API_BASE}/v1/leave-administration`,{headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
   createLeaveTypeV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<LeaveType>>(`${API_BASE}/v1/leave-administration/types`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   deleteLeaveTypeV1: async(id:string) => (await fetchJSON<ApiEnvelope<{deleted:boolean}>>(`${API_BASE}/v1/leave-administration/types/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`}})).data,
+  getLeaveEncashmentEligibility: async () =>
+    (await fetchJSON<ApiEnvelope<import('../types/leaveEncashment').LeaveEncashmentEligibility>>(
+      `${API_BASE}/v1/leave-encashment/eligibility`,
+      { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  requestLeaveEncashment: async (body: { leaveTypeId: string; days: number; reason: string; payrollMonth?: string }) =>
+    (await fetchJSON<ApiEnvelope<{ serviceRequest: import('../types/leaveEncashment').LeaveEncashmentItem; workflowId?: string }>>(
+      `${API_BASE}/v1/leave-encashment/request`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify(body),
+      }
+    )).data,
+  getLeaveEncashmentRequests: async () =>
+    (await fetchJSON<ApiEnvelope<import('../types/leaveEncashment').LeaveEncashmentItem[]>>(
+      `${API_BASE}/v1/leave-encashment/requests`,
+      { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  approveLeaveEncashmentRequest: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<{ status: string; payrollMonth: string; amount: number }>>(
+      `${API_BASE}/v1/leave-encashment/requests/${id}/approve`,
+      { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  rejectLeaveEncashmentRequest: async (id: string, reason: string) =>
+    (await fetchJSON<ApiEnvelope<{ status: string }>>(
+      `${API_BASE}/v1/leave-encashment/requests/${id}/reject`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify({ reason }),
+      }
+    )).data,
+  triggerSlaEscalationJob: async () =>
+    (await fetchJSON<ApiEnvelope<{ checked: number; escalated: unknown[] }>>(
+      `${API_BASE}/v1/workflows/jobs/escalate-sla`,
+      { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  getBankExportSources: async () =>
+    (await fetchJSON<ApiEnvelope<{
+      payrollRuns: import('../types').PayrollRun[];
+      reimbursements: { count: number; totalAmount: number; claims: unknown[] };
+    }>>(
+      `${API_BASE}/v1/payroll/bank-export/sources`,
+      { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  previewBankExport: async (body: {
+    sourceType: 'PAYROLL' | 'REIMBURSEMENT' | 'COMBINED';
+    payrollRunId?: string;
+    expenseClaimIds?: string[];
+    bankFormat: string;
+  }) =>
+    (await fetchJSON<ApiEnvelope<import('../types/bankExport').BankExportPreviewResponse>>(
+      `${API_BASE}/v1/payroll/bank-export/preview`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify(body),
+      }
+    )).data,
+  initiateBankExportBatch: async (body: {
+    sourceType: 'PAYROLL' | 'REIMBURSEMENT' | 'COMBINED';
+    payrollRunId?: string;
+    expenseClaimIds?: string[];
+    bankFormat: string;
+    notes?: string;
+  }) =>
+    (await fetchJSON<ApiEnvelope<{
+      batchId: string;
+      status: string;
+      rowCount: number;
+      totalAmount: number;
+      sha256Checksum: string;
+    }>>(
+      `${API_BASE}/v1/payroll/bank-export/batch/initiate`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify(body),
+      }
+    )).data,
+  getBankExportBatches: async () =>
+    (await fetchJSON<ApiEnvelope<import('../types/bankExport').BankExportBatchItem[]>>(
+      `${API_BASE}/v1/payroll/bank-export/batches`,
+      { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  approveBankExportBatch: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<{ status: string; isLocked: boolean }>>(
+      `${API_BASE}/v1/payroll/bank-export/batch/${id}/approve`,
+      { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  downloadBankExportFile: async (id: string) => {
+    const res = await fetch(`${API_BASE}/v1/payroll/bank-export/batch/${id}/download`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `Download failed with status ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition');
+    let filename = `bank_transfer_batch_${id.slice(0, 8)}.csv`;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+  getTaxSimulatorConfig: async (financialYear = '2025-26') =>
+    (await fetchJSON<ApiEnvelope<unknown>>(
+      `${API_BASE}/v1/payroll/tax-simulator/config/${financialYear}`,
+      { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } }
+    )).data,
+  simulateTax: async (payload: import('../types/taxSimulator').TaxSimulationPayload) =>
+    (await fetchJSON<ApiEnvelope<import('../types/taxSimulator').TaxSimulationComparisonResult>>(
+      `${API_BASE}/v1/payroll/tax-simulator/simulate`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify(payload),
+      }
+    )).data,
+  applyTaxRegime: async (payload: import('../types/taxSimulator').ApplyTaxRegimePayload) =>
+    (await fetchJSON<ApiEnvelope<{ declarationId: string; regime: string; appliedAt: string }>>(
+      `${API_BASE}/v1/payroll/tax-simulator/apply-regime`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+        body: JSON.stringify(payload),
+      }
+    )).data,
   getAttendanceRequests: async () => (await fetchJSON<ApiEnvelope<AttendanceRequestItem[]>>(`${API_BASE}/v1/me/attendance/requests`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   createAttendanceRequest: async (body: Omit<AttendanceRequestItem,'id'|'status'|'workflowInstanceId'|'createdAt'>) => (await fetchJSON<ApiEnvelope<AttendanceRequestItem>>(`${API_BASE}/v1/me/attendance/requests`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   startBreak: async () => (await fetchJSON<ApiEnvelope<unknown>>(`${API_BASE}/v1/me/attendance/breaks/start`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,

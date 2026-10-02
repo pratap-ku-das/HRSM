@@ -5,6 +5,7 @@ import { androidRelease } from "./mobileRelease.js";
 import { emitNotification } from "./notifications.js";
 import { runComplianceReminders } from "./reminders.js";
 import { reconcileMidnightAbsentMissingClockOut } from "./attendancePolicies.js";
+import { escalateOverdueWorkflowSteps } from "./workflows.js";
 
 const INVALID_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
@@ -134,13 +135,21 @@ export function startNotificationWorkers(prisma: PrismaClient) {
     pushRunning = true;
     try { await processPushDeliveries(prisma, messaging); } catch (error) { console.error("Push delivery worker failed.", error); } finally { pushRunning = false; }
   };
+  let slaRunning = false;
+  const runSlaEscalation = async () => {
+    if (slaRunning) return;
+    slaRunning = true;
+    try { await escalateOverdueWorkflowSteps(prisma); } catch (error) { console.error("SLA escalation job failed.", error); } finally { slaRunning = false; }
+  };
   void queueAndroidReleaseNotifications(prisma).catch((error) => console.error("Update notification queue failed.", error));
   void runAutomaticReminders(prisma).catch((error) => console.error("Automatic reminder job failed.", error));
   void reconcileMidnightAbsentMissingClockOut(prisma).catch((error) => console.error("Midnight absent auto-reconciliation failed.", error));
+  void runSlaEscalation();
   const pushTimer = setInterval(() => void push(), 15_000);
   const reminderTimer = setInterval(() => void runAutomaticReminders(prisma).catch((error) => console.error("Automatic reminder job failed.", error)), 6 * 60 * 60_000);
   const midnightAbsentTimer = setInterval(() => void reconcileMidnightAbsentMissingClockOut(prisma).catch((error) => console.error("Midnight absent auto-reconciliation failed.", error)), 15 * 60_000);
-  pushTimer.unref(); reminderTimer.unref(); midnightAbsentTimer.unref();
+  const slaTimer = setInterval(() => void runSlaEscalation(), 5 * 60_000);
+  pushTimer.unref(); reminderTimer.unref(); midnightAbsentTimer.unref(); slaTimer.unref();
   setTimeout(() => void push(), 2_000).unref();
-  return () => { clearInterval(pushTimer); clearInterval(reminderTimer); clearInterval(midnightAbsentTimer); };
+  return () => { clearInterval(pushTimer); clearInterval(reminderTimer); clearInterval(midnightAbsentTimer); clearInterval(slaTimer); };
 }
