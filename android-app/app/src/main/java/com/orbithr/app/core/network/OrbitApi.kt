@@ -83,6 +83,7 @@ interface OrbitApi {
     @POST("payroll/runs/{id}/submit") suspend fun submitPayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
     @POST("payroll/runs/{id}/approve") suspend fun approvePayroll(@Path("id") id:String,@Body body:PayrollDecisionRequest=PayrollDecisionRequest()):ApiEnvelope<PayrollRunMobileDto>
     @POST("payroll/runs/{id}/generate-payslips") suspend fun generatePayrollPayslips(@Path("id") id:String):ApiEnvelope<Map<String,Int>>
+    @POST("payroll/runs/{id}/publish") suspend fun publishPayroll(@Path("id") id:String):ApiEnvelope<Map<String,Any>>
     @Streaming @GET("employee-documents/{id}/file") suspend fun employeeDocumentFile(@Path("id") id:String):Response<ResponseBody>
     @Streaming @GET("me/payroll/payslips/{id}/pdf") suspend fun payslipPdf(@Path("id") id: String): Response<ResponseBody>
     @GET("me/payroll/form16") suspend fun form16List(): ApiEnvelope<List<Form16Dto>>

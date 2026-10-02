@@ -597,7 +597,7 @@ fun PayslipScreen(
                         items(form16List, key = { it.id }) { f16 ->
                             Surface(
                                 shape = RoundedCornerShape(22.dp),
-                                color = OrbitDarkSurface,
+                                color = Color(0xFF1D2145),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -621,7 +621,7 @@ fun PayslipScreen(
                                     Button(
                                         onClick = { onViewPdf?.invoke("Form 16 - FY ${f16.financialYear}", "FORM16", f16.id) },
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(containerColor = OrbitCyan, contentColor = OrbitDarkSurface),
+                                        colors = ButtonDefaults.buttonColors(containerColor = OrbitCyan, contentColor = Color(0xFF1D2145)),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
                                         Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1118,7 +1118,7 @@ private fun OnboardDialog(
 }
 
 @Composable
-private fun EmptyState(icon: ImageVector, title: String, message: String) {
+fun EmptyState(icon: ImageVector, title: String, message: String) {
     OrbitGlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Box(Modifier.size(52.dp).background(OrbitViolet.copy(alpha = .09f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, tint = OrbitViolet) }

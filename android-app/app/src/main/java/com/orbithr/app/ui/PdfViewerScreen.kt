@@ -36,7 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.orbithr.app.core.data.OrbitRepository
@@ -50,6 +50,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
+
+private val DarkCardBg = Color(0xFF1D2145)
 
 sealed class PdfViewerUiState {
   data object Loading : PdfViewerUiState()
@@ -144,27 +146,39 @@ fun PdfViewerScreen(
 
   Scaffold(
     topBar = {
-      OrbitTopBar(
-        title = title,
-        onBack = onBack,
-        actions = {
-          if (state is PdfViewerUiState.Success) {
-            val file = (state as PdfViewerUiState.Success).file
-
-            // Share Action
-            IconButton(onClick = { sharePdf(context, file, title) }) {
-              Icon(Icons.Outlined.Share, contentDescription = "Share PDF", tint = Color.White)
-            }
-
-            // Download Action
-            IconButton(onClick = { downloadPdf(context, file, title) }) {
-              Icon(Icons.Outlined.Download, contentDescription = "Download PDF", tint = Color.White)
-            }
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(OrbitHeroBrush)
+          .statusBarsPadding()
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        IconButton(onClick = onBack) {
+          Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+          text = title,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+          modifier = Modifier.weight(1f),
+          maxLines = 1,
+          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+        if (state is PdfViewerUiState.Success) {
+          val file = (state as PdfViewerUiState.Success).file
+          IconButton(onClick = { sharePdf(context, file, title) }) {
+            Icon(Icons.Outlined.Share, contentDescription = "Share PDF", tint = Color.White)
+          }
+          IconButton(onClick = { downloadPdf(context, file, title) }) {
+            Icon(Icons.Outlined.Download, contentDescription = "Download PDF", tint = Color.White)
           }
         }
-      )
+      }
     },
-    containerColor = OrbitBackground
+    containerColor = OrbitCloud
   ) { padding ->
     Box(
       modifier = Modifier
@@ -197,14 +211,14 @@ fun PdfViewerScreen(
               "Unable to load document",
               style = MaterialTheme.typography.titleMedium,
               fontWeight = FontWeight.Bold,
-              color = Color.White
+              color = OrbitInk
             )
             Spacer(Modifier.height(8.dp))
             Text(s.message, style = MaterialTheme.typography.bodySmall, color = OrbitRose)
             Spacer(Modifier.height(20.dp))
             Button(
               onClick = { viewModel.loadDocument(type, documentId) },
-              colors = ButtonDefaults.buttonColors(containerColor = OrbitCyan, contentColor = OrbitDarkSurface)
+              colors = ButtonDefaults.buttonColors(containerColor = OrbitCyan, contentColor = OrbitInk)
             ) {
               Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
               Spacer(Modifier.width(8.dp))
@@ -279,7 +293,7 @@ fun PdfViewerScreen(
             if (scale > 1.05f) {
               Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = OrbitDarkSurface.copy(alpha = 0.85f),
+                color = DarkCardBg.copy(alpha = 0.85f),
                 modifier = Modifier
                   .align(Alignment.BottomCenter)
                   .padding(bottom = 24.dp)

@@ -18,8 +18,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.orbithr.app.core.model.MyAssetDto
+
+private val DarkCardBg = Color(0xFF1D2145)
 
 @Composable
 fun MyAssetsScreen(
@@ -43,17 +45,31 @@ fun MyAssetsScreen(
 
   Scaffold(
     topBar = {
-      OrbitTopBar(
-        title = "My Assigned Assets",
-        onBack = onBack,
-        actions = {
-          IconButton(onClick = viewModel::refresh) {
-            Icon(Icons.Outlined.Refresh, contentDescription = "Refresh Assets", tint = Color.White)
-          }
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(OrbitHeroBrush)
+          .statusBarsPadding()
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        IconButton(onClick = onBack) {
+          Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
         }
-      )
+        Spacer(Modifier.width(8.dp))
+        Text(
+          text = "My Assigned Assets",
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+          modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = viewModel::refresh) {
+          Icon(Icons.Outlined.Refresh, contentDescription = "Refresh Assets", tint = Color.White)
+        }
+      }
     },
-    containerColor = OrbitBackground
+    containerColor = OrbitCloud
   ) { padding ->
     Box(
       modifier = Modifier
@@ -65,7 +81,7 @@ fun MyAssetsScreen(
           EmptyState(
             icon = Icons.Outlined.Devices,
             title = "No assets assigned",
-            body = "You currently do not have any company hardware or equipment checked out."
+            message = "You currently do not have any company hardware or equipment checked out."
           )
         } else {
           LazyColumn(
@@ -76,7 +92,7 @@ fun MyAssetsScreen(
             item {
               Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = OrbitDarkSurface,
+                color = DarkCardBg,
                 modifier = Modifier.fillMaxWidth()
               ) {
                 Row(
@@ -112,7 +128,7 @@ fun MyAssetsScreen(
 
         AlertDialog(
           onDismissRequest = { acknowledgingAsset = null },
-          containerColor = OrbitDarkSurface,
+          containerColor = DarkCardBg,
           titleContentColor = Color.White,
           textContentColor = OrbitMuted,
           icon = { Icon(Icons.Outlined.TaskAlt, contentDescription = null, tint = OrbitMint) },
@@ -142,7 +158,7 @@ fun MyAssetsScreen(
                 viewModel.acknowledge(asset.id, notes.trim().ifEmpty { null }, deviceInfo)
                 acknowledgingAsset = null
               },
-              colors = ButtonDefaults.buttonColors(containerColor = OrbitMint, contentColor = OrbitDarkSurface)
+              colors = ButtonDefaults.buttonColors(containerColor = OrbitMint, contentColor = DarkCardBg)
             ) {
               Text("Confirm Receipt", fontWeight = FontWeight.Bold)
             }
@@ -162,7 +178,7 @@ fun MyAssetsScreen(
 
         AlertDialog(
           onDismissRequest = { returningAsset = null },
-          containerColor = OrbitDarkSurface,
+          containerColor = DarkCardBg,
           titleContentColor = Color.White,
           textContentColor = OrbitMuted,
           icon = { Icon(Icons.Outlined.AssignmentReturn, contentDescription = null, tint = OrbitAmber) },
@@ -207,7 +223,7 @@ fun MyAssetsScreen(
                   Toast.makeText(context, "Please enter a return reason", Toast.LENGTH_SHORT).show()
                 }
               },
-              colors = ButtonDefaults.buttonColors(containerColor = OrbitAmber, contentColor = OrbitDarkSurface)
+              colors = ButtonDefaults.buttonColors(containerColor = OrbitAmber, contentColor = DarkCardBg)
             ) {
               Text("Submit Return", fontWeight = FontWeight.Bold)
             }
@@ -227,7 +243,7 @@ fun MyAssetsScreen(
 
         AlertDialog(
           onDismissRequest = { reportingAsset = null },
-          containerColor = OrbitDarkSurface,
+          containerColor = DarkCardBg,
           titleContentColor = Color.White,
           textContentColor = OrbitMuted,
           icon = { Icon(Icons.Outlined.ReportProblem, contentDescription = null, tint = OrbitRose) },
@@ -307,7 +323,7 @@ private fun AssetCard(
 
   Surface(
     shape = RoundedCornerShape(24.dp),
-    color = OrbitDarkSurface,
+    color = DarkCardBg,
     modifier = Modifier.fillMaxWidth()
   ) {
     Column(
@@ -389,7 +405,7 @@ private fun AssetCard(
           Button(
             onClick = onAcknowledge,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = OrbitMint, contentColor = OrbitDarkSurface),
+            colors = ButtonDefaults.buttonColors(containerColor = OrbitMint, contentColor = DarkCardBg),
             shape = RoundedCornerShape(12.dp)
           ) {
             Icon(Icons.Outlined.TaskAlt, contentDescription = null, modifier = Modifier.size(16.dp))
