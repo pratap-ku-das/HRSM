@@ -132,3 +132,48 @@ data class PendingFile(val title:String,val category:String,val fileName:String,
     val businessHoursStart:String="09:30",val businessHoursEnd:String="18:30",val enableAutomaticOvertime:Boolean=true,
     val enableAuditLogging:Boolean=true,val defaultProbationPeriodMonths:Int=3
 )
+
+@Serializable
+data class Form16Dto(
+    val id: String,
+    val financialYear: String,
+    val documentKey: String,
+    val publishedAt: String? = null,
+    val generatedAt: String? = null
+)
+
+@Serializable
+data class MyAssetDto(
+    val id: String,
+    val name: String,
+    val category: String,
+    val serialNumber: String,
+    val assignedDate: String? = null,
+    val purchaseDate: String? = null,
+    val status: String,
+    val condition: String,
+    val isAcknowledged: Boolean = false,
+    val acknowledgedAt: String? = null,
+    val hasPendingReturn: Boolean = false,
+    val hasPendingIssue: Boolean = false,
+    val returnRequestStatus: String? = null
+)
+
+@Serializable
+data class AssetAcknowledgeRequest(
+    val notes: String? = null,
+    val deviceInfo: String? = null
+)
+
+@Serializable
+data class AssetReturnRequest(
+    val reason: String,
+    val condition: String? = null
+)
+
+@Serializable
+data class AssetIssueRequest(
+    val issueDescription: String,
+    val severity: String = "MEDIUM"
+)
+

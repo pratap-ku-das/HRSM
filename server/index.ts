@@ -510,6 +510,14 @@ app.post('/api/attendance', requireAttendanceAdmin, async (req: AttendanceAdminR
     if (!employee) return res.status(404).json({ error: 'Employee was not found in this company.' });
 
     const dateObj = new Date(date);
+    const locked = await prisma.attendancePeriodLock.findFirst({
+      where: {
+        companyId: req.attendanceAdmin!.companyId,
+        periodStart: { lte: dateObj },
+        periodEnd: { gte: dateObj },
+      },
+    });
+    if (locked) return res.status(409).json({ error: 'Attendance is locked for payroll during this period.' });
     const clockIn = clockInTime ? new Date(clockInTime) : null;
     const clockOut = clockOutTime ? new Date(clockOutTime) : null;
     if (clockIn && clockOut && clockOut <= clockIn) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
@@ -561,6 +569,18 @@ app.post('/api/attendance/bulk', requireAttendanceAdmin, async (req: AttendanceA
       return clockIn && clockOut && clockOut <= clockIn;
     });
     if (hasInvalidTimes) return res.status(400).json({ error: 'Clock-out time must be after clock-in time' });
+
+    for (const r of records) {
+      const d = new Date(r.date);
+      const locked = await prisma.attendancePeriodLock.findFirst({
+        where: {
+          companyId: req.attendanceAdmin!.companyId,
+          periodStart: { lte: d },
+          periodEnd: { gte: d },
+        },
+      });
+      if (locked) return res.status(409).json({ error: `Attendance is locked for payroll on ${r.date}.` });
+    }
 
     const results = await prisma.$transaction(
       records.map((r: any) =>
@@ -775,9 +795,14 @@ app.get('/api/payroll/payslips', async (req, res) => {
   }
 });
 
-app.post('/api/payroll/generate', async (req, res) => {
+app.post('/api/payroll/generate', requireAttendanceAdmin, async (req: AttendanceAdminRequest, res) => {
   try {
     const { companyId, month } = req.body;
+    if (companyId !== req.attendanceAdmin!.companyId) return res.status(403).json({ error: 'Cross-company changes are forbidden.' });
+    const existing = await prisma.payrollRun.findFirst({ where: { companyId, month } });
+    if (existing && ['LOCKED', 'PAYSLIPS_PUBLISHED', 'PAID', 'FINANCE_APPROVED', 'REVERSED'].includes(existing.status)) {
+      return res.status(409).json({ error: `Payroll run for ${month} is finalized/published and cannot be modified.` });
+    }
     const employees = await prisma.employee.findMany({
       where: { companyId },
     });

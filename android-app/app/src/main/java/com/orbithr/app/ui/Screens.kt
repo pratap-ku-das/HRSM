@@ -558,75 +558,162 @@ private fun LeaveDialog(types: List<LeaveTypeDto>, dismiss: () -> Unit, submit: 
 }
 
 @Composable
-fun PayslipScreen(vm: PayViewModel = hiltViewModel()) {
+fun PayslipScreen(
+    onViewPdf: ((title: String, type: String, id: String) -> Unit)? = null,
+    vm: PayViewModel = hiltViewModel()
+) {
     val state by vm.state.collectAsState()
+    val form16State by vm.form16State.collectAsState()
+    var payTab by remember { mutableStateOf("PAYSLIPS") }
+
     Page("COMPENSATION", "My pay", "Published statements and year-to-date totals") {
-        StateBody(state, retry = vm::refresh) { payslips ->
-            if (payslips.isEmpty()) EmptyState(Icons.Outlined.AccountBalanceWallet, "No published payslips", "Your payroll team has not published a payslip yet.")
-            else {
-                var selectedId by remember(payslips) { mutableStateOf(payslips.first().id) }
-                var showAmounts by remember { mutableStateOf(false) }
-                val selected = payslips.firstOrNull { it.id == selectedId } ?: payslips.first()
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
-                item {
-                    val latest = payslips.first()
-                    Surface(shape = RoundedCornerShape(30.dp), color = Color.Transparent, modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(30.dp), spotColor = Color(0x443E36C8))) {
-                        Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF1D2145), OrbitIndigo, OrbitViolet))).padding(22.dp)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Text("LATEST TAKE-HOME PAY", style = MaterialTheme.typography.labelMedium, color = OrbitCyan); Spacer(Modifier.weight(1f)); TextButton(onClick = { showAmounts = !showAmounts }) { Icon(if (showAmounts) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, null, tint = Color.White); Spacer(Modifier.width(5.dp)); Text(if (showAmounts) "Hide" else "Show", color = Color.White) } }
-                                Text(if (showAmounts) latest.netSalary.money() else "₹ ••••••", style = MaterialTheme.typography.displaySmall, color = Color.White)
-                                Row { Text(latest.month, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = .75f)); Spacer(Modifier.weight(1f)); OrbitStatusBadge(latest.status, Color.White) }
-                                HorizontalDivider(color = Color.White.copy(alpha = .14f))
-                                Row {
-                                    PayMetric("Gross", latest.grossSalary, showAmounts, Modifier.weight(1f))
-                                    PayMetric("Deductions", latest.totalDeductions, showAmounts, Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+            FilterChip(
+                selected = payTab == "PAYSLIPS",
+                onClick = { payTab = "PAYSLIPS" },
+                label = { Text("Monthly Payslips") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = OrbitViolet,
+                    selectedLabelColor = Color.White
+                )
+            )
+            FilterChip(
+                selected = payTab == "FORM16",
+                onClick = { payTab = "FORM16" },
+                label = { Text("Form 16 (TDS)") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = OrbitViolet,
+                    selectedLabelColor = Color.White
+                )
+            )
+        }
+
+        if (payTab == "FORM16") {
+            StateBody(form16State, retry = vm::refreshForm16) { form16List ->
+                if (form16List.isEmpty()) {
+                    EmptyState(Icons.Outlined.Description, "No Form 16 published", "Your payroll administrator has not published Form 16 documents for your profile yet.")
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+                        items(form16List, key = { it.id }) { f16 ->
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = OrbitDarkSurface,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier.size(44.dp).background(OrbitCyan.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Outlined.Description, contentDescription = null, tint = OrbitCyan, modifier = Modifier.size(24.dp))
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Financial Year ${f16.financialYear}", fontWeight = FontWeight.Bold, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                            Text("Certificate of TDS u/s 203", color = OrbitMuted, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        OrbitStatusBadge("PUBLISHED", OrbitMint)
+                                    }
+
+                                    HorizontalDivider(color = Color(0xFF282F45))
+
+                                    Button(
+                                        onClick = { onViewPdf?.invoke("Form 16 - FY ${f16.financialYear}", "FORM16", f16.id) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = OrbitCyan, contentColor = OrbitDarkSurface),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("View Form 16 Part B PDF", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                item { OrbitSectionTitle("Payslip archive", "Choose a month for the full statement") }
-                items(payslips, key = { it.id }) { payslip ->
-                    OrbitListItem(
-                        headline = { Text(payslip.month, fontWeight = FontWeight.Bold) },
-                        supporting = { Text(if (showAmounts) "Gross ${payslip.grossSalary.money()} · Deductions ${payslip.totalDeductions.money()}" else "Published salary statement") },
-                        leading = { Box(Modifier.size(42.dp).background(OrbitViolet.copy(alpha = .1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Description, null, tint = OrbitViolet) } },
-                        trailing = { Column(horizontalAlignment = Alignment.End) { Text(if (showAmounts) payslip.netSalary.money() else "••••••", fontWeight = FontWeight.Bold); Text(payslip.status, style = MaterialTheme.typography.labelMedium, color = orbitStatusColor(payslip.status)) } },
-                        onClick = { selectedId = payslip.id },
-                    )
-                }
-                item { OrbitSectionTitle("Statement details", selected.month) }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PaySummaryCard("Gross", selected.grossSalary, showAmounts, OrbitCyan, Modifier.weight(1f))
-                        PaySummaryCard("Deductions", selected.totalDeductions, showAmounts, OrbitRose, Modifier.weight(1f))
-                        PaySummaryCard("Net pay", selected.netSalary, showAmounts, OrbitMint, Modifier.weight(1f))
-                    }
-                }
-                item {
-                    Surface(shape = RoundedCornerShape(22.dp), color = Color.White, border = BorderStroke(1.dp, Color(0xFFE9EAF2))) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Pay period", fontWeight = FontWeight.Bold)
-                            PayFact("Working days", selected.workingDays.toString())
-                            PayFact("Paid attendance", "${selected.presentDays} present · ${selected.paidLeaveDays} paid leave")
-                            PayFact("Unpaid days", selected.unpaidDays.toString())
-                            PayFact("Payment date", selected.paymentDate?.prettyDate() ?: "Not recorded")
+            }
+        } else {
+            StateBody(state, retry = vm::refresh) { payslips ->
+                if (payslips.isEmpty()) EmptyState(Icons.Outlined.AccountBalanceWallet, "No published payslips", "Your payroll team has not published a payslip yet.")
+                else {
+                    var selectedId by remember(payslips) { mutableStateOf(payslips.first().id) }
+                    var showAmounts by remember { mutableStateOf(false) }
+                    val selected = payslips.firstOrNull { it.id == selectedId } ?: payslips.first()
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
+                        item {
+                            val latest = payslips.first()
+                            Surface(shape = RoundedCornerShape(30.dp), color = Color.Transparent, modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(30.dp), spotColor = Color(0x443E36C8))) {
+                                Box(Modifier.background(Brush.linearGradient(listOf(Color(0xFF1D2145), OrbitIndigo, OrbitViolet))).padding(22.dp)) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) { Text("LATEST TAKE-HOME PAY", style = MaterialTheme.typography.labelMedium, color = OrbitCyan); Spacer(Modifier.weight(1f)); TextButton(onClick = { showAmounts = !showAmounts }) { Icon(if (showAmounts) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, null, tint = Color.White); Spacer(Modifier.width(5.dp)); Text(if (showAmounts) "Hide" else "Show", color = Color.White) } }
+                                        Text(if (showAmounts) latest.netSalary.money() else "₹ ••••••", style = MaterialTheme.typography.displaySmall, color = Color.White)
+                                        Row { Text(latest.month, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = .75f)); Spacer(Modifier.weight(1f)); OrbitStatusBadge(latest.status, Color.White) }
+                                        HorizontalDivider(color = Color.White.copy(alpha = .14f))
+                                        Row {
+                                            PayMetric("Gross", latest.grossSalary, showAmounts, Modifier.weight(1f))
+                                            PayMetric("Deductions", latest.totalDeductions, showAmounts, Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item { OrbitSectionTitle("Payslip archive", "Choose a month for the full statement") }
+                        items(payslips, key = { it.id }) { payslip ->
+                            OrbitListItem(
+                                headline = { Text(payslip.month, fontWeight = FontWeight.Bold) },
+                                supporting = { Text(if (showAmounts) "Gross ${payslip.grossSalary.money()} · Deductions ${payslip.totalDeductions.money()}" else "Published salary statement") },
+                                leading = { Box(Modifier.size(42.dp).background(OrbitViolet.copy(alpha = .1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Description, null, tint = OrbitViolet) } },
+                                trailing = { Column(horizontalAlignment = Alignment.End) { Text(if (showAmounts) payslip.netSalary.money() else "••••••", fontWeight = FontWeight.Bold); Text(payslip.status, style = MaterialTheme.typography.labelMedium, color = orbitStatusColor(payslip.status)) } },
+                                onClick = { selectedId = payslip.id },
+                            )
+                        }
+                        item { OrbitSectionTitle("Statement details", selected.month) }
+                        item {
+                            Button(
+                                onClick = { onViewPdf?.invoke("Payslip ${selected.month}", "PAYSLIP", selected.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = OrbitViolet, contentColor = Color.White),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("View Official Payslip PDF", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PaySummaryCard("Gross", selected.grossSalary, showAmounts, OrbitCyan, Modifier.weight(1f))
+                                PaySummaryCard("Deductions", selected.totalDeductions, showAmounts, OrbitRose, Modifier.weight(1f))
+                                PaySummaryCard("Net pay", selected.netSalary, showAmounts, OrbitMint, Modifier.weight(1f))
+                            }
+                        }
+                        item {
+                            Surface(shape = RoundedCornerShape(22.dp), color = Color.White, border = BorderStroke(1.dp, Color(0xFFE9EAF2))) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("Pay period", fontWeight = FontWeight.Bold)
+                                    PayFact("Working days", selected.workingDays.toString())
+                                    PayFact("Paid attendance", "${selected.presentDays} present · ${selected.paidLeaveDays} paid leave")
+                                    PayFact("Unpaid days", selected.unpaidDays.toString())
+                                    PayFact("Payment date", selected.paymentDate?.prettyDate() ?: "Not recorded")
+                                }
+                            }
+                        }
+                        item { PayComponents("Earnings", "EARNING", selected, showAmounts, OrbitMint) }
+                        item { PayComponents("Deductions", "DEDUCTION", selected, showAmounts, OrbitRose) }
+                        if (selected.componentMeta.any { it.value.kind == "EMPLOYER_CONTRIBUTION" }) item { PayComponents("Employer contributions", "EMPLOYER_CONTRIBUTION", selected, showAmounts, OrbitViolet) }
+                        item {
+                            Surface(shape = RoundedCornerShape(22.dp), color = OrbitMint.copy(alpha = .1f), border = BorderStroke(1.dp, OrbitMint.copy(alpha = .3f))) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    Text("Year to date", fontWeight = FontWeight.Bold, color = OrbitInk)
+                                    PayFact("Gross earnings", if (showAmounts) selected.ytdGross.money() else "₹ ••••••")
+                                    PayFact("Deductions", if (showAmounts) selected.ytdDeductions.money() else "₹ ••••••")
+                                    PayFact("Net pay", if (showAmounts) selected.ytdNet.money() else "₹ ••••••", true)
+                                }
+                            }
                         }
                     }
-                }
-                item { PayComponents("Earnings", "EARNING", selected, showAmounts, OrbitMint) }
-                item { PayComponents("Deductions", "DEDUCTION", selected, showAmounts, OrbitRose) }
-                if (selected.componentMeta.any { it.value.kind == "EMPLOYER_CONTRIBUTION" }) item { PayComponents("Employer contributions", "EMPLOYER_CONTRIBUTION", selected, showAmounts, OrbitViolet) }
-                item {
-                    Surface(shape = RoundedCornerShape(22.dp), color = OrbitMint.copy(alpha = .1f), border = BorderStroke(1.dp, OrbitMint.copy(alpha = .3f))) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                            Text("Year to date", fontWeight = FontWeight.Bold, color = OrbitInk)
-                            PayFact("Gross earnings", if (showAmounts) selected.ytdGross.money() else "₹ ••••••")
-                            PayFact("Deductions", if (showAmounts) selected.ytdDeductions.money() else "₹ ••••••")
-                            PayFact("Net pay", if (showAmounts) selected.ytdNet.money() else "₹ ••••••", true)
-                        }
-                    }
-                }
                 }
             }
         }
@@ -698,7 +785,7 @@ private fun ExpenseDialog(dismiss: () -> Unit, submit: (SubmitExpenseRequest) ->
 }
 
 @Composable
-fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit, payroll:()->Unit, profile:()->Unit, company:()->Unit, security:()->Unit, operations:()->Unit, settings:()->Unit) {
+fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: () -> Unit, attendanceRequests: () -> Unit, approvals: () -> Unit, notifications: () -> Unit, workspace: () -> Unit, payroll:()->Unit, profile:()->Unit, company:()->Unit, security:()->Unit, operations:()->Unit, settings:()->Unit, assets: () -> Unit = {}) {
     Page(me.user.mobileWorkspaceTitle(), "More from OrbitHR", "Profile and permitted tools") {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
@@ -726,6 +813,7 @@ fun MoreScreen(me: MeDto, logout: () -> Unit, expenses: () -> Unit, employees: (
             if (me.user.hasPermission("workflow.review")) item { MoreAction(Icons.Outlined.Approval, "Approval inbox", "Review requests assigned to you", OrbitMint, approvals) }
             if (me.user.canOpenPeopleDirectory()) item { MoreAction(Icons.Outlined.Groups, "People directory", if (me.user.hasPermission("employee.manage")) "Employees and onboarding" else "Your permitted team", OrbitCyan, employees) }
             if (me.user.hasPermission("payroll.manage")) item { MoreAction(Icons.Outlined.Calculate, "Payroll processing", "Attendance review, approval and payslip publication", OrbitAmber, payroll) }
+            item { MoreAction(Icons.Outlined.Devices, "My assets", "Acknowledge receipt, report issues and request return", OrbitCyan, assets) }
             item { MoreAction(Icons.Outlined.FolderOpen, "Documents, assets & goals", "Your verified records and assigned equipment", OrbitViolet, workspace) }
             item { MoreAction(Icons.Outlined.NotificationsNone, "Notifications", "Your persistent OrbitHR inbox", OrbitMint, notifications) }
             item {

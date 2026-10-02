@@ -29,7 +29,57 @@ data class ApprovalWorkspace(val inbox:List<ApprovalInboxDto>,val mine:List<Work
 @HiltViewModel class ApprovalViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<ApprovalWorkspace>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{runCatching{ApprovalWorkspace(repo.approvalInbox(),repo.myRequests())}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun act(id:String,action:String,comment:String?=null)=viewModelScope.launch{_state.value=_state.value.copy(loading=true,error=null);runCatching{repo.workflowAction(id,action,comment)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}}}
 @HiltViewModel class NotificationViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<List<NotificationDto>>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{runCatching{repo.notifications()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun read(id:String)=viewModelScope.launch{runCatching{repo.readNotification(id)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(error=it.userMessage())}};fun readAll()=viewModelScope.launch{runCatching{repo.readAllNotifications()}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(error=it.userMessage())}}}
 @HiltViewModel class LeaveViewModel @Inject constructor(private val repo: OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<LeavesDto>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{runCatching{repo.leaves()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun apply(body:ApplyLeaveRequest)=viewModelScope.launch{_state.value=_state.value.copy(loading=true,error=null);runCatching{repo.applyLeave(body)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}}}
-@HiltViewModel class PayViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<List<PayslipDto>>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{_state.value=_state.value.copy(loading=true,error=null);runCatching{repo.payslips()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}}}
+@HiltViewModel class PayViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){
+    private val _state=MutableStateFlow(LoadState<List<PayslipDto>>())
+    val state=_state.asStateFlow()
+    private val _form16State=MutableStateFlow(LoadState<List<Form16Dto>>())
+    val form16State=_form16State.asStateFlow()
+    init{
+        refresh()
+        refreshForm16()
+    }
+    fun refresh()=viewModelScope.launch{
+        _state.value=_state.value.copy(loading=true,error=null)
+        runCatching{repo.payslips()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}
+    }
+    fun refreshForm16()=viewModelScope.launch{
+        _form16State.value=_form16State.value.copy(loading=true,error=null)
+        runCatching{repo.form16List()}.onSuccess{_form16State.value=LoadState(it,false)}.onFailure{_form16State.value=LoadState(error=it.userMessage(),loading=false)}
+    }
+}
+@HiltViewModel class MyAssetsViewModel @Inject constructor(private val repo: OrbitRepository): ViewModel() {
+    private val _state=MutableStateFlow(LoadState<List<MyAssetDto>>())
+    val state=_state.asStateFlow()
+    private val _actionMessage=MutableStateFlow<String?>(null)
+    val actionMessage=_actionMessage.asStateFlow()
+    init{refresh()}
+    fun refresh()=viewModelScope.launch{
+        _state.value=_state.value.copy(loading=true,error=null)
+        runCatching{repo.myAssets()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}
+    }
+    fun acknowledge(assetId:String,notes:String?=null,deviceInfo:String?=null)=viewModelScope.launch{
+        _state.value=_state.value.copy(loading=true)
+        runCatching{repo.acknowledgeAsset(assetId,notes,deviceInfo)}.onSuccess{
+            _actionMessage.value="Asset receipt acknowledged successfully."
+            refresh()
+        }.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}
+    }
+    fun requestReturn(assetId:String,reason:String,condition:String?=null)=viewModelScope.launch{
+        _state.value=_state.value.copy(loading=true)
+        runCatching{repo.requestAssetReturn(assetId,reason,condition)}.onSuccess{
+            _actionMessage.value="Asset return request submitted to HR/Operations."
+            refresh()
+        }.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}
+    }
+    fun reportIssue(assetId:String,issueDescription:String,severity:String="MEDIUM")=viewModelScope.launch{
+        _state.value=_state.value.copy(loading=true)
+        runCatching{repo.reportAssetIssue(assetId,issueDescription,severity)}.onSuccess{
+            _actionMessage.value="Asset issue reported to IT support."
+            refresh()
+        }.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}
+    }
+    fun clearActionMessage(){_actionMessage.value=null}
+}
 @HiltViewModel class PayrollAdminViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<PayrollConfigurationOptionDto>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{runCatching{repo.payrollConfiguration()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun create(month:String)=viewModelScope.launch{_state.value=_state.value.copy(loading=true);runCatching{repo.createPayrollRun(month)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}};fun advance(run:PayrollRunMobileDto)=viewModelScope.launch{_state.value=_state.value.copy(loading=true);runCatching{repo.advancePayroll(run)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}}}
 @HiltViewModel class ExpenseViewModel @Inject constructor(private val repo:OrbitRepository):ViewModel(){private val _state=MutableStateFlow(LoadState<List<ExpenseDto>>());val state=_state.asStateFlow();init{refresh()};fun refresh()=viewModelScope.launch{runCatching{repo.expenses()}.onSuccess{_state.value=LoadState(it,false)}.onFailure{_state.value=LoadState(error=it.userMessage(),loading=false)}};fun submit(body:SubmitExpenseRequest)=viewModelScope.launch{_state.value=_state.value.copy(loading=true);runCatching{repo.submitExpense(body)}.onSuccess{refresh()}.onFailure{_state.value=_state.value.copy(loading=false,error=it.userMessage())}}}
 @HiltViewModel

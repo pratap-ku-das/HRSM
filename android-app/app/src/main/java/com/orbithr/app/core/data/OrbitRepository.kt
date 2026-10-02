@@ -178,6 +178,35 @@ import dagger.hilt.android.qualifiers.ApplicationContext
     suspend fun openEmployeeDocument(id:String):OpenedDocument{
         return openProtectedFile(api.employeeDocumentFile(id),"employee-document")
     }
+    suspend fun fetchPayslipPdfFile(id: String): File {
+        val response = api.payslipPdf(id)
+        if (!response.isSuccessful) throw HttpException(response)
+        val body = response.body() ?: error("Payslip PDF is empty.")
+        val folder = File(context.cacheDir, "pdf-cache").apply { mkdirs() }
+        val file = File(folder, "payslip-$id.pdf")
+        body.byteStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+        return file
+    }
+    suspend fun form16List(): List<Form16Dto> = api.form16List().data
+    suspend fun fetchForm16PdfFile(id: String): File {
+        val response = api.form16File(id)
+        if (!response.isSuccessful) throw HttpException(response)
+        val body = response.body() ?: error("Form 16 PDF is empty.")
+        val folder = File(context.cacheDir, "pdf-cache").apply { mkdirs() }
+        val file = File(folder, "form16-$id.pdf")
+        body.byteStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+        return file
+    }
+    suspend fun myAssets(): List<MyAssetDto> = api.myAssets().data
+    suspend fun acknowledgeAsset(id: String, notes: String? = null, deviceInfo: String? = null) {
+        api.acknowledgeAsset(id, AssetAcknowledgeRequest(notes, deviceInfo))
+    }
+    suspend fun requestAssetReturn(id: String, reason: String, condition: String? = null) {
+        api.requestAssetReturn(id, AssetReturnRequest(reason, condition))
+    }
+    suspend fun reportAssetIssue(id: String, issueDescription: String, severity: String = "MEDIUM") {
+        api.reportAssetIssue(id, AssetIssueRequest(issueDescription, severity))
+    }
     private fun openProtectedFile(response:retrofit2.Response<okhttp3.ResponseBody>,fallbackName:String):OpenedDocument{
         if(!response.isSuccessful)throw HttpException(response)
         val body=response.body()?:error("Document file was empty.")

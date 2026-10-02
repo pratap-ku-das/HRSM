@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, Clock3, Landmark, MapPin, Save, Settings } from 'lucide-react';
+import { Building2, Clock3, Landmark, MapPin, Save, Settings, Sparkles } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { api } from '../../services/api';
 import type { CompanySettings } from '../../types';
+import { StatutoryWizard } from '../../components/StatutoryWizard';
 
 const initial: CompanySettings = {
   id: '',
@@ -108,18 +109,38 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const [showWizard, setShowWizard] = useState(false);
+
   return (
     <div className="neo-page neo-settings space-y-5">
-      <header className="border-b border-slate-800 pb-4">
-        <h1 className="flex gap-2 text-2xl font-bold">
-          <Settings className="text-brand-400" />
-          Workspace Settings
-        </h1>
-        <p className="text-xs text-slate-400">
-          Complete legal registration, statutory identity, contact information,
-          payroll calendar and workplace defaults.
-        </p>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+        <div>
+          <h1 className="flex gap-2 text-2xl font-bold">
+            <Settings className="text-brand-400" />
+            Workspace Settings
+          </h1>
+          <p className="text-xs text-slate-400">
+            Complete legal registration, statutory identity, contact information,
+            payroll calendar and workplace defaults.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowWizard(v => !v)}
+          className="flex items-center gap-2 bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg"
+        >
+          <Sparkles className="w-4 h-4" />
+          {showWizard ? 'Hide Statutory Wizard' : 'Open Statutory Onboarding Wizard'}
+        </button>
       </header>
+
+      {showWizard && (
+        <StatutoryWizard
+          initialSettings={form}
+          onSaved={() => void load()}
+          onClose={() => setShowWizard(false)}
+        />
+      )}
       <form onSubmit={save} className="space-y-4">
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
           <h2 className="mb-4 flex items-center gap-2 font-bold">

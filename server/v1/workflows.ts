@@ -828,6 +828,13 @@ export function createWorkflowRouter(
                 data: { status: "REJECTED" },
               }) as never,
             );
+          if (instance.subjectType === "AttendanceRequest")
+            operations.push(
+              prisma.attendanceRequest.updateMany({
+                where: { id: instance.subjectId, companyId },
+                data: { status: "REJECTED" },
+              }) as never,
+            );
           await prisma.$transaction(operations);
           const notice = workflowResultNotification(instance, false);
           await emitNotification(prisma, {
@@ -941,6 +948,13 @@ export function createWorkflowRouter(
           if (instance.subjectType === "EmployeeServiceRequest")
             operations.push(
               prisma.employeeServiceRequest.updateMany({
+                where: { id: instance.subjectId, companyId },
+                data: { status: "APPROVED" },
+              }) as never,
+            );
+          if (instance.subjectType === "AttendanceRequest")
+            operations.push(
+              prisma.attendanceRequest.updateMany({
                 where: { id: instance.subjectId, companyId },
                 data: { status: "APPROVED" },
               }) as never,

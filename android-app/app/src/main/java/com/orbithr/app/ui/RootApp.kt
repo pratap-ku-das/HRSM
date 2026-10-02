@@ -27,7 +27,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import com.orbithr.app.SessionState
 import com.orbithr.app.core.model.AttendanceVerificationResult
 import com.orbithr.app.core.model.MeDto
@@ -307,8 +309,15 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 }
                 composable("attendance") { AttendanceScreen(verifyAttendance) }
                 composable("leave") { LeaveScreen() }
-                composable("pay") { PayslipScreen() }
-                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }, { nav.navigate("payrollAdmin") }, { nav.navigate("profile") }, { nav.navigate("company") }, { nav.navigate("security") }, { nav.navigate("operations") }, { nav.navigate("settings") }) }
+                composable("pay") {
+                    PayslipScreen(
+                        onViewPdf = { title, type, id ->
+                            val encodedTitle = java.net.URLEncoder.encode(title, "UTF-8")
+                            nav.navigate("pdf-viewer/$type/$id?title=$encodedTitle")
+                        }
+                    )
+                }
+                composable("more") { MoreScreen(me, logout, { nav.navigate("expenses") }, { nav.navigate("employees") }, { nav.navigate("attendanceRequests") }, { nav.navigate("approvals") }, { nav.navigate("notifications") }, { nav.navigate("workspace") }, { nav.navigate("payrollAdmin") }, { nav.navigate("profile") }, { nav.navigate("company") }, { nav.navigate("security") }, { nav.navigate("operations") }, { nav.navigate("settings") }, { nav.navigate("my-assets") }) }
                 composable("expenses") { ExpenseScreen(back = { nav.popBackStack() }) }
                 composable("employees") { EmployeeScreen(back = { nav.popBackStack() }, canManage = "employee.manage" in me.user.permissions) }
                 composable("attendanceRequests") { AttendanceRequestsScreen(back = { nav.popBackStack() }) }
@@ -321,6 +330,29 @@ private fun SignedInApp(me: MeDto, logout: () -> Unit, verifyAttendance: (String
                 composable("security") { NativeSecurityScreen(back = { nav.popBackStack() }, signedOut = logout) }
                 composable("operations") { NativeOperationsScreen(back = { nav.popBackStack() }) }
                 composable("settings") { NativeSettingsScreen(back = { nav.popBackStack() }) }
+                composable("my-assets") { MyAssetsScreen(onBack = { nav.popBackStack() }) }
+                composable(
+                    route = "pdf-viewer/{type}/{id}?title={title}",
+                    arguments = listOf(
+                        navArgument("type") { type = NavType.StringType },
+                        navArgument("id") { type = NavType.StringType },
+                        navArgument("title") {
+                            type = NavType.StringType
+                            defaultValue = "Document"
+                        }
+                    )
+                ) { backStackEntry ->
+                    val type = backStackEntry.arguments?.getString("type").orEmpty()
+                    val id = backStackEntry.arguments?.getString("id").orEmpty()
+                    val rawTitle = backStackEntry.arguments?.getString("title").orEmpty()
+                    val title = runCatching { java.net.URLDecoder.decode(rawTitle, "UTF-8") }.getOrDefault(rawTitle)
+                    PdfViewerScreen(
+                        title = title,
+                        type = type,
+                        documentId = id,
+                        onBack = { nav.popBackStack() }
+                    )
+                }
             }
         }
     }

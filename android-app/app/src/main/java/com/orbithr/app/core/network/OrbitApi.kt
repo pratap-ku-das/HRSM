@@ -83,6 +83,12 @@ interface OrbitApi {
     @POST("payroll/runs/{id}/submit") suspend fun submitPayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
     @POST("payroll/runs/{id}/approve") suspend fun approvePayroll(@Path("id") id:String,@Body body:PayrollDecisionRequest=PayrollDecisionRequest()):ApiEnvelope<PayrollRunMobileDto>
     @POST("payroll/runs/{id}/generate-payslips") suspend fun generatePayrollPayslips(@Path("id") id:String):ApiEnvelope<Map<String,Int>>
-    @POST("payroll/runs/{id}/publish") suspend fun publishPayroll(@Path("id") id:String):ApiEnvelope<PayrollRunMobileDto>
     @Streaming @GET("employee-documents/{id}/file") suspend fun employeeDocumentFile(@Path("id") id:String):Response<ResponseBody>
+    @Streaming @GET("me/payroll/payslips/{id}/pdf") suspend fun payslipPdf(@Path("id") id: String): Response<ResponseBody>
+    @GET("me/payroll/form16") suspend fun form16List(): ApiEnvelope<List<Form16Dto>>
+    @Streaming @GET("me/payroll/form16/{id}/file") suspend fun form16File(@Path("id") id: String): Response<ResponseBody>
+    @GET("me/assets") suspend fun myAssets(): ApiEnvelope<List<MyAssetDto>>
+    @POST("me/assets/{id}/acknowledge") suspend fun acknowledgeAsset(@Path("id") id: String, @Body body: AssetAcknowledgeRequest): ApiEnvelope<Map<String, Boolean>>
+    @POST("me/assets/{id}/return-request") suspend fun requestAssetReturn(@Path("id") id: String, @Body body: AssetReturnRequest): ApiEnvelope<Map<String, Boolean>>
+    @POST("me/assets/{id}/report-issue") suspend fun reportAssetIssue(@Path("id") id: String, @Body body: AssetIssueRequest): ApiEnvelope<Map<String, Boolean>>
 }

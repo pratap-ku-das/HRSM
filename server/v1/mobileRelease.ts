@@ -1,12 +1,12 @@
 import { Router } from "express";
 
 export const androidRelease = Object.freeze({
-  versionCode: 27,
-  versionName: "1.4.7",
+  versionCode: 28,
+  versionName: "1.4.8",
   downloadUrl:
     "https://hr.balajione.dev/downloads/OrbitHR.apk",
   releaseNotes:
-    "Attendance re-clock-in support, streamlined punch flow, single-row analytics, and optimized GPS workday route tracking.",
+    "Native Payslip & Form 16 PDF Viewer with pinch-to-zoom and offline ephemeral security, My Assets self-service acknowledgement and return workflows, and ATS candidate conversion.",
   publishedAt: "2026-10-02",
 });
 

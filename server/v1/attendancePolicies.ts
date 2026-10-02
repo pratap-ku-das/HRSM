@@ -319,6 +319,21 @@ export function createAttendancePolicyRouter(
             "ATTENDANCE_NOT_FOUND",
             "Attendance record was not found.",
           );
+        if (
+          await prisma.attendancePeriodLock.findFirst({
+            where: {
+              companyId,
+              periodStart: { lte: date },
+              periodEnd: { gte: date },
+            },
+          })
+        )
+          return fail(
+            res,
+            409,
+            "ATTENDANCE_PERIOD_LOCKED",
+            "Attendance is locked for payroll.",
+          );
         const assignment = await prisma.shiftAssignment.findFirst({
           where: {
             companyId,

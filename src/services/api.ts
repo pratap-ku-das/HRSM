@@ -379,6 +379,89 @@ export const api = {
   createHolidayV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<Holiday>>(`${API_BASE}/v1/operations/holidays`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   createAnnouncementV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<Announcement>>(`${API_BASE}/v1/operations/announcements`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
   createCompanyDocumentV1: async(body:Record<string,unknown>) => (await fetchJSON<ApiEnvelope<CompanyDocument>>(`${API_BASE}/v1/operations/company-documents`,{method:'POST',headers:{Authorization:`Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY)||''}`},body:JSON.stringify(body)})).data,
+  getStatutoryStatusV1: async () => (await fetchJSON<ApiEnvelope<{
+    completionPercentage: number;
+    isFullyCompliant: boolean;
+    statutoryFields: Record<string, string | null>;
+    missingFields: string[];
+    documents: Array<{ id: string; docType: string; status: 'PENDING' | 'VERIFIED' | 'REJECTED'; title: string; fileName: string; uploadedAt: string; remarks?: string }>;
+  }>>(`${API_BASE}/v1/workspace-settings/statutory-status`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  saveStatutoryDraftV1: async (body: Partial<CompanySettings>) => (await fetchJSON<ApiEnvelope<CompanySettings>>(`${API_BASE}/v1/workspace-settings/statutory-draft`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify(body),
+  })).data,
+  uploadStatutoryDocumentV1: async (file: File, docType: string, expiryDate?: string) => {
+    const body = new FormData();
+    body.append('document', file);
+    body.append('docType', docType);
+    if (expiryDate) body.append('expiryDate', expiryDate);
+    return (await fetchJSON<ApiEnvelope<{ id: string; docType: string; status: string; title: string; fileName: string }>>(`${API_BASE}/v1/workspace-settings/statutory-documents/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body,
+    })).data;
+  },
+  verifyStatutoryDocumentV1: async (id: string, status: 'VERIFIED' | 'REJECTED', remarks?: string) => (await fetchJSON<ApiEnvelope<{ id: string; docType: string; status: string; title: string; remarks?: string }>>(`${API_BASE}/v1/workspace-settings/statutory-documents/${id}/verify`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify({ status, remarks }),
+  })).data,
+  convertCandidateToEmployeeV1: async (id: string, payload: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    dateOfJoining: string;
+    departmentId: string;
+    designationId: string;
+    employmentType?: string;
+    monthlyCtc?: number;
+    employeeCode?: string;
+  }) => (await fetchJSON<ApiEnvelope<{
+    candidate: { id: string; fullName: string; stage: string; hiredAt: string; employeeId: string };
+    employee: { id: string; employeeCode: string; firstName: string; lastName: string; email: string };
+    onboarding: { id: string; status: string };
+    activationToken?: string;
+  }>>(`${API_BASE}/v1/recruitment/applicants/${id}/convert-to-employee`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify(payload),
+  })).data,
+  getMyAssetsV1: async () => (await fetchJSON<ApiEnvelope<Array<{
+    id: string;
+    name: string;
+    category: string;
+    serialNumber: string;
+    assignedDate: string;
+    purchaseDate: string;
+    status: string;
+    condition: string;
+    isAcknowledged: boolean;
+    acknowledgedAt: string | null;
+    hasPendingReturn: boolean;
+    hasPendingIssue: boolean;
+    returnRequestStatus: string | null;
+  }>>>(`${API_BASE}/v1/me/assets`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+  })).data,
+  acknowledgeMyAssetV1: async (id: string, body?: { notes?: string; deviceInfo?: string }) => (await fetchJSON<ApiEnvelope<{ success: boolean; assetId: string; acknowledgedAt: string }>>(`${API_BASE}/v1/me/assets/${id}/acknowledge`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify(body || {}),
+  })).data,
+  reportMyAssetIssueV1: async (id: string, body: { issueDescription: string; severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' }) => (await fetchJSON<ApiEnvelope<{ success: boolean; message: string }>>(`${API_BASE}/v1/me/assets/${id}/report-issue`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify(body),
+  })).data,
+  requestMyAssetReturnV1: async (id: string, body: { reason: string; condition?: string }) => (await fetchJSON<ApiEnvelope<{ success: boolean; message: string }>>(`${API_BASE}/v1/me/assets/${id}/return-request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    body: JSON.stringify(body),
+  })).data,
   uploadCompanyDocumentV1: async(file:File,category:string,title:string) => {
     const body = new FormData();
     body.append('document', file);
