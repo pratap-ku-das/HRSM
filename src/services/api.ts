@@ -744,9 +744,25 @@ export const api = {
 
   // Payroll Compliance, Full & Final (F&F) Settlement & Form 16
   getSettlements: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/payroll/compliance/settlements`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getSettlementPreview: async (employeeId: string, lastWorkingDay?: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/preview/${employeeId}${lastWorkingDay ? `?lastWorkingDay=${encodeURIComponent(lastWorkingDay)}` : ''}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   calculateSettlement: async (body: any) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/calculate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   approveSettlement: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   paySettlement: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/settlements/${id}/pay`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  downloadSettlementPdf: async (id: string, employeeCode = 'EMP') => {
+    const res = await fetch(`${API_BASE}/v1/payroll/compliance/settlements/${id}/pdf`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }
+    });
+    if (!res.ok) throw new Error('Failed to download settlement voucher');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `exit-settlement-${employeeCode}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
   getForm16List: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/payroll/compliance/form16`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   publishForm16: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/${id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   batchGenerateForm16: async (body: { financialYear: string; publishAll?: boolean }) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/generate-batch`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,

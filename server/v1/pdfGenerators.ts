@@ -337,3 +337,172 @@ export function generateForm16PdfBuffer(data: {
 
   return Buffer.from(doc.output('arraybuffer'));
 }
+
+export interface ExitSettlementPdfPayload {
+  company: {
+    name: string;
+    address?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
+  settings: {
+    legalEntityName?: string | null;
+    panNumber?: string | null;
+    tanNumber?: string | null;
+    currencySymbol?: string | null;
+  };
+  employee: {
+    firstName: string;
+    lastName: string;
+    employeeCode: string;
+    designation?: string | null;
+    department?: string | null;
+    dateOfJoining: string | Date;
+    lastWorkingDay: string | Date;
+  };
+  settlement: {
+    id: string;
+    status: string;
+    unpaidSalary: number;
+    leaveEncashment: number;
+    gratuity: number;
+    bonus: number;
+    recoveries: number;
+    loanRecovery: number;
+    taxDeduction: number;
+    netSettlement: number;
+    calculatedAt?: Date | string | null;
+    approvedAt?: Date | string | null;
+    paidAt?: Date | string | null;
+    breakdown?: Record<string, any> | null;
+  };
+}
+
+export function generateExitSettlementPdfBuffer(data: ExitSettlementPdfPayload): Buffer {
+  const { company, settings, employee, settlement } = data;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+  const pageWidth = 210;
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const navy: [number, number, number] = [22, 39, 73];
+  const emerald: [number, number, number] = [5, 150, 105];
+  const rose: [number, number, number] = [225, 29, 72];
+  const grey: [number, number, number] = [100, 116, 139];
+  const line: [number, number, number] = [226, 232, 240];
+
+  const dojStr = new Date(employee.dateOfJoining).toLocaleDateString('en-IN');
+  const lwdStr = new Date(employee.lastWorkingDay).toLocaleDateString('en-IN');
+
+  // Header Title
+  doc.setFillColor(...navy);
+  doc.rect(0, 0, pageWidth, 28, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('FULL & FINAL SETTLEMENT & NO-DUES CLEARANCE VOUCHER', margin, 12);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`${settings.legalEntityName || company.name} — Terminal Benefits Statement`, margin, 18);
+  doc.setFontSize(8);
+  doc.text(`Status: ${settlement.status} | Voucher: ${settlement.id.slice(0, 8).toUpperCase()}`, pageWidth - margin, 15, { align: 'right' });
+
+  let y = 35;
+  const section = (title: string) => {
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(margin, y, contentWidth, 7, 1.5, 1.5, 'F');
+    doc.setTextColor(...navy);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(title, margin + 3, y + 4.8);
+    y += 11;
+  };
+
+  // Section 1: Employee Particulars
+  section('1. EXITING EMPLOYEE DETAILS & SERVICE TENURE');
+  doc.setTextColor(...grey); doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('EMPLOYEE NAME', margin, y);
+  doc.text('EMPLOYEE CODE', margin + 65, y);
+  doc.text('DESIGNATION / DEPT', margin + 115, y);
+  doc.text('DOJ — LWD', margin + 160, y);
+  y += 4;
+  doc.setTextColor(...navy); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+  doc.text(`${employee.firstName} ${employee.lastName}`, margin, y);
+  doc.text(employee.employeeCode, margin + 65, y);
+  doc.text(`${employee.designation || 'Staff'} · ${employee.department || 'General'}`, margin + 115, y, { maxWidth: 42 });
+  doc.text(`${dojStr} to ${lwdStr}`, margin + 160, y);
+  y += 12;
+
+  // Section 2: Statement of Accounts (Additions vs Deductions)
+  section('2. STATEMENT OF SETTLEMENT DUES');
+  const grossAdditions = settlement.unpaidSalary + settlement.leaveEncashment + settlement.gratuity + settlement.bonus;
+  const totalDeductions = settlement.recoveries + settlement.loanRecovery + settlement.taxDeduction;
+
+  const items: Array<{ category: 'EARNING' | 'DEDUCTION'; label: string; amount: number; statutoryNote?: string }> = [
+    { category: 'EARNING', label: 'Pro-rata Unpaid Salary (Final Month)', amount: settlement.unpaidSalary },
+    { category: 'EARNING', label: 'Leave Encashment (Earned Leave Balance)', amount: settlement.leaveEncashment, statutoryNote: 'Sec 10(10AA) exempt up to ₹25L' },
+    { category: 'EARNING', label: 'Gratuity (Payment of Gratuity Act 1972)', amount: settlement.gratuity, statutoryNote: 'Sec 10(10) exempt up to ₹20L' },
+    { category: 'EARNING', label: 'Bonus / Ex-gratia / Statutory Additions', amount: settlement.bonus },
+    { category: 'DEDUCTION', label: 'Outstanding Loan / Advance Recovery', amount: settlement.loanRecovery },
+    { category: 'DEDUCTION', label: 'Notice Shortfall / Asset Cost / Other Recoveries', amount: settlement.recoveries },
+    { category: 'DEDUCTION', label: 'Income Tax Deduction (TDS)', amount: settlement.taxDeduction },
+  ];
+
+  items.forEach((item, i) => {
+    if (i % 2 === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentWidth, 6.5, 'F');
+    }
+    doc.setTextColor(...navy);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text(item.label, margin + 3, y + 4.5);
+    if (item.statutoryNote) {
+      doc.setTextColor(...grey);
+      doc.setFontSize(6.5);
+      doc.text(`(${item.statutoryNote})`, margin + 78, y + 4.5);
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...(item.category === 'EARNING' ? emerald : rose));
+    const prefix = item.category === 'EARNING' ? '+' : '-';
+    doc.text(`${prefix} ${money(item.amount)}`, pageWidth - margin - 3, y + 4.5, { align: 'right' });
+    y += 6.5;
+  });
+  y += 5;
+
+  // Totals & Net Pay Box
+  doc.setFillColor(240, 253, 244);
+  doc.roundedRect(margin, y, contentWidth, 14, 2, 2, 'F');
+  doc.setDrawColor(...emerald);
+  doc.roundedRect(margin, y, contentWidth, 14, 2, 2, 'D');
+
+  doc.setTextColor(...emerald);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('NET SETTLEMENT PAYABLE:', margin + 4, y + 9);
+  doc.setFontSize(12);
+  doc.text(money(settlement.netSettlement), pageWidth - margin - 4, y + 9.5, { align: 'right' });
+  y += 20;
+
+  // Section 3: Clearance and Signatures
+  section('3. INTER-DEPARTMENTAL CLEARANCE & NO-DUES SIGN-OFF');
+  doc.setTextColor(...grey); doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+  doc.text('I hereby confirm that I have returned all company property (laptops, identity cards, access tokens) and accept', margin, y);
+  y += 3.5;
+  doc.text('this settlement as full, final and complete satisfaction of all legal dues, claims and service entitlements.', margin, y);
+  y += 12;
+
+  const colW = contentWidth / 3;
+  doc.setDrawColor(...line);
+  doc.line(margin + 5, y, margin + colW - 5, y);
+  doc.line(margin + colW + 5, y, margin + colW * 2 - 5, y);
+  doc.line(margin + colW * 2 + 5, y, margin + contentWidth - 5, y);
+  y += 4;
+
+  doc.setTextColor(...navy); doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
+  doc.text('Exiting Employee Signature', margin + colW / 2, y, { align: 'center' });
+  doc.text('IT & Assets Clearance', margin + colW * 1.5, y, { align: 'center' });
+  doc.text('HR & Finance Authorized Signatory', margin + colW * 2.5, y, { align: 'center' });
+
+  return Buffer.from(doc.output('arraybuffer'));
+}

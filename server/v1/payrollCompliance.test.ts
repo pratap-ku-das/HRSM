@@ -110,10 +110,89 @@ describe('Payroll Compliance PDF Streaming API', () => {
     },
     employee: {
       findUnique: vi.fn(async () => mockEmployee),
+      findFirst: vi.fn(async ({ where }) => {
+        if (where.id === employeeId || where.companyId === companyId) {
+          return mockEmployee;
+        }
+        return null;
+      }),
+    },
+    employeeSalaryRevision: {
+      findFirst: vi.fn(async () => ({
+        annualCtc: 1200000,
+        structure: {
+          components: [
+            { code: 'BASIC', kind: 'EARNING', value: 50000, method: 'FIXED' },
+            { code: 'HRA', kind: 'EARNING', value: 25000, method: 'FIXED' },
+          ],
+        },
+        componentValues: { BASIC: 50000, HRA: 25000 },
+      })),
+    },
+    employeeLoan: {
+      findMany: vi.fn(async () => [
+        { id: 'loan-1', employeeId, companyId, principal: 50000, outstanding: 20000, status: 'ACTIVE', startsOn: new Date('2025-01-01') },
+      ]),
+      aggregate: vi.fn(async () => ({ _sum: { outstanding: 20000 } })),
+      update: vi.fn(async ({ data }) => ({ id: 'loan-1', ...data })),
+    },
+    loanRepayment: {
+      create: vi.fn(async ({ data }) => ({ id: 'repay-1', ...data })),
+    },
+    asset: {
+      findMany: vi.fn(async () => [
+        { id: 'asset-1', name: 'MacBook Pro 16', serialNumber: 'MBP-2024-001', status: 'ASSIGNED' },
+      ]),
+    },
+    attendanceRecord: {
+      findMany: vi.fn(async () => [
+        { id: 'att-1', status: 'PRESENT', date: new Date('2026-03-01') },
+        { id: 'att-2', status: 'PRESENT', date: new Date('2026-03-02') },
+      ]),
+    },
+    fullFinalSettlement: {
+      findMany: vi.fn(async () => [
+        {
+          id: 'settlement-001',
+          companyId,
+          employeeId,
+          lastWorkingDay: new Date('2026-03-31'),
+          status: 'CALCULATED',
+          unpaidSalary: 50000,
+          leaveEncashment: 25000,
+          gratuity: 150000,
+          bonus: 10000,
+          recoveries: 0,
+          loanRecovery: 20000,
+          taxDeduction: 15000,
+          netSettlement: 200000,
+          employee: mockEmployee,
+        },
+      ]),
+      findFirst: vi.fn(async ({ where }) => ({
+        id: where.id,
+        companyId,
+        employeeId,
+        lastWorkingDay: new Date('2026-03-31'),
+        status: where.status || 'APPROVED',
+        unpaidSalary: 50000,
+        leaveEncashment: 25000,
+        gratuity: 150000,
+        bonus: 10000,
+        recoveries: 0,
+        loanRecovery: 20000,
+        taxDeduction: 15000,
+        netSettlement: 200000,
+        employee: mockEmployee,
+      })),
+      upsert: vi.fn(async ({ create }) => ({ id: 'settlement-001', ...create })),
+      update: vi.fn(async ({ data }) => ({ id: 'settlement-001', ...data })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     auditLog: {
       create: vi.fn(async () => ({ id: 'audit-1' })),
     },
+    $transaction: vi.fn(async (cb) => cb(prismaMock)),
   };
 
   const app = express();
@@ -123,8 +202,8 @@ describe('Payroll Compliance PDF Streaming API', () => {
       id: 'usr-employee-1',
       companyId,
       employeeId,
-      role: 'EMPLOYEE',
-      permissions: ['payroll.read'],
+      role: 'ADMIN',
+      permissions: ['payroll.read', 'payroll.manage', 'payroll.approve'],
     };
     next();
   };
@@ -156,5 +235,68 @@ describe('Payroll Compliance PDF Streaming API', () => {
       .get('/api/v1/me/payroll/form16/form16-other/file');
 
     expect(res.status).toBe(404);
+  });
+
+  describe('P2.5 Automated Full & Final (F&F) Settlement API', () => {
+    it('returns preview with automated gratuity, leave encashment, active loans, and assets', async () => {
+      const res = await request(app)
+        .get(`/api/v1/payroll/compliance/settlements/preview/${employeeId}?lastWorkingDay=2026-03-31`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.employee.employeeCode).toBe('EMP001');
+      expect(res.body.data.monthlyBasic).toBe(50000);
+      expect(res.body.data.activeLoans.length).toBe(1);
+      expect(res.body.data.assignedAssets.length).toBe(1);
+      expect(res.body.data.preview.gratuity).toBeDefined();
+      expect(res.body.data.preview.leaveEncashment).toBeDefined();
+      expect(res.body.data.preview.netSettlement).toBeGreaterThanOrEqual(0);
+    });
+
+    it('calculates and upserts statutory F&F exit settlement with full breakdown', async () => {
+      const res = await request(app)
+        .post('/api/v1/payroll/compliance/settlements/calculate')
+        .send({
+          employeeId,
+          lastWorkingDay: '2026-03-31',
+          contractualNoticeDays: 30,
+          noticeServedDays: 30,
+          encashableLeaveDays: 15,
+          bonus: 10000,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('CALCULATED');
+      expect(res.body.data.loanRecovery).toBe(20000);
+      expect(res.body.data.breakdown).toBeDefined();
+      expect(res.body.data.breakdown.calculationTrace.length).toBeGreaterThan(5);
+    });
+
+    it('approves a calculated settlement when authorized', async () => {
+      const res = await request(app)
+        .post('/api/v1/payroll/compliance/settlements/settlement-001/approve');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('APPROVED');
+    });
+
+    it('pays an approved settlement and automatically amortizes/closes active employee loans', async () => {
+      const res = await request(app)
+        .post('/api/v1/payroll/compliance/settlements/settlement-001/pay');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('PAID');
+      expect(prismaMock.loanRepayment.create).toHaveBeenCalled();
+      expect(prismaMock.employeeLoan.update).toHaveBeenCalled();
+    });
+
+    it('generates and streams authentic Exit Settlement No-Dues PDF Voucher', async () => {
+      const res = await request(app)
+        .get('/api/v1/payroll/compliance/settlements/settlement-001/pdf');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toContain('exit-settlement-EMP001.pdf');
+      expect(res.body.slice(0, 4).toString()).toBe('%PDF');
+    });
   });
 });
