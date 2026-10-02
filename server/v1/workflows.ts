@@ -12,6 +12,14 @@ import type {
 } from "@prisma/client";
 import { z } from "zod";
 import { emitNotification } from "./notifications.js";
+import {
+  adaptWorkflowToGraph,
+  compileGraphToWorkflow,
+  validateWorkflowGraph,
+  simulateWorkflowTrace,
+  PREBUILT_TEMPLATES,
+  type CanvasLayout,
+} from "./workflowDesignerEngine.js";
 
 type WorkflowRequest = Request & {
   auth?: {
@@ -468,6 +476,431 @@ export function createWorkflowRouter(
           ),
         ]);
         return ok(res, { activated: true });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    "/workflows/templates",
+    permitted("workflow.manage"),
+    async (_req: WorkflowRequest, res) => {
+      return ok(res, Object.values(PREBUILT_TEMPLATES));
+    },
+  );
+
+  router.post(
+    "/workflows/templates/:templateKey/instantiate",
+    permitted("workflow.manage"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const template = PREBUILT_TEMPLATES[String(req.params.templateKey)];
+        if (!template) {
+          return fail(res, 404, "TEMPLATE_NOT_FOUND", "Workflow template not found.");
+        }
+        const companyId = req.auth!.companyId;
+        const latest = await prisma.workflowDefinition.findFirst({
+          where: { companyId, code: template.code },
+          orderBy: { version: "desc" },
+          select: { version: true },
+        });
+
+        const created = await prisma.workflowDefinition.create({
+          data: {
+            companyId,
+            module: template.module,
+            name: template.name,
+            code: template.code,
+            version: (latest?.version || 0) + 1,
+            status: "DRAFT",
+            createdById: req.auth!.id,
+            criteria: { canvasLayout: template.canvasLayout } as never,
+            steps: {
+              create: template.steps.map((step, idx) => ({
+                name: step.name,
+                sequence: idx + 1,
+                approverType: step.approverType,
+                approverReference: step.approverReference || null,
+                minimumApprovals: step.minimumApprovals,
+                slaHours: step.slaHours || null,
+                allowDelegation: step.allowDelegation,
+                conditions: (step.conditions as never) || null,
+              })),
+            },
+          },
+          include: { steps: { orderBy: { sequence: "asc" } } },
+        });
+
+        await audit(
+          req,
+          "WORKFLOW_DRAFT_CREATED",
+          `Draft workflow instantiated from template ${template.key} (v${created.version}).`,
+        );
+
+        return ok(
+          res,
+          {
+            definition: created,
+            graph: adaptWorkflowToGraph(created),
+          },
+          201,
+        );
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    "/workflows/definitions/:id/designer",
+    permitted("workflow.manage"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const definition = await prisma.workflowDefinition.findFirst({
+          where: { id: String(req.params.id), companyId: req.auth!.companyId },
+          include: { steps: { orderBy: { sequence: "asc" } } },
+        });
+        if (!definition) {
+          return fail(res, 404, "WORKFLOW_NOT_FOUND", "Workflow definition not found.");
+        }
+        const graph = adaptWorkflowToGraph(definition);
+        return ok(res, { definition, graph });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/workflows/definitions/draft",
+    permitted("workflow.manage"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const body = z
+          .object({
+            definitionId: z.string().uuid().optional(),
+            module: z.enum(modules),
+            name: z.string().trim().min(2).max(120),
+            code: z
+              .string()
+              .trim()
+              .min(2)
+              .max(40)
+              .transform((v) => v.toUpperCase()),
+            expectedUpdatedAt: z.string().datetime().optional(),
+            canvasLayout: z
+              .object({
+                version: z.number().default(1),
+                viewport: z
+                  .object({ x: z.number(), y: z.number(), zoom: z.number() })
+                  .optional(),
+                nodes: z.array(z.any()),
+                edges: z.array(z.any()),
+              })
+              .optional(),
+            steps: z
+              .array(
+                z.object({
+                  name: z.string().trim().min(2).max(120),
+                  approverType: z.enum(approverTypes),
+                  approverReference: z.string().trim().max(100).nullable().optional(),
+                  minimumApprovals: z.number().int().min(1).max(20).default(1),
+                  slaHours: z.number().int().min(1).max(8760).nullable().optional(),
+                  allowDelegation: z.boolean().default(true),
+                  conditions: z.record(z.string(), z.unknown()).nullable().optional(),
+                }),
+              )
+              .optional(),
+          })
+          .parse(req.body);
+
+        const companyId = req.auth!.companyId;
+
+        // If canvasLayout is provided, compile steps from it
+        let compiledSteps = body.steps || [];
+        let canvasLayoutToSave = body.canvasLayout;
+        if (body.canvasLayout && body.canvasLayout.nodes && body.canvasLayout.nodes.length > 0) {
+          const compiled = compileGraphToWorkflow(body.canvasLayout as CanvasLayout);
+          compiledSteps = compiled.steps;
+          canvasLayoutToSave = compiled.canvasLayout;
+        }
+
+        if (compiledSteps.length === 0) {
+          return fail(res, 400, "STEPS_REQUIRED", "Workflow must have at least one approval step.");
+        }
+
+        // Updating an existing draft
+        if (body.definitionId) {
+          const existing = await prisma.workflowDefinition.findFirst({
+            where: { id: body.definitionId, companyId },
+            include: { steps: true },
+          });
+
+          if (!existing) {
+            return fail(res, 404, "WORKFLOW_NOT_FOUND", "Workflow draft definition not found.");
+          }
+
+          if (existing.status !== "DRAFT") {
+            return fail(
+              res,
+              400,
+              "CANNOT_EDIT_ACTIVE_WORKFLOW",
+              "Published/active workflows cannot be edited in-place. Create a new draft version instead.",
+            );
+          }
+
+          // Optimistic concurrency check
+          if (body.expectedUpdatedAt) {
+            const serverUpdated = new Date(existing.updatedAt).getTime();
+            const clientUpdated = new Date(body.expectedUpdatedAt).getTime();
+            if (serverUpdated > clientUpdated) {
+              return fail(
+                res,
+                409,
+                "WORKFLOW_EDIT_CONFLICT",
+                "Draft was modified by another administrator. Please refresh before saving.",
+              );
+            }
+          }
+
+          const existingCriteria = (existing.criteria || {}) as Record<string, unknown>;
+          const updatedCriteria = {
+            ...existingCriteria,
+            ...(canvasLayoutToSave ? { canvasLayout: canvasLayoutToSave } : {}),
+          };
+
+          const updated = await prisma.$transaction(async (tx) => {
+            await tx.workflowStep.deleteMany({
+              where: { definitionId: existing.id },
+            });
+
+            return tx.workflowDefinition.update({
+              where: { id: existing.id },
+              data: {
+                name: body.name,
+                code: body.code,
+                criteria: updatedCriteria as never,
+                steps: {
+                  create: compiledSteps.map((step, idx) => ({
+                    sequence: idx + 1,
+                    name: step.name,
+                    approverType: step.approverType,
+                    approverReference: step.approverReference || null,
+                    minimumApprovals: step.minimumApprovals,
+                    slaHours: step.slaHours || null,
+                    allowDelegation: step.allowDelegation,
+                    conditions: (step.conditions as never) || null,
+                  })),
+                },
+              },
+              include: { steps: { orderBy: { sequence: "asc" } } },
+            });
+          });
+
+          await audit(
+            req,
+            "WORKFLOW_DRAFT_SAVED",
+            `Draft workflow ${updated.code} v${updated.version} saved.`,
+          );
+
+          return ok(res, {
+            definition: updated,
+            graph: adaptWorkflowToGraph(updated),
+          });
+        }
+
+        // Creating a new draft definition
+        const latest = await prisma.workflowDefinition.findFirst({
+          where: { companyId, code: body.code },
+          orderBy: { version: "desc" },
+          select: { version: true },
+        });
+
+        const newVersion = (latest?.version || 0) + 1;
+        const newCriteria = canvasLayoutToSave ? { canvasLayout: canvasLayoutToSave } : {};
+
+        const created = await prisma.workflowDefinition.create({
+          data: {
+            companyId,
+            module: body.module,
+            name: body.name,
+            code: body.code,
+            version: newVersion,
+            status: "DRAFT",
+            createdById: req.auth!.id,
+            criteria: newCriteria as never,
+            steps: {
+              create: compiledSteps.map((step, idx) => ({
+                sequence: idx + 1,
+                name: step.name,
+                approverType: step.approverType,
+                approverReference: step.approverReference || null,
+                minimumApprovals: step.minimumApprovals,
+                slaHours: step.slaHours || null,
+                allowDelegation: step.allowDelegation,
+                conditions: (step.conditions as never) || null,
+              })),
+            },
+          },
+          include: { steps: { orderBy: { sequence: "asc" } } },
+        });
+
+        await audit(
+          req,
+          "WORKFLOW_DRAFT_CREATED",
+          `Draft workflow ${created.code} v${created.version} created.`,
+        );
+
+        return ok(
+          res,
+          {
+            definition: created,
+            graph: adaptWorkflowToGraph(created),
+          },
+          201,
+        );
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/workflows/definitions/:id/validate",
+    permitted("workflow.manage"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const definition = await prisma.workflowDefinition.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { steps: { orderBy: { sequence: "asc" } } },
+        });
+
+        if (!definition) {
+          return fail(res, 404, "WORKFLOW_NOT_FOUND", "Workflow definition not found.");
+        }
+
+        const layout = req.body?.canvasLayout
+          ? (req.body.canvasLayout as CanvasLayout)
+          : adaptWorkflowToGraph(definition);
+
+        const validation = await validateWorkflowGraph(
+          layout,
+          definition.module,
+          companyId,
+          prisma,
+        );
+
+        await audit(
+          req,
+          "WORKFLOW_VALIDATED",
+          `Workflow ${definition.code} v${definition.version} validation completed (${validation.valid ? "VALID" : "INVALID"}).`,
+        );
+
+        return ok(res, validation);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/workflows/definitions/:id/publish",
+    permitted("workflow.manage"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const definition = await prisma.workflowDefinition.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { steps: { orderBy: { sequence: "asc" } } },
+        });
+
+        if (!definition) {
+          return fail(res, 404, "WORKFLOW_NOT_FOUND", "Workflow definition not found.");
+        }
+
+        if (definition.status !== "DRAFT") {
+          return fail(res, 400, "WORKFLOW_NOT_DRAFT", "Only draft workflows can be published.");
+        }
+
+        const layout = adaptWorkflowToGraph(definition);
+        const validation = await validateWorkflowGraph(
+          layout,
+          definition.module,
+          companyId,
+          prisma,
+        );
+
+        if (!validation.valid) {
+          return fail(
+            res,
+            422,
+            "WORKFLOW_VALIDATION_FAILED",
+            `Workflow cannot be published: ${validation.errors.map((e) => e.message).join("; ")}`,
+          );
+        }
+
+        await prisma.$transaction([
+          prisma.workflowDefinition.updateMany({
+            where: {
+              companyId,
+              module: definition.module,
+              status: "ACTIVE",
+              id: { not: definition.id },
+            },
+            data: { status: "RETIRED" },
+          }),
+          prisma.workflowDefinition.update({
+            where: { id: definition.id },
+            data: { status: "ACTIVE" },
+          }),
+          audit(
+            req,
+            "WORKFLOW_PUBLISHED",
+            `Workflow ${definition.code} v${definition.version} published and set to ACTIVE.`,
+          ),
+        ]);
+
+        return ok(res, {
+          published: true,
+          definitionId: definition.id,
+          version: definition.version,
+          status: "ACTIVE",
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/workflows/definitions/:id/simulate",
+    permitted("workflow.review"),
+    async (req: WorkflowRequest, res, next) => {
+      try {
+        const body = z
+          .object({
+            sampleRequesterUserId: z.string().uuid(),
+          })
+          .parse(req.body);
+
+        const companyId = req.auth!.companyId;
+        const simulation = await simulateWorkflowTrace(
+          prisma,
+          companyId,
+          String(req.params.id),
+          body.sampleRequesterUserId,
+          resolveApprovers,
+        );
+
+        await audit(
+          req,
+          "WORKFLOW_SIMULATED",
+          `Dry-run simulated for workflow ${simulation.definitionId} with sample user ${body.sampleRequesterUserId}.`,
+        );
+
+        return ok(res, simulation);
       } catch (error) {
         next(error);
       }

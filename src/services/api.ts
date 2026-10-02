@@ -1,3 +1,10 @@
+import type {
+  CanvasLayout,
+  WorkflowTemplate,
+  WorkflowValidationResult,
+  SimulationResult,
+  WorkflowDesignerData,
+} from '../types/workflowDesigner';
 import { 
   Company, User, Employee, Department, Designation, AttendanceRecord, 
   LeaveType, LeaveRequest, PayrollRun, Payslip, JobPosting, JobApplicant, 
@@ -166,6 +173,29 @@ export const api = {
   getWorkflowDefinitions: async () => (await fetchJSON<ApiEnvelope<WorkflowDefinition[]>>(`${API_BASE}/v1/workflows/definitions`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   createWorkflowDefinition: async (body: { module: WorkflowModule; name: string; code: string; steps: Array<{ name: string; approverType: string; approverReference?: string; minimumApprovals: number; slaHours?: number }> }) => (await fetchJSON<ApiEnvelope<WorkflowDefinition>>(`${API_BASE}/v1/workflows/definitions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   activateWorkflowDefinition: async (id: string) => (await fetchJSON<ApiEnvelope<{ activated: boolean }>>(`${API_BASE}/v1/workflows/definitions/${id}/activate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getWorkflowTemplates: async () => (await fetchJSON<ApiEnvelope<WorkflowTemplate[]>>(`${API_BASE}/v1/workflows/templates`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  instantiateWorkflowTemplate: async (templateKey: string) => (await fetchJSON<ApiEnvelope<WorkflowDesignerData>>(`${API_BASE}/v1/workflows/templates/${templateKey}/instantiate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getWorkflowDesigner: async (id: string) => (await fetchJSON<ApiEnvelope<WorkflowDesignerData>>(`${API_BASE}/v1/workflows/definitions/${id}/designer`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  saveWorkflowDraft: async (body: {
+    definitionId?: string;
+    module: WorkflowModule;
+    name: string;
+    code: string;
+    expectedUpdatedAt?: string;
+    canvasLayout?: CanvasLayout;
+    steps?: Array<{
+      name: string;
+      approverType: string;
+      approverReference?: string | null;
+      minimumApprovals: number;
+      slaHours?: number | null;
+      allowDelegation?: boolean;
+      conditions?: Record<string, unknown> | null;
+    }>;
+  }) => (await fetchJSON<ApiEnvelope<WorkflowDesignerData>>(`${API_BASE}/v1/workflows/definitions/draft`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  validateWorkflow: async (id: string, canvasLayout?: CanvasLayout) => (await fetchJSON<ApiEnvelope<WorkflowValidationResult>>(`${API_BASE}/v1/workflows/definitions/${id}/validate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ canvasLayout }) })).data,
+  publishWorkflow: async (id: string) => (await fetchJSON<ApiEnvelope<{ published: boolean; definitionId: string; version: number; status: string }>>(`${API_BASE}/v1/workflows/definitions/${id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  simulateWorkflow: async (id: string, sampleRequesterUserId: string) => (await fetchJSON<ApiEnvelope<SimulationResult>>(`${API_BASE}/v1/workflows/definitions/${id}/simulate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ sampleRequesterUserId }) })).data,
   getApprovalInbox: async () => (await fetchJSON<ApiEnvelope<ApprovalInboxItem[]>>(`${API_BASE}/v1/workflows/inbox`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   getMyRequests: async () => (await fetchJSON<ApiEnvelope<WorkflowInstance[]>>(`${API_BASE}/v1/workflows/my-requests`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   actOnWorkflow: async (id: string, action: 'APPROVE' | 'REJECT' | 'COMMENT', comment?: string) => (await fetchJSON<ApiEnvelope<{ status: string }>>(`${API_BASE}/v1/workflows/instances/${id}/actions`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify({ action, comment }) })).data,
