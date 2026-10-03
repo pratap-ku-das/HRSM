@@ -303,6 +303,8 @@ export function createBankExportRouter(prisma: PrismaClient, authenticate: Reque
           where: {
             companyId,
             status: 'APPROVED',
+            payrollAdjustment: null,
+            reimbursedAt: null,
           },
           include: {
             employee: {
@@ -419,6 +421,8 @@ export function createBankExportRouter(prisma: PrismaClient, authenticate: Reque
         const claimWhere: Record<string, unknown> = {
           companyId,
           status: 'APPROVED',
+          payrollAdjustment: null,
+          reimbursedAt: null,
         };
         if (body.expenseClaimIds && body.expenseClaimIds.length > 0) {
           claimWhere.id = { in: body.expenseClaimIds };
@@ -624,6 +628,8 @@ export function createBankExportRouter(prisma: PrismaClient, authenticate: Reque
           where: {
             companyId,
             status: 'APPROVED',
+            payrollAdjustment: null,
+            reimbursedAt: null,
             ...(body.expenseClaimIds?.length ? { id: { in: body.expenseClaimIds } } : {}),
           },
           include: { employee: true },

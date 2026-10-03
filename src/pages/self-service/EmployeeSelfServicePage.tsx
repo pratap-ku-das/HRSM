@@ -9,6 +9,7 @@ import {
   Receipt,
   RefreshCw,
   Sparkles,
+  Paperclip,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { AttendanceRecord, ExpenseClaim, Payslip } from '../../types';
@@ -82,6 +83,7 @@ export const EmployeeSelfServicePage: React.FC<{
     expenseDate: new Date().toISOString().slice(0, 10),
     notes: '',
   });
+  const [expenseReceipt, setExpenseReceipt] = useState<File | null>(null);
 
   const meta = sectionMeta[section];
   const Icon = meta.icon;
@@ -202,11 +204,15 @@ export const EmployeeSelfServicePage: React.FC<{
     event.preventDefault();
     setBusy(true);
     try {
-      await api.submitMyExpense({
-        ...expenseForm,
-        amount: Number(expenseForm.amount),
-      });
+      await api.submitMyExpense(
+        {
+          ...expenseForm,
+          amount: Number(expenseForm.amount),
+        },
+        expenseReceipt,
+      );
       setExpenseForm((value) => ({ ...value, title: '', amount: 0, notes: '' }));
+      setExpenseReceipt(null);
       await load();
       toast.success('Expense claim submitted');
     } catch (error) {
@@ -726,95 +732,167 @@ export const EmployeeSelfServicePage: React.FC<{
 
       {section === 'expenses' && (
         <>
+          <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 text-xs text-slate-400 flex flex-col sm:flex-row justify-between gap-2">
+            <div>
+              <span className="font-semibold text-slate-200">Company Expense Policy:</span> Receipt is mandatory for claims exceeding ₹500. Allowed formats: PDF, JPEG, PNG (max 10 MB).
+            </div>
+            <div className="text-slate-500 font-mono">
+              Max: ₹1,00,000 · Meals Cap: ₹3,000
+            </div>
+          </div>
+
           <form
             onSubmit={submitExpense}
-            className="grid md:grid-cols-6 gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-4"
+            className="space-y-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5"
           >
-            <input
-              required
-              minLength={3}
-              value={expenseForm.title}
-              onChange={(event) =>
-                setExpenseForm({ ...expenseForm, title: event.target.value })
-              }
-              placeholder="Claim title"
-              className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
-            />
-            <select
-              value={expenseForm.category}
-              onChange={(event) =>
-                setExpenseForm({
-                  ...expenseForm,
-                  category: event.target.value as ExpenseClaim['category'],
-                })
-              }
-              className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
-            >
-              {['TRAVEL', 'MEALS', 'HARDWARE', 'CERTIFICATION', 'MISC'].map(
-                (item) => (
-                  <option key={item}>{item}</option>
-                ),
-              )}
-            </select>
-            <input
-              required
-              type="number"
-              min="1"
-              value={expenseForm.amount || ''}
-              onChange={(event) =>
-                setExpenseForm({
-                  ...expenseForm,
-                  amount: Number(event.target.value),
-                })
-              }
-              placeholder="Amount"
-              className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
-            />
-            <input
-              required
-              type="date"
-              value={expenseForm.expenseDate}
-              onChange={(event) =>
-                setExpenseForm({
-                  ...expenseForm,
-                  expenseDate: event.target.value,
-                })
-              }
-              className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
-            />
-            <input
-              value={expenseForm.notes}
-              onChange={(event) =>
-                setExpenseForm({ ...expenseForm, notes: event.target.value })
-              }
-              placeholder="Notes"
-              className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
-            />
-            <button
-              disabled={busy}
-              className="bg-brand-500 rounded-xl font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-            >
-              Submit claim
-            </button>
-          </form>
-          <div className="space-y-2">
-            {expenses.map((item) => (
-              <article
-                key={item.id}
-                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex justify-between"
+            <div className="grid md:grid-cols-5 gap-3">
+              <input
+                required
+                minLength={3}
+                value={expenseForm.title}
+                onChange={(event) =>
+                  setExpenseForm({ ...expenseForm, title: event.target.value })
+                }
+                placeholder="Claim title (e.g. Client Dinner)"
+                className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
+              />
+              <select
+                value={expenseForm.category}
+                onChange={(event) =>
+                  setExpenseForm({
+                    ...expenseForm,
+                    category: event.target.value as ExpenseClaim['category'],
+                  })
+                }
+                className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
               >
-                <div>
-                  <strong className="text-slate-200">{item.title}</strong>
-                  <p className="text-xs text-slate-500">
-                    {item.category} · {item.currency} {item.amount.toLocaleString()}{' '}
-                    · {item.expenseDate.slice(0, 10)}
-                  </p>
-                </div>
-                <span className="text-xs text-brand-300 font-medium">
-                  {item.status}
-                </span>
-              </article>
-            ))}
+                {['TRAVEL', 'MEALS', 'HARDWARE', 'CERTIFICATION', 'MISC'].map(
+                  (item) => (
+                    <option key={item}>{item}</option>
+                  ),
+                )}
+              </select>
+              <input
+                required
+                type="number"
+                min="1"
+                value={expenseForm.amount || ''}
+                onChange={(event) =>
+                  setExpenseForm({
+                    ...expenseForm,
+                    amount: Number(event.target.value),
+                  })
+                }
+                placeholder="Amount (₹)"
+                className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
+              />
+              <input
+                required
+                type="date"
+                value={expenseForm.expenseDate}
+                onChange={(event) =>
+                  setExpenseForm({
+                    ...expenseForm,
+                    expenseDate: event.target.value,
+                  })
+                }
+                className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
+              />
+              <input
+                value={expenseForm.notes}
+                onChange={(event) =>
+                  setExpenseForm({ ...expenseForm, notes: event.target.value })
+                }
+                placeholder="Notes / Purpose"
+                className="input bg-slate-950 text-sm border-slate-700 rounded-xl"
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-300 font-medium flex items-center gap-1.5 cursor-pointer">
+                  <Paperclip className="w-4 h-4 text-brand-400" />
+                  <span>Attach Receipt:</span>
+                  <input
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png"
+                    onChange={(event) =>
+                      setExpenseReceipt(event.target.files?.[0] || null)
+                    }
+                    className="text-xs text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-750"
+                  />
+                </label>
+                {expenseForm.amount > 500 && !expenseReceipt && (
+                  <span className="text-[11px] text-amber-400 font-medium">
+                    (Required for claims &gt; ₹500)
+                  </span>
+                )}
+                {expenseReceipt && (
+                  <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                    ✓ {expenseReceipt.name} ({(expenseReceipt.size / 1024).toFixed(0)} KB)
+                  </span>
+                )}
+              </div>
+
+              <button
+                disabled={busy}
+                className="px-5 py-2 bg-brand-500 rounded-xl font-medium text-white hover:bg-brand-600 disabled:opacity-50 text-sm transition"
+              >
+                Submit claim
+              </button>
+            </div>
+          </form>
+
+          <div className="space-y-2">
+            {expenses.length === 0 ? (
+              <div className="text-center py-10 bg-slate-900/40 border border-slate-800 rounded-2xl">
+                <Receipt className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                <p className="text-xs text-slate-400">No expense claims submitted yet.</p>
+              </div>
+            ) : (
+              expenses.map((item) => {
+                const receiptAttached = item.notes?.includes('[RECEIPT:');
+                const displayNotes = item.notes
+                  ?.replace(/\[RECEIPT:docId=[^:]+:fileName=[^:]+:mime=[^:]+:size=\d+\]\s*/g, '')
+                  .trim();
+                return (
+                  <article
+                    key={item.id}
+                    className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong className="text-slate-200">{item.title}</strong>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                          {item.category}
+                        </span>
+                        {receiptAttached && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20 flex items-center gap-1">
+                            <Paperclip className="w-3 h-3" />
+                            Receipt Attached
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        ₹{item.amount.toLocaleString('en-IN')} · {item.expenseDate?.slice(0, 10)}
+                        {displayNotes && ` · "${displayNotes}"`}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-xl ${
+                        item.status === 'APPROVED'
+                          ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                          : item.status === 'REJECTED'
+                          ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                          : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                  </article>
+                );
+              })
+            )}
           </div>
         </>
       )}

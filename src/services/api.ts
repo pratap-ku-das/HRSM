@@ -144,9 +144,61 @@ export const api = {
   getMyExpenses: async () => (await fetchJSON<ApiEnvelope<ExpenseClaim[]>>(`${API_BASE}/v1/me/expenses`, {
     headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
   })).data,
-  submitMyExpense: async (body: { title: string; category: 'TRAVEL' | 'MEALS' | 'HARDWARE' | 'CERTIFICATION' | 'MISC'; amount: number; expenseDate: string; notes?: string }) => (await fetchJSON<ApiEnvelope<ExpenseClaim>>(`${API_BASE}/v1/me/expenses`, {
-    method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body),
-  })).data,
+  submitMyExpense: async (
+    body: { title: string; category: string; amount: number; expenseDate: string; notes?: string },
+    receiptFile?: File | null,
+  ) => {
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+    if (receiptFile) {
+      const formData = new FormData();
+      formData.append('title', body.title);
+      formData.append('category', body.category);
+      formData.append('amount', String(body.amount));
+      formData.append('expenseDate', body.expenseDate);
+      if (body.notes) formData.append('notes', body.notes);
+      formData.append('receipt', receiptFile);
+      const res = await fetch(`${API_BASE}/v1/me/expenses`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || data.message || 'Expense submission failed');
+      return data.data;
+    }
+    return (await fetchJSON<ApiEnvelope<ExpenseClaim>>(`${API_BASE}/v1/me/expenses`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })).data;
+  },
+  uploadExpenseReceipt: async (claimId: string, receiptFile: File) => {
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+    const formData = new FormData();
+    formData.append('receipt', receiptFile);
+    const res = await fetch(`${API_BASE}/v1/operations/expenses/${claimId}/receipt`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.message || 'Receipt upload failed');
+    return data.data;
+  },
+  deleteExpenseReceipt: async (claimId: string) => {
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+    return (await fetchJSON<ApiEnvelope<{ claim: ExpenseClaim }>>(`${API_BASE}/v1/operations/expenses/${claimId}/receipt`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })).data;
+  },
+  getExpenseReceiptUrl: (claimId: string) => `${API_BASE}/v1/operations/expenses/${claimId}/receipt`,
+  getExpensePolicy: async () => {
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+    return (await fetchJSON<ApiEnvelope<{ maxAmount: number; requiresReceiptAbove: number; allowedCategories: string[]; categoryLimits?: Record<string, number> }>>(`${API_BASE}/v1/operations/expenses/policy`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })).data;
+  },
   clearV1Session: () => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);

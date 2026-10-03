@@ -453,7 +453,7 @@ export interface Announcement {
   createdAt: string;
 }
 
-export type ExpenseStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REIMBURSED';
+export type ExpenseStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'REIMBURSED' | 'INGESTED';
 
 export interface ExpenseClaim {
   id: string;
@@ -467,6 +467,8 @@ export interface ExpenseClaim {
   status: ExpenseStatus;
   notes?: string;
   submittedAt: string;
+  approvedAt?: string;
+  reimbursedAt?: string;
 }
 
 export interface AuditLog {

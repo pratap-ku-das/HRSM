@@ -115,6 +115,78 @@ export async function ensureDefaultLeaveWorkflow(
   });
 }
 
+export async function ensureDefaultExpenseWorkflow(
+  prisma: WorkflowDb,
+  companyId: string,
+  createdById: string,
+) {
+  const active = await prisma.workflowDefinition.findFirst({
+    where: { companyId, module: "EXPENSE", status: "ACTIVE" },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+    orderBy: { version: "desc" },
+  });
+  if (active) return active;
+
+  const existingDefault = await prisma.workflowDefinition.findFirst({
+    where: { companyId, code: "EXPENSE_DEFAULT" },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+    orderBy: { version: "desc" },
+  });
+  if (existingDefault) {
+    return prisma.workflowDefinition.update({
+      where: { id: existingDefault.id },
+      data: { status: "ACTIVE" },
+      include: { steps: { orderBy: { sequence: "asc" } } },
+    });
+  }
+
+  return prisma.workflowDefinition.create({
+    data: {
+      companyId,
+      module: "EXPENSE",
+      name: "Default expense approval",
+      code: "EXPENSE_DEFAULT",
+      version: 1,
+      status: "ACTIVE",
+      createdById,
+      criteria: {
+        policy: {
+          maxAmount: 100000,
+          requiresReceiptAbove: 500,
+          allowedCategories: [
+            "TRAVEL",
+            "MEALS",
+            "HARDWARE",
+            "CERTIFICATION",
+            "OFFICE_SUPPLIES",
+            "INTERNET",
+            "CLIENT_ENTERTAINMENT",
+            "MISC",
+          ],
+          categoryLimits: {
+            MEALS: 3000,
+            INTERNET: 3000,
+            MISC: 5000,
+          },
+        },
+      },
+      steps: {
+        create: [
+          {
+            sequence: 1,
+            name: "Finance & Operations approval",
+            approverType: "FINANCE",
+            minimumApprovals: 1,
+            slaHours: 48,
+            allowDelegation: true,
+          },
+        ],
+      },
+    },
+    include: { steps: { orderBy: { sequence: "asc" } } },
+  });
+}
+
 async function adapterApprovers(
   prisma: WorkflowDb,
   companyId: string,
@@ -186,6 +258,13 @@ export async function startConfiguredWorkflow(
   });
   if (!definition && input.module === "LEAVE") {
     definition = await ensureDefaultLeaveWorkflow(
+      prisma,
+      input.companyId,
+      input.requesterUserId,
+    );
+  }
+  if (!definition && input.module === "EXPENSE") {
+    definition = await ensureDefaultExpenseWorkflow(
       prisma,
       input.companyId,
       input.requesterUserId,

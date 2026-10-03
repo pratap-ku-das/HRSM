@@ -243,6 +243,7 @@ enum ExpenseStatus {
   APPROVED
   REJECTED
   REIMBURSED
+  INGESTED
 }
 
 enum WorkflowModule {
@@ -1295,6 +1296,7 @@ model PayrollRun {
   payslips          Payslip[]
   lines             PayrollLine[]
   attendanceReviews PayrollAttendanceReview[]
+  adjustments       PayrollAdjustment[]
 
   @@unique([companyId, month])
   @@index([companyId])
@@ -1458,22 +1460,27 @@ model LoanRepayment {
 }
 
 model PayrollAdjustment {
-  id          String              @id @default(uuid())
-  companyId   String
-  employeeId  String
-  month       String
-  code        String
-  name        String
-  kind        SalaryComponentKind
-  amount      Float
-  reason      String
-  createdById String
-  createdAt   DateTime            @default(now())
-  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  employee    Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id             String              @id @default(uuid())
+  companyId      String
+  employeeId     String
+  month          String
+  code           String
+  name           String
+  kind           SalaryComponentKind
+  amount         Float
+  reason         String
+  createdById    String
+  createdAt      DateTime            @default(now())
+  expenseClaimId String?             @unique
+  payrollRunId   String?
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employee       Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  expenseClaim   ExpenseClaim?       @relation(fields: [expenseClaimId], references: [id], onDelete: Restrict)
+  payrollRun     PayrollRun?         @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
 
   @@index([companyId, month])
   @@index([employeeId, month])
+  @@index([payrollRunId])
 }
 
 model PayrollLine {
@@ -2011,9 +2018,11 @@ model ExpenseClaim {
   expenseDate  DateTime      @db.Date
   status       ExpenseStatus @default(PENDING)
   notes        String?
-  approvedById String?
-  approvedAt   DateTime?
-  submittedAt  DateTime      @default(now())
+  approvedById      String?
+  approvedAt        DateTime?
+  submittedAt       DateTime           @default(now())
+  reimbursedAt      DateTime?
+  payrollAdjustment PayrollAdjustment?
 
   company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)

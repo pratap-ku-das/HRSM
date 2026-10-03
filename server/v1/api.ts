@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
+import path from "node:path";
 import { Router, Request, Response, NextFunction } from "express";
 import { PrismaClient, UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -6,6 +8,15 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { z, ZodError } from "zod";
+import {
+  validateExpenseClaim,
+  resolveCompanyExpensePolicy,
+  attachReceiptToNotes,
+  ALLOWED_RECEIPT_MIME_TYPES,
+  ALLOWED_RECEIPT_EXTENSIONS,
+  MAX_RECEIPT_SIZE_BYTES,
+  RECEIPT_STORAGE_ROOT,
+} from "./expensePolicyEngine.js";
 import {
   createOpaqueToken,
   deliverOnboardingEmail,
@@ -376,6 +387,10 @@ export function createV1Router(prisma: PrismaClient) {
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 8 },
     fileFilter: (_req, file, callback) =>
       callback(null, ["image/jpeg", "image/png"].includes(file.mimetype)),
+  });
+  const receiptUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_RECEIPT_SIZE_BYTES, files: 1 },
   });
   router.use((req: AuthedRequest, res, next) => {
     req.requestId = String(req.header("x-request-id") || crypto.randomUUID());
@@ -2029,21 +2044,18 @@ export function createV1Router(prisma: PrismaClient) {
     "/me/expenses",
     authenticate,
     requirePermission("expense.submit"),
+    receiptUpload.single("receipt"),
     async (req: AuthedRequest, res, next) => {
+      let uploadedFilePath: string | null = null;
       try {
         const body = z
           .object({
             title: z.string().trim().min(3).max(150),
-            category: z.enum([
-              "TRAVEL",
-              "MEALS",
-              "HARDWARE",
-              "CERTIFICATION",
-              "MISC",
-            ]),
-            amount: z.number().positive().max(10_000_000),
+            category: z.string().trim(),
+            amount: z.coerce.number().positive().max(10_000_000),
             expenseDate: z.coerce.date(),
             notes: z.string().max(1000).optional(),
+            receiptDocumentId: z.string().uuid().optional(),
           })
           .parse(req.body);
         if (!req.auth!.employeeId)
@@ -2053,15 +2065,135 @@ export function createV1Router(prisma: PrismaClient) {
             "EMPLOYEE_NOT_LINKED",
             "No employee profile is linked.",
           );
-        const result = await prisma.$transaction(async (tx) => {
-          const expense = await tx.expenseClaim.create({
-            data: {
-              ...body,
+
+        let hasReceipt = Boolean(req.file);
+        let existingDoc: {
+          id: string;
+          fileName: string;
+          mimeType: string;
+          sizeBytes: number;
+        } | null = null;
+
+        if (body.receiptDocumentId) {
+          existingDoc = await prisma.employeeDocument.findFirst({
+            where: {
+              id: body.receiptDocumentId,
               companyId: req.auth!.companyId,
-              employeeId: req.auth!.employeeId!,
-              currency: "INR",
+              employeeId: req.auth!.employeeId,
             },
           });
+          if (existingDoc) hasReceipt = true;
+        }
+
+        const policy = await resolveCompanyExpensePolicy(
+          prisma,
+          req.auth!.companyId,
+        );
+
+        const evaluation = validateExpenseClaim(
+          {
+            title: body.title,
+            category: body.category,
+            amount: body.amount,
+            currency: "INR",
+            expenseDate: body.expenseDate,
+            notes: body.notes,
+            hasReceipt,
+            receiptFileName: req.file ? req.file.originalname : existingDoc?.fileName,
+            receiptMimeType: req.file ? req.file.mimetype : existingDoc?.mimeType,
+            receiptSizeBytes: req.file ? req.file.size : existingDoc?.sizeBytes,
+          },
+          policy,
+        );
+
+        if (!evaluation.valid) {
+          return fail(
+            res,
+            400,
+            evaluation.violations[0].code,
+            evaluation.violations[0].message,
+            { violations: evaluation.violations, warnings: evaluation.warnings },
+          );
+        }
+
+        let docId: string | null = null;
+        let storageName: string | null = null;
+        if (req.file) {
+          const ext = path
+            .extname(req.file.originalname)
+            .toLowerCase()
+            .replace(/[^.a-z0-9]/g, "");
+          if (!ALLOWED_RECEIPT_EXTENSIONS.has(ext)) {
+            return fail(
+              res,
+              415,
+              "RECEIPT_TYPE_INVALID",
+              "Invalid receipt file extension.",
+            );
+          }
+          docId = crypto.randomUUID();
+          storageName = `${docId}${ext}`;
+          const companyReceiptDir = path.join(
+            RECEIPT_STORAGE_ROOT,
+            req.auth!.companyId,
+          );
+          await mkdir(companyReceiptDir, { recursive: true });
+          uploadedFilePath = path.join(companyReceiptDir, storageName);
+          await writeFile(uploadedFilePath, req.file.buffer, { flag: "wx" });
+        }
+
+        const result = await prisma.$transaction(async (tx) => {
+          let docRecord: { id: string; fileName: string; mimeType: string; sizeBytes: number } | null = null;
+          if (req.file && docId && storageName) {
+            const objectKey = `${req.auth!.companyId}/${storageName}`;
+            docRecord = await tx.employeeDocument.create({
+              data: {
+                id: docId,
+                companyId: req.auth!.companyId,
+                employeeId: req.auth!.employeeId!,
+                documentType: "EXPENSE_RECEIPT",
+                title: `Receipt for ${body.title}`.slice(0, 160),
+                objectKey,
+                fileName: req.file.originalname.slice(0, 200),
+                mimeType: req.file.mimetype,
+                sizeBytes: req.file.size,
+                issueDate: body.expenseDate,
+                verificationStatus: "VERIFIED",
+                verifiedById: req.auth!.id,
+                verifiedAt: new Date(),
+              },
+            });
+          }
+
+          const finalNotes = docRecord
+            ? attachReceiptToNotes(body.notes, {
+                docId: docRecord.id,
+                fileName: req.file!.originalname.slice(0, 200),
+                mime: req.file!.mimetype,
+                size: req.file!.size,
+              })
+            : existingDoc
+            ? attachReceiptToNotes(body.notes, {
+                docId: existingDoc.id,
+                fileName: existingDoc.fileName,
+                mime: existingDoc.mimeType,
+                size: existingDoc.sizeBytes,
+              })
+            : body.notes || null;
+
+          const expense = await tx.expenseClaim.create({
+            data: {
+              title: body.title,
+              category: body.category,
+              amount: body.amount,
+              currency: "INR",
+              expenseDate: body.expenseDate,
+              notes: finalNotes,
+              companyId: req.auth!.companyId,
+              employeeId: req.auth!.employeeId!,
+            },
+          });
+
           const workflow = await startConfiguredWorkflow(tx, {
             companyId: req.auth!.companyId,
             requesterUserId: req.auth!.id,
@@ -2077,14 +2209,40 @@ export function createV1Router(prisma: PrismaClient) {
               expenseDate: expense.expenseDate.toISOString(),
             },
           });
-          return { expense, workflowId: workflow?.id };
+
+          await tx.auditLog.create({
+            data: {
+              companyId: req.auth!.companyId,
+              userId: req.auth!.id,
+              userName: req.auth!.id,
+              userRole: req.auth!.role,
+              action: "SUBMIT_EXPENSE_CLAIM",
+              category: "EXPENSE",
+              details: `Expense claim ${expense.id} submitted for ₹${expense.amount.toLocaleString("en-IN")}.`,
+              ipAddress: req.ip || "unknown",
+            },
+          });
+
+          return {
+            expense,
+            workflowId: workflow?.id,
+            receiptDocumentId: docRecord?.id || existingDoc?.id,
+          };
         });
+
         return ok(
           res,
-          { ...result.expense, workflowId: result.workflowId },
+          {
+            ...result.expense,
+            workflowId: result.workflowId,
+            receiptDocumentId: result.receiptDocumentId,
+          },
           201,
         );
       } catch (e) {
+        if (uploadedFilePath) {
+          await unlink(uploadedFilePath).catch(() => {});
+        }
         next(e);
       }
     },

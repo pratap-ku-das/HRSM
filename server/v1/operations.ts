@@ -5,12 +5,22 @@ import {
   type Response,
 } from "express";
 import crypto from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import multer from "multer";
 import { z } from "zod";
 import { emitNotification } from "./notifications.js";
+import {
+  resolveCompanyExpensePolicy,
+  attachReceiptToNotes,
+  detachReceiptFromNotes,
+  parseReceiptFromNotes,
+  ALLOWED_RECEIPT_MIME_TYPES,
+  ALLOWED_RECEIPT_EXTENSIONS,
+  MAX_RECEIPT_SIZE_BYTES,
+  RECEIPT_STORAGE_ROOT,
+} from "./expensePolicyEngine.js";
 
 type Req = Request & {
   auth?: {
@@ -287,6 +297,294 @@ export function createOperationsRouter(
       }
     },
   );
+  const receiptUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_RECEIPT_SIZE_BYTES, files: 1 },
+  });
+
+  router.get(
+    "/operations/expenses/policy",
+    async (req: Req, res, next) => {
+      try {
+        const policy = await resolveCompanyExpensePolicy(prisma, req.auth!.companyId);
+        return ok(res, policy);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/operations/expenses/:id/receipt",
+    receiptUpload.single("receipt"),
+    async (req: Req, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const claim = await prisma.expenseClaim.findFirst({
+          where: { id: String(req.params.id), companyId },
+        });
+        if (!claim) {
+          return fail(res, 404, "EXPENSE_NOT_FOUND", "Expense claim was not found.");
+        }
+        if (claim.status !== "PENDING") {
+          return fail(
+            res,
+            409,
+            "EXPENSE_NOT_PENDING",
+            "Cannot attach or modify receipt for an expense claim that is not pending.",
+          );
+        }
+
+        const isOwner = req.auth!.employeeId && req.auth!.employeeId === claim.employeeId;
+        const canReview =
+          req.auth!.permissions.includes("expense.review") ||
+          req.auth!.permissions.includes("operations.manage");
+        if (!isOwner && !canReview) {
+          return fail(
+            res,
+            403,
+            "FORBIDDEN",
+            "You are not authorized to upload a receipt for this claim.",
+          );
+        }
+
+        if (!req.file) {
+          return fail(res, 400, "RECEIPT_REQUIRED", "Choose a receipt file to upload.");
+        }
+
+        if (!ALLOWED_RECEIPT_MIME_TYPES.has(req.file.mimetype)) {
+          return fail(
+            res,
+            415,
+            "RECEIPT_TYPE_INVALID",
+            "Unsupported receipt format. Allowed formats: PDF, JPEG, PNG.",
+          );
+        }
+
+        const ext = path
+          .extname(req.file.originalname)
+          .toLowerCase()
+          .replace(/[^.a-z0-9]/g, "");
+        if (!ALLOWED_RECEIPT_EXTENSIONS.has(ext)) {
+          return fail(res, 415, "RECEIPT_TYPE_INVALID", "Invalid receipt file extension.");
+        }
+
+        if (req.file.size > MAX_RECEIPT_SIZE_BYTES) {
+          return fail(res, 413, "RECEIPT_TOO_LARGE", "Receipt file size exceeds 10 MB limit.");
+        }
+
+        const id = crypto.randomUUID();
+        const storageName = `${id}${ext}`;
+        const companyReceiptDir = path.join(RECEIPT_STORAGE_ROOT, companyId);
+        await mkdir(companyReceiptDir, { recursive: true });
+        await writeFile(path.join(companyReceiptDir, storageName), req.file.buffer, { flag: "wx" });
+
+        // Clean up previous receipt if one was attached
+        const oldReceipt = parseReceiptFromNotes(claim.notes);
+        if (oldReceipt) {
+          try {
+            const oldDoc = await prisma.employeeDocument.findFirst({
+              where: { id: oldReceipt.docId, companyId },
+            });
+            if (oldDoc) {
+              await prisma.employeeDocument.deleteMany({ where: { id: oldDoc.id, companyId } });
+              const [cId, oldStorageName] = oldDoc.objectKey.split("/");
+              if (cId === companyId && oldStorageName) {
+                await unlink(path.join(RECEIPT_STORAGE_ROOT, companyId, oldStorageName)).catch(() => {});
+              }
+            }
+          } catch {
+            // non-fatal cleanup
+          }
+        }
+
+        const objectKey = `${companyId}/${storageName}`;
+        const doc = await prisma.employeeDocument.create({
+          data: {
+            id,
+            companyId,
+            employeeId: claim.employeeId,
+            documentType: "EXPENSE_RECEIPT",
+            title: `Receipt for ${claim.title}`.slice(0, 160),
+            objectKey,
+            fileName: req.file.originalname.slice(0, 200),
+            mimeType: req.file.mimetype,
+            sizeBytes: req.file.size,
+            issueDate: claim.expenseDate,
+            verificationStatus: "VERIFIED",
+            verifiedById: req.auth!.id,
+            verifiedAt: new Date(),
+          },
+        });
+
+        const updatedNotes = attachReceiptToNotes(claim.notes, {
+          docId: doc.id,
+          fileName: req.file.originalname.slice(0, 200),
+          mime: req.file.mimetype,
+          size: req.file.size,
+        });
+
+        const updatedClaim = await prisma.expenseClaim.update({
+          where: { id: claim.id },
+          data: { notes: updatedNotes },
+        });
+
+        await audit(
+          req,
+          "UPLOAD_EXPENSE_RECEIPT",
+          "EXPENSE",
+          `Receipt attached to expense claim ${claim.id}.`,
+        );
+
+        return ok(res, { claim: updatedClaim, document: doc }, 201);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    "/operations/expenses/:id/receipt",
+    async (req: Req, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const claim = await prisma.expenseClaim.findFirst({
+          where: { id: String(req.params.id), companyId },
+        });
+        if (!claim) {
+          return fail(res, 404, "EXPENSE_NOT_FOUND", "Expense claim was not found.");
+        }
+
+        const isOwner = req.auth!.employeeId && req.auth!.employeeId === claim.employeeId;
+        const canView = req.auth!.permissions.some((p) =>
+          ["expense.review", "operations.manage", "audit.read"].includes(p),
+        );
+        if (!isOwner && !canView) {
+          return fail(res, 403, "FORBIDDEN", "You are not authorized to view this receipt.");
+        }
+
+        let doc: { objectKey: string; fileName: string; mimeType: string } | null = null;
+        const receiptMeta = parseReceiptFromNotes(claim.notes);
+        if (receiptMeta) {
+          doc = await prisma.employeeDocument.findFirst({
+            where: { id: receiptMeta.docId, companyId },
+          });
+        }
+        if (!doc) {
+          doc = await prisma.employeeDocument.findFirst({
+            where: {
+              companyId,
+              employeeId: claim.employeeId,
+              documentType: "EXPENSE_RECEIPT",
+              issueDate: claim.expenseDate,
+            },
+            orderBy: { createdAt: "desc" },
+          });
+        }
+
+        if (!doc) {
+          return fail(res, 404, "RECEIPT_NOT_FOUND", "Receipt not found for this claim.");
+        }
+
+        const [cId, storageName] = doc.objectKey.split("/");
+        if (cId !== companyId || !storageName || storageName !== path.basename(storageName)) {
+          return fail(res, 400, "RECEIPT_KEY_INVALID", "Receipt storage key is invalid.");
+        }
+
+        const filePath = path.join(RECEIPT_STORAGE_ROOT, companyId, storageName);
+        const contents = await readFile(filePath);
+        res.setHeader("Content-Type", doc.mimeType);
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename*=UTF-8''${encodeURIComponent(doc.fileName)}`,
+        );
+        return res.send(contents);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return fail(
+            res,
+            404,
+            "RECEIPT_FILE_NOT_FOUND",
+            "The stored receipt file was not found on disk.",
+          );
+        }
+        next(error);
+      }
+    },
+  );
+
+  router.delete(
+    "/operations/expenses/:id/receipt",
+    async (req: Req, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const claim = await prisma.expenseClaim.findFirst({
+          where: { id: String(req.params.id), companyId },
+        });
+        if (!claim) {
+          return fail(res, 404, "EXPENSE_NOT_FOUND", "Expense claim was not found.");
+        }
+        if (claim.status !== "PENDING") {
+          return fail(
+            res,
+            409,
+            "EXPENSE_NOT_PENDING",
+            "Cannot remove receipt from an expense claim that is not pending.",
+          );
+        }
+
+        const isOwner = req.auth!.employeeId && req.auth!.employeeId === claim.employeeId;
+        const canManage =
+          req.auth!.permissions.includes("operations.manage") ||
+          req.auth!.permissions.includes("expense.review");
+        if (!isOwner && !canManage) {
+          return fail(res, 403, "FORBIDDEN", "You are not authorized to delete this receipt.");
+        }
+
+        const policy = await resolveCompanyExpensePolicy(prisma, companyId);
+        if (claim.amount > policy.requiresReceiptAbove) {
+          return fail(
+            res,
+            400,
+            "EXPENSE_RECEIPT_REQUIRED",
+            `Receipt is required for claims above ₹${policy.requiresReceiptAbove.toLocaleString("en-IN")}. Cannot remove receipt.`,
+          );
+        }
+
+        const receiptMeta = parseReceiptFromNotes(claim.notes);
+        if (receiptMeta) {
+          const doc = await prisma.employeeDocument.findFirst({
+            where: { id: receiptMeta.docId, companyId },
+          });
+          if (doc) {
+            await prisma.employeeDocument.deleteMany({ where: { id: doc.id, companyId } });
+            const [cId, storageName] = doc.objectKey.split("/");
+            if (cId === companyId && storageName) {
+              await unlink(path.join(RECEIPT_STORAGE_ROOT, companyId, storageName)).catch(() => {});
+            }
+          }
+        }
+
+        const updatedNotes = detachReceiptFromNotes(claim.notes);
+        const updatedClaim = await prisma.expenseClaim.update({
+          where: { id: claim.id },
+          data: { notes: updatedNotes || null },
+        });
+
+        await audit(
+          req,
+          "DELETE_EXPENSE_RECEIPT",
+          "EXPENSE",
+          `Receipt removed from expense claim ${claim.id}.`,
+        );
+
+        return ok(res, { claim: updatedClaim });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   router.patch(
     "/operations/expenses/:id/review",
     permit("expense.review"),
@@ -294,23 +592,29 @@ export function createOperationsRouter(
       try {
         const body = z
             .object({ status: z.enum(["APPROVED", "REJECTED"]) })
-            .parse(req.body),
-          claim = await prisma.expenseClaim.findFirst({
-            where: {
-              id: String(req.params.id),
-              companyId: req.auth!.companyId,
-              status: "PENDING",
-            },
-          });
-        if (!claim)
+            .parse(req.body);
+        const existingClaim = await prisma.expenseClaim.findFirst({
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+          },
+        });
+        if (!existingClaim)
           return fail(
             res,
             404,
-            "EXPENSE_NOT_PENDING",
-            "Pending expense claim was not found.",
+            "EXPENSE_NOT_FOUND",
+            "Expense claim was not found.",
+          );
+        if (existingClaim.status !== "PENDING")
+          return fail(
+            res,
+            409,
+            "EXPENSE_ALREADY_REVIEWED",
+            `Expense claim has already been ${existingClaim.status.toLowerCase()}. Cannot review again.`,
           );
         const updated = await prisma.expenseClaim.update({
-          where: { id: claim.id },
+          where: { id: existingClaim.id },
           data: {
             status: body.status,
             approvedById: req.auth!.id,
@@ -321,7 +625,7 @@ export function createOperationsRouter(
           req,
           "REVIEW_EXPENSE",
           "EXPENSE",
-          `Expense ${claim.id} ${body.status.toLowerCase()}.`,
+          `Expense ${existingClaim.id} ${body.status.toLowerCase()}.`,
         );
         return ok(res, updated);
       } catch (error) {

@@ -37,6 +37,18 @@ const countWorkingDays = (start: Date, end: Date) => {
     if (![0, 6].includes(date.getUTCDay())) count++;
   return count;
 };
+const getPeriodEndCutoff = (periodEnd: Date): Date => {
+  const d = new Date(periodEnd);
+  if (
+    d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0
+  ) {
+    d.setUTCHours(23, 59, 59, 999);
+  }
+  return d;
+};
 
 export function createPayrollRouter(
   prisma: PrismaClient,
@@ -406,6 +418,14 @@ export function createPayrollRouter(
             reason: z.string().trim().min(3).max(500),
           })
           .parse(req.body);
+        if (body.kind === "REIMBURSEMENT") {
+          return fail(
+            res,
+            400,
+            "REIMBURSEMENT_NOT_ALLOWED",
+            "Manual reimbursement adjustments are not permitted. Reimbursements must be ingested from approved Expense Claims.",
+          );
+        }
         if (
           !(await prisma.employee.findFirst({
             where: { id: body.employeeId, companyId: req.auth!.companyId },
@@ -505,113 +525,426 @@ export function createPayrollRouter(
     },
   );
 
+  router.get(
+    "/payroll/runs/:id/eligible-expenses",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const run = await prisma.payrollRun.findFirst({
+          where: { id: String(req.params.id), companyId },
+        });
+        if (!run) {
+          return fail(res, 404, "PAYROLL_RUN_NOT_FOUND", "Payroll run was not found.");
+        }
+        if (!run.periodEnd) {
+          return fail(res, 409, "PAYROLL_STATE_INVALID", "Payroll run has no period end date.");
+        }
+
+        const cutoff = getPeriodEndCutoff(run.periodEnd);
+
+        const eligible = await prisma.expenseClaim.findMany({
+          where: {
+            companyId,
+            status: "APPROVED",
+            approvedAt: { lte: cutoff },
+            payrollAdjustment: null,
+            reimbursedAt: null,
+            employee: {
+              companyId,
+              status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
+            },
+          },
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                employeeCode: true,
+              },
+            },
+          },
+          orderBy: { approvedAt: "asc" },
+        });
+
+        const totalAmount = Math.round(eligible.reduce((sum, c) => sum + c.amount, 0) * 100) / 100;
+
+        return ok(res, {
+          payrollRunId: run.id,
+          month: run.month,
+          periodEnd: run.periodEnd,
+          cutoff,
+          count: eligible.length,
+          totalAmount,
+          claims: eligible,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/payroll/runs/:id/ingest-expenses",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const runId = String(req.params.id);
+        const idempotencyKey = (
+          req.header("idempotency-key") ||
+          (req.headers["x-idempotency-key"] as string | undefined)
+        )?.trim();
+
+        if (idempotencyKey) {
+          const oldRecord = await prisma.idempotencyRecord.findUnique({
+            where: {
+              companyId_userId_key_operation: {
+                companyId,
+                userId: req.auth!.id,
+                key: idempotencyKey,
+                operation: `INGEST_EXPENSES_${runId}`,
+              },
+            },
+          });
+          if (oldRecord) {
+            return ok(res, oldRecord.responseJson, oldRecord.statusCode);
+          }
+        }
+
+        const body = z
+          .object({
+            expenseClaimIds: z.array(uuid).optional(),
+          })
+          .parse(req.body || {});
+
+        const requestedIds = body.expenseClaimIds && body.expenseClaimIds.length > 0 ? body.expenseClaimIds : null;
+
+        const result = await prisma.$transaction(async (tx) => {
+          // 1. Lock target PayrollRun row FOR UPDATE
+          const [run] = await tx.$queryRaw<Array<{
+            id: string;
+            companyId: string;
+            month: string;
+            status: string;
+            periodEnd: Date | null;
+          }>>`
+            SELECT id, "companyId", month, status, "periodEnd"
+            FROM "PayrollRun"
+            WHERE id = ${runId} AND "companyId" = ${companyId}
+            FOR UPDATE
+          `;
+
+          if (!run) {
+            throw new Error("PAYROLL_RUN_NOT_FOUND");
+          }
+
+          if (
+            !["DRAFT", "ATTENDANCE_REVIEW", "ATTENDANCE_LOCKED", "ATTENDANCE_FINALIZED", "CALCULATED"].includes(
+              run.status,
+            )
+          ) {
+            throw new Error(`PAYROLL_STATE_INVALID:${run.status}`);
+          }
+
+          if (!run.periodEnd) {
+            throw new Error("PAYROLL_PERIOD_END_MISSING");
+          }
+
+          const cutoff = getPeriodEndCutoff(run.periodEnd);
+
+          // 2. Query eligible claims inside locked transaction
+          const eligibleClaims = await tx.expenseClaim.findMany({
+            where: {
+              companyId,
+              status: "APPROVED",
+              approvedAt: { lte: cutoff },
+              payrollAdjustment: null,
+              reimbursedAt: null,
+              employee: {
+                companyId,
+                status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
+              },
+              ...(requestedIds ? { id: { in: requestedIds } } : {}),
+            },
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  employeeCode: true,
+                },
+              },
+            },
+          });
+
+          // If specific claim IDs were requested, all of them must be eligible
+          if (requestedIds && eligibleClaims.length !== requestedIds.length) {
+            const foundIds = new Set(eligibleClaims.map((c) => c.id));
+            const missing = requestedIds.filter((id) => !foundIds.has(id));
+            throw new Error(`CLAIMS_NOT_ELIGIBLE:${missing.join(",")}`);
+          }
+
+          if (eligibleClaims.length === 0) {
+            return {
+              count: 0,
+              totalAmount: 0,
+              adjustments: [],
+              claims: [],
+              invalidatedCalculation: false,
+            };
+          }
+
+          const adjustments: Array<import("@prisma/client").PayrollAdjustment> = [];
+          for (const claim of eligibleClaims) {
+            const adj = await tx.payrollAdjustment.create({
+              data: {
+                companyId,
+                employeeId: claim.employeeId,
+                month: run.month,
+                code: "EXPENSE_REIMBURSEMENT",
+                name: `Reimbursement: ${claim.title}`,
+                kind: "REIMBURSEMENT",
+                amount: claim.amount,
+                reason: `Expense claim ${claim.id} (${claim.title}) ingested into payroll run ${run.month}`,
+                createdById: req.auth!.id,
+                expenseClaimId: claim.id,
+                payrollRunId: run.id,
+              },
+            });
+
+            await tx.expenseClaim.update({
+              where: { id: claim.id },
+              data: { status: "INGESTED" },
+            });
+
+            adjustments.push(adj);
+          }
+
+          let invalidatedCalculation = false;
+          // Invalidate stale calculated payroll if run was already CALCULATED
+          if (run.status === "CALCULATED") {
+            await tx.payrollLine.deleteMany({
+              where: { payrollRunId: run.id },
+            });
+            await tx.payrollRun.update({
+              where: { id: run.id },
+              data: {
+                status: "ATTENDANCE_FINALIZED",
+                calculatedAt: null,
+                totalGrossSalary: 0,
+                totalDeductions: 0,
+                totalNetPayout: 0,
+                totalEmployees: 0,
+              },
+            });
+            invalidatedCalculation = true;
+          }
+
+          const totalAmount = Math.round(eligibleClaims.reduce((s, c) => s + c.amount, 0) * 100) / 100;
+
+          return {
+            count: eligibleClaims.length,
+            totalAmount,
+            adjustments,
+            claims: eligibleClaims,
+            invalidatedCalculation,
+          };
+        });
+
+        if (idempotencyKey) {
+          await prisma.idempotencyRecord.create({
+            data: {
+              companyId,
+              userId: req.auth!.id,
+              key: idempotencyKey,
+              operation: `INGEST_EXPENSES_${runId}`,
+              statusCode: 200,
+              responseJson: result as unknown as Prisma.InputJsonValue,
+              expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+            },
+          });
+        }
+
+        await audit(
+          req,
+          "INGEST_PAYROLL_EXPENSES",
+          `Ingested ${result.count} expense claims (₹${result.totalAmount}) into payroll run ${runId}.`,
+        );
+
+        return ok(res, result);
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "PAYROLL_RUN_NOT_FOUND") {
+            return fail(res, 404, "PAYROLL_RUN_NOT_FOUND", "Payroll run was not found.");
+          }
+          if (error.message.startsWith("PAYROLL_STATE_INVALID")) {
+            return fail(
+              res,
+              409,
+              "PAYROLL_STATE_INVALID",
+              `Cannot ingest expenses into payroll in state: ${error.message.split(":")[1]}.`,
+            );
+          }
+          if (error.message === "PAYROLL_PERIOD_END_MISSING") {
+            return fail(res, 409, "PAYROLL_STATE_INVALID", "Payroll run has no period end date.");
+          }
+          if (error.message.startsWith("CLAIMS_NOT_ELIGIBLE")) {
+            return fail(
+              res,
+              400,
+              "EXPENSE_CLAIM_NOT_ELIGIBLE",
+              `One or more requested expense claims are not eligible for ingestion: ${error.message.split(":")[1]}`,
+            );
+          }
+        }
+        next(error);
+      }
+    },
+  );
+
   router.post(
     "/payroll/runs/:id/calculate",
     async (req: PayrollRequest, res, next) => {
       try {
         const companyId = req.auth!.companyId;
-        const run = await prisma.payrollRun.findFirst({
-          where: {
-            id: String(req.params.id),
-            companyId,
-            status: { in: ["ATTENDANCE_LOCKED", "ATTENDANCE_FINALIZED", "CALCULATED"] },
-          },
-        });
-        if (!run?.periodStart || !run.periodEnd)
-          return fail(
-            res,
-            409,
-            "PAYROLL_STATE_INVALID",
-            "Attendance must be locked before calculation.",
-          );
-        const employees = await prisma.employee.findMany({
-          where: {
-            companyId,
-            status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
-          },
-          select: { id: true },
-        });
-        const days = countWorkingDays(run.periodStart, run.periodEnd);
-        const rules = await prisma.statutoryRuleVersion.findMany({
-          where: {
-            companyId,
-            active: true,
-            effectiveFrom: { lte: run.periodEnd },
-            OR: [
-              { effectiveTo: null },
-              { effectiveTo: { gte: run.periodStart } },
-            ],
-          },
-        });
-        const adjustments = await prisma.payrollAdjustment.findMany({
-          where: { companyId, month: run.month },
-        });
-        const lines: Array<{ employeeId: string } & ReturnType<typeof calculatePayroll>> = [];
-        for (const employee of employees) {
-          const revision = await prisma.employeeSalaryRevision.findFirst({
-            where: {
-              companyId,
-              employeeId: employee.id,
-              status: "APPROVED",
-              effectiveFrom: { lte: run.periodEnd },
-            },
-            include: {
-              structure: {
-                include: { components: { orderBy: { sequence: "asc" } } },
-              },
-            },
-            orderBy: { effectiveFrom: "desc" },
-          });
-          if (!revision) continue;
-          const snapshot = await prisma.payrollAttendanceReview.findUnique({
-            where: { payrollRunId_employeeId: { payrollRunId: run.id, employeeId: employee.id } },
-          });
-          const attendance = snapshot ? [] : await prisma.attendanceRecord.findMany({
-            where: { companyId, employeeId: employee.id, date: { gte: run.periodStart, lte: run.periodEnd } },
-          });
-          const payableDays = snapshot
-            ? snapshot.presentDays + snapshot.lateDays + snapshot.halfDays * 0.5 + snapshot.paidLeaveDays
-            : attendance.reduce((sum, item) => sum + (["PRESENT", "LATE"].includes(item.status) ? 1 : item.status === "HALF_DAY" ? 0.5 : 0), 0);
-          const loan = await prisma.employeeLoan.findFirst({
-            where: {
-              companyId,
-              employeeId: employee.id,
-              status: "ACTIVE",
-              startsOn: { lte: run.periodEnd },
-            },
-            orderBy: { startsOn: "asc" },
-          });
-          const calculated = calculatePayroll({
-            components: revision.structure.components as SalaryComponentInput[],
-            overrides: (revision.componentValues || undefined) as
-              | Record<string, number>
-              | undefined,
-            adjustments: adjustments.filter(
-              (item) => item.employeeId === employee.id,
-            ),
-            rules: rules.map((item) => ({
-              type: item.type,
-              configuration: item.configuration as Record<string, unknown>,
-            })) as StatutoryRuleInput[],
-            workingDays: days,
-            payableDays,
-            loanInstallment: loan
-              ? Math.min(loan.installment, loan.outstanding)
-              : 0,
-          });
-          lines.push({ employeeId: employee.id, ...calculated });
-        }
-        const totals = lines.reduce(
-          (value, line) => ({
-            gross: value.gross + line.grossEarnings,
-            deductions: value.deductions + line.employeeDeductions,
-            net: value.net + line.netPay,
-          }),
-          { gross: 0, deductions: 0, net: 0 },
-        );
+        const runId = String(req.params.id);
+
         const result = await prisma.$transaction(async (tx) => {
+          // 1. Lock PayrollRun row exclusively
+          const [run] = await tx.$queryRaw<Array<{
+            id: string;
+            companyId: string;
+            month: string;
+            status: string;
+            periodStart: Date | null;
+            periodEnd: Date | null;
+          }>>`
+            SELECT id, "companyId", month, status, "periodStart", "periodEnd"
+            FROM "PayrollRun"
+            WHERE id = ${runId} AND "companyId" = ${companyId}
+            FOR UPDATE
+          `;
+
+          if (!run) {
+            throw new Error("PAYROLL_RUN_NOT_FOUND");
+          }
+
+          if (!["ATTENDANCE_LOCKED", "ATTENDANCE_FINALIZED", "CALCULATED"].includes(run.status)) {
+            throw new Error("PAYROLL_STATE_INVALID");
+          }
+
+          if (!run.periodStart || !run.periodEnd) {
+            throw new Error("ATTENDANCE_NOT_LOCKED");
+          }
+
+          const employees = await tx.employee.findMany({
+            where: {
+              companyId,
+              status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
+            },
+            select: { id: true },
+          });
+
+          const days = countWorkingDays(run.periodStart, run.periodEnd);
+
+          const rules = await tx.statutoryRuleVersion.findMany({
+            where: {
+              companyId,
+              active: true,
+              effectiveFrom: { lte: run.periodEnd },
+              OR: [
+                { effectiveTo: null },
+                { effectiveTo: { gte: run.periodStart } },
+              ],
+            },
+          });
+
+          // Section 15: CRITICAL DATA-SCOPE RULE
+          const adjustments = await tx.payrollAdjustment.findMany({
+            where: {
+              companyId,
+              month: run.month,
+              OR: [
+                { kind: { not: "REIMBURSEMENT" } },
+                { kind: "REIMBURSEMENT", payrollRunId: run.id },
+              ],
+            },
+          });
+
+          const lines: Array<{ employeeId: string } & ReturnType<typeof calculatePayroll>> = [];
+
+          for (const employee of employees) {
+            const revision = await tx.employeeSalaryRevision.findFirst({
+              where: {
+                companyId,
+                employeeId: employee.id,
+                status: "APPROVED",
+                effectiveFrom: { lte: run.periodEnd },
+              },
+              include: {
+                structure: {
+                  include: { components: { orderBy: { sequence: "asc" } } },
+                },
+              },
+              orderBy: { effectiveFrom: "desc" },
+            });
+            if (!revision) continue;
+
+            const snapshot = await tx.payrollAttendanceReview.findUnique({
+              where: { payrollRunId_employeeId: { payrollRunId: run.id, employeeId: employee.id } },
+            });
+
+            const attendance = snapshot ? [] : await tx.attendanceRecord.findMany({
+              where: { companyId, employeeId: employee.id, date: { gte: run.periodStart, lte: run.periodEnd } },
+            });
+
+            const payableDays = snapshot
+              ? snapshot.presentDays + snapshot.lateDays + snapshot.halfDays * 0.5 + snapshot.paidLeaveDays
+              : attendance.reduce((sum, item) => sum + (["PRESENT", "LATE"].includes(item.status) ? 1 : item.status === "HALF_DAY" ? 0.5 : 0), 0);
+
+            const loan = await tx.employeeLoan.findFirst({
+              where: {
+                companyId,
+                employeeId: employee.id,
+                status: "ACTIVE",
+                startsOn: { lte: run.periodEnd },
+              },
+              orderBy: { startsOn: "asc" },
+            });
+
+            const calculated = calculatePayroll({
+              components: revision.structure.components as SalaryComponentInput[],
+              overrides: (revision.componentValues || undefined) as
+                | Record<string, number>
+                | undefined,
+              adjustments: adjustments.filter(
+                (item) => item.employeeId === employee.id,
+              ),
+              rules: rules.map((item) => ({
+                type: item.type,
+                configuration: item.configuration as Record<string, unknown>,
+              })) as StatutoryRuleInput[],
+              workingDays: days,
+              payableDays,
+              loanInstallment: loan
+                ? Math.min(loan.installment, loan.outstanding)
+                : 0,
+            });
+            lines.push({ employeeId: employee.id, ...calculated });
+          }
+
+          const totals = lines.reduce(
+            (value, line) => ({
+              gross: value.gross + line.grossEarnings,
+              deductions: value.deductions + line.employeeDeductions,
+              net: value.net + line.netPay,
+            }),
+            { gross: 0, deductions: 0, net: 0 },
+          );
+
           await tx.payrollLine.deleteMany({ where: { payrollRunId: run.id } });
-          for (const line of lines)
+          for (const line of lines) {
             await tx.payrollLine.create({
               data: {
                 ...line,
@@ -620,6 +953,8 @@ export function createPayrollRouter(
                 calculationTrace: line.calculationTrace as Prisma.InputJsonValue,
               },
             });
+          }
+
           return tx.payrollRun.update({
             where: { id: run.id },
             data: {
@@ -632,13 +967,120 @@ export function createPayrollRouter(
             },
           });
         });
+
         await audit(
           req,
           "CALCULATE_PAYROLL",
-          `${run.month} calculated for ${lines.length} employees.`,
+          `${result.month} calculated for ${result.totalEmployees} employees.`,
         );
         return ok(res, result);
       } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "PAYROLL_RUN_NOT_FOUND") {
+            return fail(res, 404, "PAYROLL_RUN_NOT_FOUND", "Payroll run was not found.");
+          }
+          if (error.message === "PAYROLL_STATE_INVALID" || error.message === "ATTENDANCE_NOT_LOCKED") {
+            return fail(res, 409, "PAYROLL_STATE_INVALID", "Attendance must be locked before calculation.");
+          }
+        }
+        next(error);
+      }
+    },
+  );
+
+  router.post(
+    "/payroll/runs/:id/discard",
+    async (req: PayrollRequest, res, next) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const runId = String(req.params.id);
+
+        const result = await prisma.$transaction(async (tx) => {
+          const [run] = await tx.$queryRaw<Array<{
+            id: string;
+            companyId: string;
+            month: string;
+            status: string;
+          }>>`
+            SELECT id, "companyId", month, status
+            FROM "PayrollRun"
+            WHERE id = ${runId} AND "companyId" = ${companyId}
+            FOR UPDATE
+          `;
+
+          if (!run) {
+            throw new Error("PAYROLL_RUN_NOT_FOUND");
+          }
+
+          if (
+            !["DRAFT", "ATTENDANCE_REVIEW", "ATTENDANCE_LOCKED", "ATTENDANCE_FINALIZED", "CALCULATED"].includes(
+              run.status,
+            )
+          ) {
+            throw new Error("PAYROLL_STATE_INVALID");
+          }
+
+          // Find all ingested reimbursement adjustments in this run
+          const reimbursements = await tx.payrollAdjustment.findMany({
+            where: {
+              payrollRunId: run.id,
+              kind: "REIMBURSEMENT",
+              expenseClaimId: { not: null },
+            },
+            select: { id: true, expenseClaimId: true },
+          });
+
+          // Restore claims to APPROVED
+          const claimIds = reimbursements.map((r) => r.expenseClaimId!).filter(Boolean);
+          if (claimIds.length > 0) {
+            await tx.expenseClaim.updateMany({
+              where: { id: { in: claimIds } },
+              data: { status: "APPROVED", reimbursedAt: null },
+            });
+          }
+
+          // Remove the adjustments
+          await tx.payrollAdjustment.deleteMany({
+            where: {
+              payrollRunId: run.id,
+              kind: "REIMBURSEMENT",
+            },
+          });
+
+          // Delete payroll lines
+          await tx.payrollLine.deleteMany({
+            where: { payrollRunId: run.id },
+          });
+
+          return tx.payrollRun.update({
+            where: { id: run.id },
+            data: {
+              status: "DRAFT",
+              calculatedAt: null,
+              totalGrossSalary: 0,
+              totalDeductions: 0,
+              totalNetPayout: 0,
+              totalEmployees: 0,
+            },
+          });
+        });
+
+        await audit(
+          req,
+          "DISCARD_PAYROLL_DRAFT",
+          `Payroll draft ${runId} discarded and ${result.month} reimbursement adjustments rolled back.`,
+        );
+
+        return ok(res, { discarded: true, run: result });
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "PAYROLL_RUN_NOT_FOUND") {
+            return fail(res, 404, "PAYROLL_RUN_NOT_FOUND", "Payroll run was not found.");
+          }
+          if (error.message === "PAYROLL_STATE_INVALID") {
+            return fail(res, 409, "PAYROLL_STATE_INVALID", "Cannot discard an approved or locked payroll run.");
+          }
+        }
         next(error);
       }
     },
@@ -768,15 +1210,72 @@ export function createPayrollRouter(
     permit("payroll.approve"),
     async (req: PayrollRequest, res, next) => {
       try {
-        const body = z.object({ paymentDate: z.coerce.date(), paymentReference: z.string().trim().min(3).max(120) }).parse(req.body);
+        const body = z
+          .object({
+            paymentDate: z.coerce.date(),
+            paymentReference: z.string().trim().min(3).max(120),
+          })
+          .parse(req.body);
+
         const updated = await prisma.payrollRun.updateMany({
-          where: { id: String(req.params.id), companyId: req.auth!.companyId, status: "LOCKED" },
-          data: { paymentDate: body.paymentDate, paymentReference: body.paymentReference, paymentRecordedById: req.auth!.id, paymentRecordedAt: new Date() },
+          where: {
+            id: String(req.params.id),
+            companyId: req.auth!.companyId,
+            status: "LOCKED",
+          },
+          data: {
+            paymentDate: body.paymentDate,
+            paymentReference: body.paymentReference,
+            paymentRecordedById: req.auth!.id,
+            paymentRecordedAt: new Date(),
+          },
         });
-        if (!updated.count) return fail(res, 409, "PAYROLL_STATE_INVALID", "Only a locked payroll can record payment.");
-        await audit(req, "RECORD_PAYROLL_PAYMENT", `Payment ${body.paymentReference} recorded for payroll ${req.params.id}.`);
-        return ok(res, { recorded: true, paymentDate: body.paymentDate, paymentReference: body.paymentReference });
-      } catch (error) { next(error); }
+
+        if (!updated.count)
+          return fail(
+            res,
+            409,
+            "PAYROLL_STATE_INVALID",
+            "Only a locked payroll can record payment.",
+          );
+
+        // Mark ingested claims as REIMBURSED
+        if (prisma.payrollAdjustment?.findMany && prisma.expenseClaim?.updateMany) {
+          const adjustments = await prisma.payrollAdjustment.findMany({
+            where: {
+              payrollRunId: String(req.params.id),
+              kind: "REIMBURSEMENT",
+              expenseClaimId: { not: null },
+            },
+            select: { expenseClaimId: true },
+          });
+
+          const claimIds = adjustments.map((a) => a.expenseClaimId!).filter(Boolean);
+          if (claimIds.length > 0) {
+            await prisma.expenseClaim.updateMany({
+              where: { id: { in: claimIds } },
+              data: {
+                status: "REIMBURSED",
+                reimbursedAt: body.paymentDate,
+              },
+            });
+          }
+        }
+
+        await audit(
+          req,
+          "RECORD_PAYROLL_PAYMENT",
+          `Payment ${body.paymentReference} recorded for payroll ${req.params.id}.`,
+        );
+
+        return ok(res, {
+          recorded: true,
+          paymentDate: body.paymentDate,
+          paymentReference: body.paymentReference,
+        });
+      } catch (error) {
+        next(error);
+      }
     },
   );
 
@@ -998,6 +1497,7 @@ export function createPayrollRouter(
         const body = z
           .object({ reason: z.string().trim().min(5).max(500) })
           .parse(req.body);
+
         const updated = await prisma.payrollRun.updateMany({
           where: {
             id: String(req.params.id),
@@ -1014,6 +1514,7 @@ export function createPayrollRouter(
           },
           data: { status: "REVERSED" },
         });
+
         if (!updated.count)
           return fail(
             res,
@@ -1021,6 +1522,34 @@ export function createPayrollRouter(
             "PAYROLL_STATE_INVALID",
             "A locked or published payroll run was not found.",
           );
+
+        // Revert ingested claims back to APPROVED
+        if (prisma.payrollAdjustment?.findMany && prisma.expenseClaim?.updateMany) {
+          const adjustments = await prisma.payrollAdjustment.findMany({
+            where: {
+              payrollRunId: String(req.params.id),
+              kind: "REIMBURSEMENT",
+              expenseClaimId: { not: null },
+            },
+            select: { expenseClaimId: true },
+          });
+
+          const claimIds = adjustments.map((a) => a.expenseClaimId!).filter(Boolean);
+          if (claimIds.length > 0) {
+            await prisma.expenseClaim.updateMany({
+              where: { id: { in: claimIds } },
+              data: { status: "APPROVED", reimbursedAt: null },
+            });
+          }
+
+          await prisma.payrollAdjustment.deleteMany({
+            where: {
+              payrollRunId: String(req.params.id),
+              kind: "REIMBURSEMENT",
+            },
+          });
+        }
+
         await audit(
           req,
           "REVERSE_PAYROLL",
