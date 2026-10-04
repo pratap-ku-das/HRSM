@@ -874,4 +874,36 @@ export const api = {
     (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/epf/challans`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   updateEpfChallan: async (id: string, body: any) =>
     (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/epf/challans/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  downloadEsicFile: async (id: string, customFilename?: string) => {
+    const res = await fetch(`${API_BASE}/v1/compliance/filings/${id}/export`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || 'Failed to download ESIC bulk return file');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = customFilename || `ESIC_Return_${id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
+  getEsicChallans: async (params?: { status?: string; wageYear?: number; wageMonth?: number; statutoryFilingId?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.wageYear) q.set('wageYear', String(params.wageYear));
+    if (params?.wageMonth) q.set('wageMonth', String(params.wageMonth));
+    if (params?.statutoryFilingId) q.set('statutoryFilingId', params.statutoryFilingId);
+    return (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/compliance/esic/challans?${q.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data;
+  },
+  getEsicChallan: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/esic/challans/${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createEsicChallan: async (body: any) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/esic/challans`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  updateEsicChallan: async (id: string, body: any) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/esic/challans/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
 };

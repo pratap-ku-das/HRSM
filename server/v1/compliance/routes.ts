@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Router, type Response, type NextFunction, type RequestHandler } from "express";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
@@ -10,6 +11,9 @@ import {
   CreateEpfChallanSchema,
   UpdateEpfChallanSchema,
   TRRN_REGEX,
+  CreateEsicChallanSchema,
+  UpdateEsicChallanSchema,
+  CPRN_REGEX,
 } from "./types.js";
 import {
   extractStatutorySnapshot,
@@ -26,6 +30,11 @@ import {
   type EpfSnapshotItemInput,
   type EpfRuleConfiguration,
 } from "./epfEngine.js";
+import {
+  runEsicDiagnostics,
+  generateEsicBulkUpload,
+  calculateEsicChallanTotals,
+} from "./esicEngine.js";
 
 export function createComplianceRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
@@ -297,6 +306,7 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
             firstName: true,
             lastName: true,
             taxIdentifier: true,
+            lastWorkingDay: true,
           },
         });
 
@@ -315,6 +325,7 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
               lastName: e.lastName,
               taxIdentifier: e.taxIdentifier,
               activeProfile: profileMap.get(e.id) || null,
+              lastWorkingDay: e.lastWorkingDay,
             },
           ]),
         );
@@ -366,6 +377,7 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
                 snapshotUan: item.snapshotUan,
                 snapshotPan: item.snapshotPan,
                 snapshotEsicIp: item.snapshotEsicIp,
+                snapshotLastWorkingDay: item.snapshotLastWorkingDay || null,
                 workingDays: item.workingDays,
                 payableDays: item.payableDays,
                 ncpDays: item.ncpDays,
@@ -772,13 +784,38 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
         });
 
         if (!filing) return fail(res, 404, "FILING_NOT_FOUND", "Filing was not found.");
-        if (filing.domain !== "EPF_ECR") {
-          return fail(res, 400, "INVALID_DOMAIN", "Diagnostics currently supported for EPF_ECR domain.");
+        if (!["EPF_ECR", "ESIC_MONTHLY"].includes(filing.domain)) {
+          return fail(res, 400, "INVALID_DOMAIN", "Diagnostics currently supported for EPF_ECR and ESIC_MONTHLY domains.");
         }
 
         const settings = prisma.companySettings
           ? await prisma.companySettings.findUnique({ where: { companyId } })
           : null;
+
+        if (filing.domain === "ESIC_MONTHLY") {
+          const diagResult = runEsicDiagnostics({
+            filing: {
+              domain: filing.domain,
+              periodYear: filing.periodYear,
+              periodMonth: filing.periodMonth || null,
+            },
+            companySettings: settings,
+            items: filing.items.map((it) => ({
+              employeeId: it.employeeId,
+              snapshotEmployeeCode: it.snapshotEmployeeCode,
+              snapshotEmployeeName: it.snapshotEmployeeName,
+              snapshotEsicIp: it.snapshotEsicIp,
+              grossWages: it.grossWages,
+              payableDays: it.payableDays,
+              workingDays: it.workingDays,
+              eeEsiShare: it.eeEsiShare,
+              erEsiShare: it.erEsiShare,
+              snapshotLastWorkingDay: it.snapshotLastWorkingDay,
+              calculationDetails: it.calculationDetails as Record<string, unknown> | null,
+            })),
+          });
+          return ok(res, diagResult);
+        }
 
         const epfItems: EpfSnapshotItemInput[] = filing.items.map((it) => ({
           snapshotEmployeeCode: it.snapshotEmployeeCode,
@@ -820,8 +857,8 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
         });
 
         if (!filing) return fail(res, 404, "FILING_NOT_FOUND", "Filing was not found.");
-        if (filing.domain !== "EPF_ECR") {
-          return fail(res, 400, "INVALID_DOMAIN", "Export currently supports EPF_ECR domain.");
+        if (!["EPF_ECR", "ESIC_MONTHLY"].includes(filing.domain)) {
+          return fail(res, 400, "INVALID_DOMAIN", "Export currently supports EPF_ECR and ESIC_MONTHLY domains.");
         }
         if (!["LOCKED", "EXPORTED"].includes(filing.status)) {
           return fail(res, 409, "INVALID_STATE", `Only LOCKED or EXPORTED filings can be exported. Current status: ${filing.status}`);
@@ -830,6 +867,45 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
         const settings = prisma.companySettings
           ? await prisma.companySettings.findUnique({ where: { companyId } })
           : null;
+
+        if (filing.domain === "ESIC_MONTHLY") {
+          const esiReg = (settings?.esiRegistrationNumber || "").trim();
+          if (!esiReg && prisma.companySettings) {
+            return fail(res, 422, "MISSING_ESI_REGISTRATION", "Cannot export ESIC: Company ESI Registration Number is missing in Company Settings.");
+          }
+
+          const effectiveEsi = esiReg || "ESIC";
+          const year = filing.periodYear;
+          const month = String(filing.periodMonth || 1).padStart(2, "0");
+          const filename = `ESIC_${effectiveEsi}_${year}${month}.csv`;
+
+          const { csv, checksum, recordCount } = generateEsicBulkUpload({
+            periodYear: filing.periodYear,
+            periodMonth: filing.periodMonth || 1,
+            items: filing.items.map((it) => ({
+              snapshotEsicIp: it.snapshotEsicIp,
+              snapshotEmployeeName: it.snapshotEmployeeName,
+              grossWages: it.grossWages,
+              payableDays: it.payableDays,
+              snapshotLastWorkingDay: it.snapshotLastWorkingDay,
+            })),
+          });
+
+          if (filing.status === "LOCKED") {
+            await prisma.statutoryFiling.update({
+              where: { id: filing.id },
+              data: { status: "EXPORTED" },
+            });
+          }
+
+          await audit(req, "EXPORT_ESIC_MONTHLY", `Exported ESIC Monthly bulk file for filing ${filing.id} (${recordCount} records, sha256: ${checksum})`);
+
+          res.setHeader("Content-Type", "text/csv; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+          res.setHeader("X-ESIC-Checksum", checksum);
+          res.setHeader("X-ESIC-Record-Count", String(recordCount));
+          return res.status(200).send(csv);
+        }
 
         const estCode = (settings?.pfRegistrationNumber || "").trim();
         if (!estCode && prisma.companySettings) {
@@ -1202,6 +1278,335 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
             },
           });
           await audit(req, "CANCEL_EPF_CHALLAN", `Cancelled EPF Challan ${challan.id}`);
+          return ok(res, updated);
+        }
+
+        return fail(res, 400, "UNKNOWN_ACTION", `Unknown action: ${body.action}`);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // 7. ESIC CHALLAN CALCULATION & RECONCILIATION (P2.7-C)
+  // -------------------------------------------------------------------------
+
+  router.post(
+    "/compliance/esic/challans",
+    permit("compliance.manage"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const body = CreateEsicChallanSchema.parse(req.body);
+
+        const filing = await prisma.statutoryFiling.findFirst({
+          where: { id: body.statutoryFilingId, companyId },
+          include: { items: true },
+        });
+
+        if (!filing) {
+          return fail(res, 404, "FILING_NOT_FOUND", "Statutory filing was not found in this company.");
+        }
+        if (filing.domain !== "ESIC_MONTHLY") {
+          return fail(res, 422, "DOMAIN_MISMATCH", `Challan domain mismatch: Target filing domain is ${filing.domain}, but ESIC challan requires ESIC_MONTHLY.`);
+        }
+        if (!["APPROVED", "LOCKED", "EXPORTED"].includes(filing.status)) {
+          return fail(res, 409, "INVALID_STATE", `Challans can only be generated for filings that are APPROVED, LOCKED, or EXPORTED. Current status: ${filing.status}`);
+        }
+
+        // Prevent duplicate active challans for the same filing
+        if (prisma.esicChallan) {
+          const existingChallan = await prisma.esicChallan.findFirst({
+            where: {
+              companyId,
+              statutoryFilingId: filing.id,
+              status: { not: "CANCELLED" },
+            },
+          });
+          if (existingChallan) {
+            return fail(res, 409, "CHALLAN_ALREADY_EXISTS", `An active ESIC Challan (${existingChallan.id}) already exists for this filing.`);
+          }
+        }
+
+        // Validate CPRN uniqueness if supplied
+        if (body.cprnNumber && prisma.esicChallan) {
+          const duplicateCprn = await prisma.esicChallan.findFirst({
+            where: { cprnNumber: body.cprnNumber },
+          });
+          if (duplicateCprn) {
+            return fail(res, 409, "DUPLICATE_CPRN", `CPRN "${body.cprnNumber}" is already assigned to challan ${duplicateCprn.id}.`);
+          }
+        }
+
+        const totals = calculateEsicChallanTotals(
+          filing.items.map((it) => ({
+            grossWages: it.grossWages,
+            eeEsiShare: it.eeEsiShare,
+            erEsiShare: it.erEsiShare,
+          })),
+        );
+
+        const challan = await prisma.esicChallan.create({
+          data: {
+            companyId,
+            statutoryFilingId: filing.id,
+            challanPeriodYear: filing.periodYear,
+            challanPeriodMonth: filing.periodMonth || 1,
+            cprnNumber: body.cprnNumber || null,
+            totalEmployees: totals.totalEmployees,
+            totalWages: totals.totalWages,
+            employeeShare: totals.employeeShare,
+            employerShare: totals.employerShare,
+            totalAmount: totals.totalAmount,
+            challanDate: new Date(body.challanDate),
+            status: "CHALLAN_GENERATED",
+            notes: body.notes || null,
+            createdById: req.auth!.id,
+          },
+        });
+
+        await audit(req, "CREATE_ESIC_CHALLAN", `Generated ESIC Challan ${challan.id} for filing ${filing.id} with total ₹${totals.totalAmount}`);
+        return ok(res, challan, 201);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.get(
+    "/compliance/esic/challans",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const { filingId, status, wageYear, wageMonth } = req.query;
+
+        const where: Prisma.EsicChallanWhereInput = { companyId };
+        if (filingId) where.statutoryFilingId = String(filingId);
+        if (status) where.status = status as Prisma.EnumEsicChallanStatusFilter;
+        if (wageYear) where.challanPeriodYear = Number(wageYear);
+        if (wageMonth) where.challanPeriodMonth = Number(wageMonth);
+
+        const challans = await prisma.esicChallan.findMany({
+          where,
+          include: {
+            filing: {
+              select: {
+                id: true,
+                domain: true,
+                periodYear: true,
+                periodMonth: true,
+                status: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        return ok(res, challans);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.get(
+    "/compliance/esic/challans/:id",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const challan = await prisma.esicChallan.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: {
+            filing: true,
+          },
+        });
+
+        if (!challan) {
+          return fail(res, 404, "CHALLAN_NOT_FOUND", "ESIC Challan was not found.");
+        }
+
+        return ok(res, challan);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.patch(
+    "/compliance/esic/challans/:id",
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const body = UpdateEsicChallanSchema.parse(req.body);
+
+        const challan = await prisma.esicChallan.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { filing: { include: { items: true } } },
+        });
+
+        if (!challan) {
+          return fail(res, 404, "CHALLAN_NOT_FOUND", "ESIC Challan was not found.");
+        }
+
+        // Segregation of Duties & RBAC per action
+        if (body.action === "RECONCILE") {
+          if (!req.auth!.permissions?.includes("compliance.approve") && req.auth!.role !== "SUPER_ADMIN" && req.auth!.role !== "COMPANY_ADMIN") {
+            return fail(res, 403, "FORBIDDEN", "Missing required permission: compliance.approve");
+          }
+          if (challan.createdById === req.auth!.id) {
+            return fail(res, 403, "MAKER_CANNOT_RECONCILE", "Segregation of Duties violation: The Maker who created this challan cannot reconcile it.");
+          }
+        } else {
+          if (!req.auth!.permissions?.includes("compliance.manage") && req.auth!.role !== "SUPER_ADMIN" && req.auth!.role !== "COMPANY_ADMIN") {
+            return fail(res, 403, "FORBIDDEN", "Missing required permission: compliance.manage");
+          }
+        }
+
+        // Action 1: SET_CPRN
+        if (body.action === "SET_CPRN") {
+          if (!body.cprnNumber) {
+            return fail(res, 422, "MISSING_CPRN", "CPRN number is required for SET_CPRN action.");
+          }
+          const dup = await prisma.esicChallan.findFirst({
+            where: { cprnNumber: body.cprnNumber, id: { not: challan.id } },
+          });
+          if (dup) {
+            return fail(res, 409, "DUPLICATE_CPRN", `CPRN "${body.cprnNumber}" is already assigned to challan ${dup.id}.`);
+          }
+          const updated = await prisma.esicChallan.update({
+            where: { id: challan.id },
+            data: {
+              cprnNumber: body.cprnNumber,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "SET_CHALLAN_CPRN", `Set CPRN ${body.cprnNumber} on challan ${challan.id}`);
+          return ok(res, updated);
+        }
+
+        // Action 2: INITIATE_PAYMENT
+        if (body.action === "INITIATE_PAYMENT") {
+          if (challan.status !== "CHALLAN_GENERATED") {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot initiate payment from status ${challan.status}. Current status must be CHALLAN_GENERATED.`);
+          }
+          const cprn = body.cprnNumber || challan.cprnNumber;
+          if (!cprn) {
+            return fail(res, 422, "MISSING_CPRN", "A valid 14-digit CPRN number is required to initiate payment.");
+          }
+          if (body.cprnNumber && body.cprnNumber !== challan.cprnNumber) {
+            const dup = await prisma.esicChallan.findFirst({
+              where: { cprnNumber: body.cprnNumber, id: { not: challan.id } },
+            });
+            if (dup) return fail(res, 409, "DUPLICATE_CPRN", `CPRN "${body.cprnNumber}" is already in use.`);
+          }
+          const updated = await prisma.esicChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "PAYMENT_INITIATED",
+              cprnNumber: cprn,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "INITIATE_ESIC_PAYMENT", `Initiated payment for challan ${challan.id} with CPRN ${cprn}`);
+          return ok(res, updated);
+        }
+
+        // Action 3: RECORD_PAYMENT
+        if (body.action === "RECORD_PAYMENT") {
+          if (!["CHALLAN_GENERATED", "PAYMENT_INITIATED"].includes(challan.status)) {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot record payment for challan with status ${challan.status}.`);
+          }
+          if (!body.paidDate) {
+            return fail(res, 422, "MISSING_PAID_DATE", "paidDate is required when recording payment.");
+          }
+          const cprn = body.cprnNumber || challan.cprnNumber;
+          if (!cprn) {
+            return fail(res, 422, "MISSING_CPRN", "CPRN is required when confirming payment.");
+          }
+          const updated = await prisma.esicChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "PAID",
+              paidDate: new Date(body.paidDate),
+              cprnNumber: cprn,
+              transactionReference: body.transactionReference || challan.transactionReference,
+              bankReference: body.bankReference || challan.bankReference,
+              paidRecordedById: req.auth!.id,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "RECORD_ESIC_PAYMENT", `Recorded payment for challan ${challan.id} on ${body.paidDate} (CPRN: ${cprn})`);
+          return ok(res, updated);
+        }
+
+        // Action 4: RECONCILE
+        if (body.action === "RECONCILE") {
+          if (challan.status !== "PAID") {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot reconcile challan with status ${challan.status}. Challan must be in PAID status before reconciliation.`);
+          }
+
+          if (!challan.filing || !Array.isArray(challan.filing.items)) {
+            return fail(res, 404, "FILING_NOT_FOUND", "Authoritative filing associated with this challan was not found.");
+          }
+
+          // Strict financial reconciliation check against filing
+          const filingTotals = calculateEsicChallanTotals(
+            challan.filing.items.map((it) => ({
+              grossWages: it.grossWages,
+              eeEsiShare: it.eeEsiShare,
+              erEsiShare: it.erEsiShare,
+            })),
+          );
+
+          if (Math.abs(challan.totalAmount - filingTotals.totalAmount) > 0.01) {
+            return fail(
+              res,
+              422,
+              "RECONCILIATION_AMOUNT_MISMATCH",
+              `Challan amount (₹${challan.totalAmount}) does not match authoritative filing liability (₹${filingTotals.totalAmount}).`,
+            );
+          }
+
+          const checksum = crypto
+            .createHash("sha256")
+            .update(`${challan.id}:${challan.totalAmount}:${challan.paidDate?.toISOString()}:${challan.cprnNumber}`)
+            .digest("hex");
+
+          const updated = await prisma.esicChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "RECONCILED",
+              reconciliationChecksum: checksum,
+              reconciledById: req.auth!.id,
+              reconciledAt: new Date(),
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "RECONCILE_ESIC_CHALLAN", `Reconciled ESIC Challan ${challan.id} by Checker ${req.auth!.id} (checksum: ${checksum})`);
+          return ok(res, updated);
+        }
+
+        // Action 5: CANCEL
+        if (body.action === "CANCEL") {
+          if (["PAID", "RECONCILED"].includes(challan.status)) {
+            return fail(res, 409, "CANNOT_CANCEL_PAID_CHALLAN", `Cannot cancel a challan that has already been PAID or RECONCILED. Current status: ${challan.status}`);
+          }
+          const updated = await prisma.esicChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "CANCELLED",
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "CANCEL_ESIC_CHALLAN", `Cancelled ESIC Challan ${challan.id}`);
           return ok(res, updated);
         }
 

@@ -15,6 +15,7 @@ export interface SnapshotEmployeeInfo {
     pfOptOut?: boolean;
     ptState?: string | null;
   } | null;
+  lastWorkingDay?: Date | string | null;
 }
 
 export interface SnapshotPayrollLineInfo {
@@ -37,6 +38,7 @@ export interface ExtractedSnapshotItem {
   snapshotUan: string | null;
   snapshotPan: string | null;
   snapshotEsicIp: string | null;
+  snapshotLastWorkingDay?: Date | null;
   workingDays: number;
   payableDays: number;
   ncpDays: number;
@@ -114,6 +116,7 @@ export function extractStatutorySnapshot(
     const uan = profile?.uan || null;
     const pan = profile?.panNumber || employee.taxIdentifier || null;
     const esicIp = profile?.esicIpNumber || null;
+    const lwd = employee.lastWorkingDay ? new Date(employee.lastWorkingDay) : null;
 
     items.push({
       employeeId: employee.id,
@@ -122,6 +125,7 @@ export function extractStatutorySnapshot(
       snapshotUan: uan,
       snapshotPan: pan ? pan.toUpperCase() : null,
       snapshotEsicIp: esicIp,
+      snapshotLastWorkingDay: lwd && !isNaN(lwd.getTime()) ? lwd : null,
       workingDays: line.workingDays,
       payableDays: line.payableDays,
       ncpDays: line.unpaidDays,
@@ -215,6 +219,9 @@ export function generateCanonicalChecksum(
       erPfShare: money(item.erEpfShare).toFixed(2),
       eeEsiShare: money(item.eeEsiShare).toFixed(2),
       erEsiShare: money(item.erEsiShare).toFixed(2),
+      lastWorkingDay: (item as any).snapshotLastWorkingDay
+        ? new Date((item as any).snapshotLastWorkingDay).toISOString().split("T")[0]
+        : "",
       ptAmount: money(item.ptAmount).toFixed(2),
       tdsAmount: money(item.tdsAmount).toFixed(2),
     })),

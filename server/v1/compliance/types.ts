@@ -76,3 +76,51 @@ export const UpdateEpfChallanSchema = z.object({
   bankReference: z.string().trim().max(100).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
 });
+
+export const CPRN_REGEX = /^[0-9]{14}$/;
+
+export const CreateEsicChallanSchema = z.object({
+  statutoryFilingId: z.string().trim().min(1, "statutoryFilingId is required"),
+  challanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "challanDate must be YYYY-MM-DD"),
+  cprnNumber: z.string().trim().regex(CPRN_REGEX, "CPRN must be exactly 14 numeric digits").optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
+export const UpdateEsicChallanSchema = z.object({
+  action: z.enum(["SET_CPRN", "INITIATE_PAYMENT", "RECORD_PAYMENT", "RECONCILE", "CANCEL"]),
+  cprnNumber: z.string().trim().regex(CPRN_REGEX, "CPRN must be exactly 14 numeric digits").optional().nullable(),
+  paidDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "paidDate must be YYYY-MM-DD").optional().nullable(),
+  transactionReference: z.string().trim().max(100).optional().nullable(),
+  bankReference: z.string().trim().max(100).optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
+export interface EsicBulkItem {
+  ipNumber: string;
+  ipName: string;
+  payableDays: number;
+  totalMonthlyWages: number;
+  reasonCode: number;
+  lastWorkingDay: string;
+}
+
+export type EsicDiagnosticCode =
+  | "ESI-DIAG-00"
+  | "ESI-DIAG-01"
+  | "ESI-DIAG-02"
+  | "ESI-DIAG-03"
+  | "ESI-DIAG-04"
+  | "ESI-DIAG-05"
+  | "ESI-DIAG-06"
+  | "ESI-DIAG-07"
+  | "ESI-DIAG-08";
+
+export interface EsicDiagnostic {
+  code: EsicDiagnosticCode;
+  severity: "ERROR" | "WARNING";
+  employeeId?: string;
+  employeeName?: string;
+  message: string;
+  blocking: boolean;
+}
+
