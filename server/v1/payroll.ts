@@ -1498,10 +1498,32 @@ export function createPayrollRouter(
           .object({ reason: z.string().trim().min(5).max(500) })
           .parse(req.body);
 
+        const runId = String(req.params.id);
+        const companyId = req.auth!.companyId;
+
+        // Statutory Compliance Guard (P2.7-A): Cannot reverse run if approved/locked filing exists
+        if (prisma.statutoryFiling?.findFirst) {
+          const activeFiling = await prisma.statutoryFiling.findFirst({
+            where: {
+              payrollRunId: runId,
+              companyId,
+              status: { in: ["APPROVED", "LOCKED", "EXPORTED"] },
+            },
+          });
+          if (activeFiling) {
+            return fail(
+              res,
+              409,
+              "STATUTORY_FILING_EXISTS",
+              `Cannot reverse payroll run ${runId} because an approved or locked statutory filing (${activeFiling.domain}) exists.`,
+            );
+          }
+        }
+
         const updated = await prisma.payrollRun.updateMany({
           where: {
-            id: String(req.params.id),
-            companyId: req.auth!.companyId,
+            id: runId,
+            companyId,
             status: {
               in: [
                 "LOCKED",

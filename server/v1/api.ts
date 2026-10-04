@@ -53,6 +53,7 @@ import { verifyMfaCode } from "./mfa.js";
 import { createMobileReleaseRouter } from "./mobileRelease.js";
 import { createOnboardingRouter } from "./onboarding.js";
 import { createPayrollWorkflowRouter } from "./payrollWorkflow.js";
+import { createComplianceRouter } from "./compliance/routes.js";
 
 type AuthUser = {
   id: string;
@@ -2981,6 +2982,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createOnboardingRouter(prisma, authenticate));
   router.use(createSettingsRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));
+  router.use(createComplianceRouter(prisma, authenticate));
 
   router.use(
     (error: unknown, _req: Request, res: Response, _next: NextFunction) => {

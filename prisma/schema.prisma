@@ -131,6 +131,30 @@ enum SalaryRevisionStatus {
   SUPERSEDED
 }
 
+enum StatutoryFilingDomain {
+  EPF_ECR
+  ESIC_MONTHLY
+  TDS_24Q
+  PROFESSIONAL_TAX
+}
+
+enum StatutoryFilingStatus {
+  DRAFT
+  VALIDATED
+  PENDING_APPROVAL
+  APPROVED
+  LOCKED
+  EXPORTED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum StatutoryFilingType {
+  ORIGINAL
+  REVISED
+}
+
+
 enum StatutoryRuleType {
   PF
   ESI
@@ -400,6 +424,9 @@ model Company {
   employeeOnboardings      EmployeeOnboarding[]
   payrollAttendanceReviews PayrollAttendanceReview[]
   payrollAttendanceChanges PayrollAttendanceChange[]
+  employeeStatutoryProfiles EmployeeStatutoryProfile[]
+  tdsChallans              TdsChallan[]
+  statutoryFilings         StatutoryFiling[]
 }
 
 // --------------------------------------------------------
@@ -607,6 +634,8 @@ model Employee {
   settlements              FullFinalSettlement[]
   onboarding               EmployeeOnboarding?
   attendanceLocationPoints AttendanceLocationPoint[]
+  statutoryProfiles        EmployeeStatutoryProfile[]
+  statutoryFilingItems     StatutoryFilingItem[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId])
@@ -1297,6 +1326,7 @@ model PayrollRun {
   lines             PayrollLine[]
   attendanceReviews PayrollAttendanceReview[]
   adjustments       PayrollAdjustment[]
+  statutoryFilings  StatutoryFiling[]
 
   @@unique([companyId, month])
   @@index([companyId])
@@ -2109,3 +2139,140 @@ model CompanySettings {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
+
+// --------------------------------------------------------
+// STATUTORY COMPLIANCE & GOVERNMENT FILING (P2.7-A)
+// --------------------------------------------------------
+
+model EmployeeStatutoryProfile {
+  id            String    @id @default(uuid())
+  companyId     String
+  employeeId    String
+  uan           String?   @db.VarChar(12)
+  pfMemberId    String?   @db.VarChar(50)
+  esicIpNumber  String?   @db.VarChar(10)
+  panNumber     String?   @db.VarChar(10)
+  epsExempt     Boolean   @default(false)
+  pfOptOut      Boolean   @default(false)
+  ptState       String?   @db.VarChar(2)
+  effectiveFrom DateTime  @default(now()) @db.Date
+  effectiveTo   DateTime? @db.Date
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, employeeId, active])
+  @@index([companyId, employeeId, effectiveFrom])
+  @@index([companyId, uan])
+  @@index([companyId, panNumber])
+}
+
+model TdsChallan {
+  id                String           @id @default(uuid())
+  companyId         String
+  financialYear     String
+  quarter           String
+  bsrCode           String           @db.VarChar(7)
+  challanDate       DateTime         @db.Date
+  challanSerialNo   String           @db.VarChar(5)
+  minorHead         String           @default("200")
+  tdsAmount         Float
+  surcharge         Float            @default(0)
+  cess              Float            @default(0)
+  interest          Float            @default(0)
+  fee               Float            @default(0)
+  totalAmount       Float
+  chequeOrDdNo      String?
+  statutoryFilingId String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  filing  StatutoryFiling? @relation(fields: [statutoryFilingId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, bsrCode, challanDate, challanSerialNo])
+  @@index([companyId, financialYear, quarter])
+  @@index([statutoryFilingId])
+}
+
+model StatutoryFiling {
+  id                 String                @id @default(uuid())
+  companyId          String
+  domain             StatutoryFilingDomain
+  filingType         StatutoryFilingType   @default(ORIGINAL)
+  periodYear         Int
+  periodMonth        Int?
+  quarter            String?
+  stateCode          String?
+  payrollRunId       String
+  status             StatutoryFilingStatus @default(DRAFT)
+  
+  totalEmployees     Int                   @default(0)
+  totalGrossWages    Float                 @default(0)
+  totalEpfWages      Float                 @default(0)
+  totalEeShare       Float                 @default(0)
+  totalErShare       Float                 @default(0)
+  totalTaxDeducted   Float                 @default(0)
+  
+  sha256Checksum     String?
+  supersededFilingId String?
+  createdById        String
+  validatedAt        DateTime?
+  approvedById       String?
+  approvedAt         DateTime?
+  lockedAt           DateTime?
+  rejectionReason    String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  payrollRun PayrollRun            @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
+  items      StatutoryFilingItem[]
+  challans   TdsChallan[]
+
+  @@unique([companyId, domain, periodYear, periodMonth, quarter, stateCode, filingType])
+  @@index([companyId, domain, periodYear])
+  @@index([payrollRunId])
+}
+
+model StatutoryFilingItem {
+  id                   String          @id @default(uuid())
+  filingId             String
+  employeeId           String
+  
+  snapshotEmployeeCode String
+  snapshotEmployeeName String
+  snapshotUan          String?
+  snapshotPan          String?
+  snapshotEsicIp       String?
+  
+  workingDays          Float           @default(0)
+  payableDays          Float           @default(0)
+  ncpDays              Float           @default(0)
+  
+  grossWages           Float           @default(0)
+  epfWages             Float           @default(0)
+  epsWages             Float           @default(0)
+  edliWages            Float           @default(0)
+  eePfShare            Float           @default(0)
+  erEpsShare           Float           @default(0)
+  erEpfShare           Float           @default(0)
+  eeEsiShare           Float           @default(0)
+  erEsiShare           Float           @default(0)
+  ptAmount             Float           @default(0)
+  tdsAmount            Float           @default(0)
+  
+  calculationDetails   Json?
+  createdAt            DateTime        @default(now())
+
+  filing   StatutoryFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([filingId, employeeId])
+  @@index([filingId])
+  @@index([employeeId])
+}
+
