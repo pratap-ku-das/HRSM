@@ -819,4 +819,59 @@ export const api = {
   publishForm16: async (id: string) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/${id}/publish`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
   batchGenerateForm16: async (body: { financialYear: string; publishAll?: boolean }) => (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/payroll/compliance/form16/generate-batch`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   getMyForm16List: async () => (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/me/payroll/form16`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+
+  // Statutory Compliance (P2.7-A & P2.7-B)
+  getComplianceFilings: async (params?: { domain?: string; status?: string; periodYear?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.domain) q.set('domain', params.domain);
+    if (params?.status) q.set('status', params.status);
+    if (params?.periodYear) q.set('periodYear', String(params.periodYear));
+    return (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/compliance/filings?${q.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data;
+  },
+  getComplianceFiling: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createComplianceSnapshot: async (body: any) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/snapshot`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  validateComplianceFiling: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}/validate`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  getComplianceDiagnostics: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}/diagnostics`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  submitComplianceApproval: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}/submit-for-approval`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  approveComplianceFiling: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  lockComplianceFiling: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/filings/${id}/lock`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  downloadEcrFile: async (id: string, customFilename?: string) => {
+    const res = await fetch(`${API_BASE}/v1/compliance/filings/${id}/export`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || 'Failed to download ECR text file');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = customFilename || `ECR_${id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
+  getEpfChallans: async (params?: { status?: string; wageYear?: number; wageMonth?: number; statutoryFilingId?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.wageYear) q.set('wageYear', String(params.wageYear));
+    if (params?.wageMonth) q.set('wageMonth', String(params.wageMonth));
+    if (params?.statutoryFilingId) q.set('statutoryFilingId', params.statutoryFilingId);
+    return (await fetchJSON<ApiEnvelope<any[]>>(`${API_BASE}/v1/compliance/epf/challans?${q.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data;
+  },
+  getEpfChallan: async (id: string) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/epf/challans/${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` } })).data,
+  createEpfChallan: async (body: any) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/epf/challans`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+  updateEpfChallan: async (id: string, body: any) =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/epf/challans/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
 };

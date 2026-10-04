@@ -154,6 +154,14 @@ enum StatutoryFilingType {
   REVISED
 }
 
+enum EpfChallanStatus {
+  CHALLAN_GENERATED
+  PAYMENT_INITIATED
+  PAID
+  RECONCILED
+  CANCELLED
+}
+
 
 enum StatutoryRuleType {
   PF
@@ -427,6 +435,7 @@ model Company {
   employeeStatutoryProfiles EmployeeStatutoryProfile[]
   tdsChallans              TdsChallan[]
   statutoryFilings         StatutoryFiling[]
+  epfChallans              EpfChallan[]
 }
 
 // --------------------------------------------------------
@@ -2232,6 +2241,7 @@ model StatutoryFiling {
   payrollRun PayrollRun            @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
   items      StatutoryFilingItem[]
   challans   TdsChallan[]
+  epfChallans EpfChallan[]
 
   @@unique([companyId, domain, periodYear, periodMonth, quarter, stateCode, filingType])
   @@index([companyId, domain, periodYear])
@@ -2274,5 +2284,47 @@ model StatutoryFilingItem {
   @@unique([filingId, employeeId])
   @@index([filingId])
   @@index([employeeId])
+}
+
+model EpfChallan {
+  id                 String           @id @default(uuid())
+  companyId          String
+  statutoryFilingId  String
+  
+  establishmentCode  String           @db.VarChar(50)
+  wageMonth          Int
+  wageYear           Int
+  trrnNumber         String?          @unique @db.VarChar(20)
+  
+  account1Amount     Float
+  account2Amount     Float
+  account10Amount    Float
+  account21Amount    Float
+  account22Amount    Float            @default(0)
+  totalAmount        Float
+  
+  challanDate        DateTime         @db.Date
+  paidDate           DateTime?        @db.Date
+  challanSerialNo    String?          @db.VarChar(20)
+  crnNumber          String?          @db.VarChar(50)
+  bankReference      String?          @db.VarChar(100)
+  status             EpfChallanStatus @default(CHALLAN_GENERATED)
+  notes              String?
+  
+  createdById        String
+  updatedById        String?
+  paidRecordedById   String?
+  reconciledById     String?
+  reconciledAt       DateTime?
+  
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  filing             StatutoryFiling  @relation(fields: [statutoryFilingId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, wageYear, wageMonth])
+  @@index([statutoryFilingId])
+  @@index([trrnNumber])
 }
 

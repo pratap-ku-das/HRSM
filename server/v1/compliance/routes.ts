@@ -7,6 +7,9 @@ import {
   EmployeeStatutoryProfileSchema,
   TdsChallanSchema,
   CreateSnapshotFilingSchema,
+  CreateEpfChallanSchema,
+  UpdateEpfChallanSchema,
+  TRRN_REGEX,
 } from "./types.js";
 import {
   extractStatutorySnapshot,
@@ -15,6 +18,14 @@ import {
   type SnapshotEmployeeInfo,
   type SnapshotPayrollLineInfo,
 } from "./snapshotEngine.js";
+import {
+  runEpfDiagnostics,
+  generateEcrFlatText,
+  calculateEpfChallanTotals,
+  calculateAge58EpsSplit,
+  type EpfSnapshotItemInput,
+  type EpfRuleConfiguration,
+} from "./epfEngine.js";
 
 export function createComplianceRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
@@ -487,6 +498,45 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
           return fail(res, 422, "VALIDATION_FAILED", `Snapshot validation failed: ${validation.errors.join("; ")}`);
         }
 
+        // EPF ECR Pre-Upload Statutory Diagnostics
+        if (filing.domain === "EPF_ECR" && prisma.companySettings) {
+          const settings = await prisma.companySettings.findUnique({
+            where: { companyId },
+          });
+
+          if (settings && (settings.pfRegistrationNumber || filing.items.length > 0)) {
+            const epfItems: EpfSnapshotItemInput[] = filing.items.map((it) => ({
+              snapshotEmployeeCode: it.snapshotEmployeeCode,
+              snapshotEmployeeName: it.snapshotEmployeeName,
+              snapshotUan: it.snapshotUan,
+              grossWages: it.grossWages,
+              epfWages: it.epfWages,
+              epsWages: it.epsWages,
+              edliWages: it.edliWages,
+              eePfShare: it.eePfShare,
+              erEpsShare: it.erEpsShare,
+              erEpfShare: it.erEpfShare,
+              ncpDays: it.ncpDays,
+            }));
+
+            const diagResult = runEpfDiagnostics({
+              companyPfRegistrationNumber: settings.pfRegistrationNumber || null,
+              periodYear: filing.periodYear,
+              periodMonth: filing.periodMonth || null,
+              items: epfItems,
+            });
+
+            if (!diagResult.valid) {
+              return fail(
+                res,
+                422,
+                "VALIDATION_FAILED",
+                `EPF ECR pre-upload diagnostics failed: ${diagResult.errors.map((e) => `[${e.ruleId}] ${e.message}`).join("; ")}`,
+              );
+            }
+          }
+        }
+
         const updated = await prisma.statutoryFiling.update({
           where: { id: filing.id },
           data: {
@@ -700,6 +750,462 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
 
         await audit(req, "DISCARD_STATUTORY_FILING", `Discarded filing ${filing.id}`);
         return ok(res, { discarded: true });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // 5. EPF ECR DIAGNOSTICS & FLAT-TEXT EXPORT (P2.7-B)
+  // -------------------------------------------------------------------------
+
+  router.get(
+    "/compliance/filings/:id/diagnostics",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const filing = await prisma.statutoryFiling.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { items: true },
+        });
+
+        if (!filing) return fail(res, 404, "FILING_NOT_FOUND", "Filing was not found.");
+        if (filing.domain !== "EPF_ECR") {
+          return fail(res, 400, "INVALID_DOMAIN", "Diagnostics currently supported for EPF_ECR domain.");
+        }
+
+        const settings = prisma.companySettings
+          ? await prisma.companySettings.findUnique({ where: { companyId } })
+          : null;
+
+        const epfItems: EpfSnapshotItemInput[] = filing.items.map((it) => ({
+          snapshotEmployeeCode: it.snapshotEmployeeCode,
+          snapshotEmployeeName: it.snapshotEmployeeName,
+          snapshotUan: it.snapshotUan,
+          grossWages: it.grossWages,
+          epfWages: it.epfWages,
+          epsWages: it.epsWages,
+          edliWages: it.edliWages,
+          eePfShare: it.eePfShare,
+          erEpsShare: it.erEpsShare,
+          erEpfShare: it.erEpfShare,
+          ncpDays: it.ncpDays,
+        }));
+
+        const diagResult = runEpfDiagnostics({
+          companyPfRegistrationNumber: settings?.pfRegistrationNumber || null,
+          periodYear: filing.periodYear,
+          periodMonth: filing.periodMonth || null,
+          items: epfItems,
+        });
+
+        return ok(res, diagResult);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.get(
+    "/compliance/filings/:id/export",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const filing = await prisma.statutoryFiling.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: { items: { orderBy: { snapshotEmployeeCode: "asc" } } },
+        });
+
+        if (!filing) return fail(res, 404, "FILING_NOT_FOUND", "Filing was not found.");
+        if (filing.domain !== "EPF_ECR") {
+          return fail(res, 400, "INVALID_DOMAIN", "Export currently supports EPF_ECR domain.");
+        }
+        if (!["LOCKED", "EXPORTED"].includes(filing.status)) {
+          return fail(res, 409, "INVALID_STATE", `Only LOCKED or EXPORTED filings can be exported. Current status: ${filing.status}`);
+        }
+
+        const settings = prisma.companySettings
+          ? await prisma.companySettings.findUnique({ where: { companyId } })
+          : null;
+
+        const estCode = (settings?.pfRegistrationNumber || "").trim();
+        if (!estCode && prisma.companySettings) {
+          return fail(res, 422, "MISSING_ESTABLISHMENT_CODE", "Cannot export ECR: Company PF Establishment Code is missing in Company Settings.");
+        }
+
+        const effectiveEstCode = estCode || "ESTABLISHMENT";
+        const year = filing.periodYear;
+        const month = String(filing.periodMonth || 1).padStart(2, "0");
+        const filename = `ECR_${effectiveEstCode}_${year}${month}.txt`;
+
+        const { text, checksum, recordCount } = generateEcrFlatText({
+          items: filing.items.map((it) => ({
+            snapshotUan: it.snapshotUan,
+            snapshotEmployeeName: it.snapshotEmployeeName,
+            grossWages: it.grossWages,
+            epfWages: it.epfWages,
+            epsWages: it.epsWages,
+            edliWages: it.edliWages,
+            eePfShare: it.eePfShare,
+            erEpsShare: it.erEpsShare,
+            erEpfShare: it.erEpfShare,
+            ncpDays: it.ncpDays,
+          })),
+        });
+
+        if (filing.status === "LOCKED") {
+          await prisma.statutoryFiling.update({
+            where: { id: filing.id },
+            data: { status: "EXPORTED" },
+          });
+        }
+
+        await audit(req, "EXPORT_EPF_ECR", `Exported ECR 2.0 file for filing ${filing.id} (${recordCount} records, sha256: ${checksum})`);
+
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.setHeader("X-ECR-Checksum", checksum);
+        res.setHeader("X-ECR-Record-Count", String(recordCount));
+        return res.status(200).send(text);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // 6. EPF CHALLAN CALCULATION & RECONCILIATION (P2.7-B)
+  // -------------------------------------------------------------------------
+
+  router.post(
+    "/compliance/epf/challans",
+    permit("compliance.manage"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const body = CreateEpfChallanSchema.parse(req.body);
+
+        const filing = await prisma.statutoryFiling.findFirst({
+          where: { id: body.statutoryFilingId, companyId },
+          include: { items: true },
+        });
+
+        if (!filing) {
+          return fail(res, 404, "FILING_NOT_FOUND", "Statutory filing was not found in this company.");
+        }
+        if (filing.domain !== "EPF_ECR") {
+          return fail(res, 422, "DOMAIN_MISMATCH", `Challan domain mismatch: Target filing domain is ${filing.domain}, but EPF challan requires EPF_ECR.`);
+        }
+        if (!["APPROVED", "LOCKED", "EXPORTED"].includes(filing.status)) {
+          return fail(res, 409, "INVALID_STATE", `Challans can only be generated for filings that are APPROVED, LOCKED, or EXPORTED. Current status: ${filing.status}`);
+        }
+
+        // Prevent duplicate active challans for the same filing
+        if (prisma.epfChallan) {
+          const existingChallan = await prisma.epfChallan.findFirst({
+            where: {
+              companyId,
+              statutoryFilingId: filing.id,
+              status: { not: "CANCELLED" },
+            },
+          });
+          if (existingChallan) {
+            return fail(res, 409, "CHALLAN_ALREADY_EXISTS", `An active EPF Challan (${existingChallan.id}) already exists for this filing.`);
+          }
+        }
+
+        // Validate TRRN uniqueness if supplied
+        if (body.trrnNumber && prisma.epfChallan) {
+          const duplicateTrrn = await prisma.epfChallan.findFirst({
+            where: { trrnNumber: body.trrnNumber },
+          });
+          if (duplicateTrrn) {
+            return fail(res, 409, "DUPLICATE_TRRN", `TRRN "${body.trrnNumber}" is already assigned to challan ${duplicateTrrn.id}.`);
+          }
+        }
+
+        const settings = prisma.companySettings
+          ? await prisma.companySettings.findUnique({ where: { companyId } })
+          : null;
+
+        const estCode = (settings?.pfRegistrationNumber || "UNCONFIGURED").trim();
+
+        // Sourced active statutory rule for PF
+        const statutoryRule = prisma.statutoryRuleVersion
+          ? await prisma.statutoryRuleVersion.findFirst({
+              where: {
+                companyId,
+                type: "PF",
+                active: true,
+              },
+              orderBy: { effectiveFrom: "desc" },
+            })
+          : null;
+
+        const ruleConfig = (statutoryRule?.configuration as Record<string, any>) || {};
+
+        const totals = calculateEpfChallanTotals(
+          filing.items.map((it) => ({
+            epfWages: it.epfWages,
+            edliWages: it.edliWages,
+            eePfShare: it.eePfShare,
+            erEpfShare: it.erEpfShare,
+            erEpsShare: it.erEpsShare,
+          })),
+          {
+            adminChargeRate: ruleConfig.adminChargeRate ?? 0.0050,
+            minAdminChargeAmount: ruleConfig.minAdminChargeAmount ?? 500.0,
+            edliContributionRate: ruleConfig.edliContributionRate ?? 0.0050,
+            edliAdminChargeRate: ruleConfig.edliAdminChargeRate ?? 0.0,
+          },
+        );
+
+        const challan = await prisma.epfChallan.create({
+          data: {
+            companyId,
+            statutoryFilingId: filing.id,
+            establishmentCode: estCode,
+            wageMonth: filing.periodMonth || 1,
+            wageYear: filing.periodYear,
+            trrnNumber: body.trrnNumber || null,
+            account1Amount: totals.account1Amount,
+            account2Amount: totals.account2Amount,
+            account10Amount: totals.account10Amount,
+            account21Amount: totals.account21Amount,
+            account22Amount: totals.account22Amount,
+            totalAmount: totals.totalAmount,
+            challanDate: new Date(body.challanDate),
+            status: "CHALLAN_GENERATED",
+            notes: body.notes || null,
+            createdById: req.auth!.id,
+          },
+        });
+
+        await audit(req, "CREATE_EPF_CHALLAN", `Generated EPF Challan ${challan.id} for filing ${filing.id} with total ₹${totals.totalAmount}`);
+        return ok(res, challan, 201);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.get(
+    "/compliance/epf/challans",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const { status, wageYear, wageMonth, statutoryFilingId } = req.query;
+
+        const where: Record<string, unknown> = { companyId };
+        if (typeof status === "string") where.status = status;
+        if (typeof wageYear === "string") where.wageYear = Number(wageYear);
+        if (typeof wageMonth === "string") where.wageMonth = Number(wageMonth);
+        if (typeof statutoryFilingId === "string") where.statutoryFilingId = statutoryFilingId;
+
+        const challans = await prisma.epfChallan.findMany({
+          where,
+          include: {
+            filing: {
+              select: {
+                id: true,
+                domain: true,
+                status: true,
+                periodYear: true,
+                periodMonth: true,
+                totalEmployees: true,
+                sha256Checksum: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        return ok(res, challans);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.get(
+    "/compliance/epf/challans/:id",
+    permit("compliance.view"),
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const challan = await prisma.epfChallan.findFirst({
+          where: { id: String(req.params.id), companyId },
+          include: {
+            filing: {
+              include: {
+                items: { orderBy: { snapshotEmployeeCode: "asc" } },
+              },
+            },
+          },
+        });
+
+        if (!challan) {
+          return fail(res, 404, "CHALLAN_NOT_FOUND", "EPF Challan was not found.");
+        }
+
+        return ok(res, challan);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.patch(
+    "/compliance/epf/challans/:id",
+    async (req: ComplianceRequest, res: Response, next: NextFunction) => {
+      try {
+        const companyId = req.auth!.companyId;
+        const body = UpdateEpfChallanSchema.parse(req.body);
+
+        const challan = await prisma.epfChallan.findFirst({
+          where: { id: String(req.params.id), companyId },
+        });
+
+        if (!challan) {
+          return fail(res, 404, "CHALLAN_NOT_FOUND", "EPF Challan was not found.");
+        }
+
+        // Segregation of Duties & RBAC per action
+        if (body.action === "RECONCILE") {
+          if (!req.auth!.permissions?.includes("compliance.approve") && req.auth!.role !== "SUPER_ADMIN" && req.auth!.role !== "COMPANY_ADMIN") {
+            return fail(res, 403, "FORBIDDEN", "Missing required permission: compliance.approve");
+          }
+          if (challan.createdById === req.auth!.id) {
+            return fail(res, 403, "MAKER_CANNOT_RECONCILE", "Segregation of Duties violation: The Maker who created this challan cannot reconcile it.");
+          }
+        } else {
+          if (!req.auth!.permissions?.includes("compliance.manage") && req.auth!.role !== "SUPER_ADMIN" && req.auth!.role !== "COMPANY_ADMIN") {
+            return fail(res, 403, "FORBIDDEN", "Missing required permission: compliance.manage");
+          }
+        }
+
+        // Action 1: SET_TRRN
+        if (body.action === "SET_TRRN") {
+          if (!body.trrnNumber) {
+            return fail(res, 422, "MISSING_TRRN", "TRRN number is required for SET_TRRN action.");
+          }
+          const dup = await prisma.epfChallan.findFirst({
+            where: { trrnNumber: body.trrnNumber, id: { not: challan.id } },
+          });
+          if (dup) {
+            return fail(res, 409, "DUPLICATE_TRRN", `TRRN "${body.trrnNumber}" is already assigned to challan ${dup.id}.`);
+          }
+          const updated = await prisma.epfChallan.update({
+            where: { id: challan.id },
+            data: {
+              trrnNumber: body.trrnNumber,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "SET_CHALLAN_TRRN", `Set TRRN ${body.trrnNumber} on challan ${challan.id}`);
+          return ok(res, updated);
+        }
+
+        // Action 2: INITIATE_PAYMENT
+        if (body.action === "INITIATE_PAYMENT") {
+          if (challan.status !== "CHALLAN_GENERATED") {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot initiate payment from status ${challan.status}. Current status must be CHALLAN_GENERATED.`);
+          }
+          const trrn = body.trrnNumber || challan.trrnNumber;
+          if (!trrn) {
+            return fail(res, 422, "MISSING_TRRN", "A valid TRRN number is required to initiate payment.");
+          }
+          if (body.trrnNumber && body.trrnNumber !== challan.trrnNumber) {
+            const dup = await prisma.epfChallan.findFirst({
+              where: { trrnNumber: body.trrnNumber, id: { not: challan.id } },
+            });
+            if (dup) return fail(res, 409, "DUPLICATE_TRRN", `TRRN "${body.trrnNumber}" is already in use.`);
+          }
+          const updated = await prisma.epfChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "PAYMENT_INITIATED",
+              trrnNumber: trrn,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "INITIATE_EPF_PAYMENT", `Initiated payment for challan ${challan.id} with TRRN ${trrn}`);
+          return ok(res, updated);
+        }
+
+        // Action 3: RECORD_PAYMENT
+        if (body.action === "RECORD_PAYMENT") {
+          if (!["CHALLAN_GENERATED", "PAYMENT_INITIATED"].includes(challan.status)) {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot record payment for challan with status ${challan.status}.`);
+          }
+          if (!body.paidDate) {
+            return fail(res, 422, "MISSING_PAID_DATE", "paidDate is required when recording payment.");
+          }
+          const trrn = body.trrnNumber || challan.trrnNumber;
+          if (!trrn) {
+            return fail(res, 422, "MISSING_TRRN", "TRRN is required when confirming payment.");
+          }
+          const updated = await prisma.epfChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "PAID",
+              paidDate: new Date(body.paidDate),
+              trrnNumber: trrn,
+              challanSerialNo: body.challanSerialNo || challan.challanSerialNo,
+              crnNumber: body.crnNumber || challan.crnNumber,
+              bankReference: body.bankReference || challan.bankReference,
+              paidRecordedById: req.auth!.id,
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "RECORD_EPF_PAYMENT", `Recorded payment for challan ${challan.id} on ${body.paidDate} (TRRN: ${trrn})`);
+          return ok(res, updated);
+        }
+
+        // Action 4: RECONCILE
+        if (body.action === "RECONCILE") {
+          if (challan.status !== "PAID") {
+            return fail(res, 409, "INVALID_STATE_TRANSITION", `Cannot reconcile challan with status ${challan.status}. Challan must be in PAID status before reconciliation.`);
+          }
+          const updated = await prisma.epfChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "RECONCILED",
+              reconciledById: req.auth!.id,
+              reconciledAt: new Date(),
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "RECONCILE_EPF_CHALLAN", `Reconciled EPF Challan ${challan.id} by Checker ${req.auth!.id}`);
+          return ok(res, updated);
+        }
+
+        // Action 5: CANCEL
+        if (body.action === "CANCEL") {
+          if (["PAID", "RECONCILED"].includes(challan.status)) {
+            return fail(res, 409, "CANNOT_CANCEL_PAID_CHALLAN", `Cannot cancel a challan that has already been PAID or RECONCILED. Current status: ${challan.status}`);
+          }
+          const updated = await prisma.epfChallan.update({
+            where: { id: challan.id },
+            data: {
+              status: "CANCELLED",
+              updatedById: req.auth!.id,
+              notes: body.notes || challan.notes,
+            },
+          });
+          await audit(req, "CANCEL_EPF_CHALLAN", `Cancelled EPF Challan ${challan.id}`);
+          return ok(res, updated);
+        }
+
+        return fail(res, 400, "UNKNOWN_ACTION", `Unknown action: ${body.action}`);
       } catch (err) {
         next(err);
       }

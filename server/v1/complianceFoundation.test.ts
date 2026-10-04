@@ -325,7 +325,7 @@ describe('P2.7-A — Statutory Compliance Architecture & Snapshot Integrity Test
 
     app.use((err: any, _req: any, res: any, _next: any) => {
       if (err instanceof ZodError) {
-        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Validation failed', details: err.errors } });
+        return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Validation failed', details: (err as any).issues || (err as any).errors } });
       }
       return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
     });

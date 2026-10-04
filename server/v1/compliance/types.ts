@@ -57,3 +57,22 @@ export const CreateSnapshotFilingSchema = z.object({
   stateCode: z.string().trim().length(2).toUpperCase().optional().nullable(),
   filingType: z.enum(["ORIGINAL", "REVISED"]).default("ORIGINAL"),
 });
+
+export const TRRN_REGEX = /^[0-9A-Za-z]{12,20}$/;
+
+export const CreateEpfChallanSchema = z.object({
+  statutoryFilingId: z.string().trim().min(1, "statutoryFilingId is required"),
+  challanDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "challanDate must be YYYY-MM-DD"),
+  trrnNumber: z.string().trim().regex(TRRN_REGEX, "TRRN must be 12 to 20 alphanumeric characters").optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
+export const UpdateEpfChallanSchema = z.object({
+  action: z.enum(["SET_TRRN", "INITIATE_PAYMENT", "RECORD_PAYMENT", "RECONCILE", "CANCEL"]),
+  trrnNumber: z.string().trim().regex(TRRN_REGEX, "TRRN must be 12 to 20 alphanumeric characters").optional().nullable(),
+  paidDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "paidDate must be YYYY-MM-DD").optional().nullable(),
+  challanSerialNo: z.string().trim().max(20).optional().nullable(),
+  crnNumber: z.string().trim().max(50).optional().nullable(),
+  bankReference: z.string().trim().max(100).optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
