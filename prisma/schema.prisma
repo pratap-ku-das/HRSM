@@ -442,6 +442,7 @@ model Company {
   payrollAttendanceChanges PayrollAttendanceChange[]
   employeeStatutoryProfiles EmployeeStatutoryProfile[]
   tdsChallans              TdsChallan[]
+  tdsChallanAllocations   TdsChallanAllocation[]
   statutoryFilings         StatutoryFiling[]
   epfChallans              EpfChallan[]
   esicChallans             EsicChallan[]
@@ -2155,6 +2156,12 @@ model CompanySettings {
   enableAuditLogging           Boolean   @default(true)
   defaultProbationPeriodMonths Int       @default(3)
 
+  responsiblePersonName        String?
+  responsiblePersonDesignation String?
+  responsiblePersonPan         String?   @db.VarChar(10)
+  responsiblePersonMobile      String?
+  responsiblePersonEmail       String?
+
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
@@ -2208,9 +2215,12 @@ model TdsChallan {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
-  company Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  filing  StatutoryFiling? @relation(fields: [statutoryFilingId], references: [id], onDelete: SetNull)
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  filing      StatutoryFiling?      @relation(fields: [statutoryFilingId], references: [id], onDelete: SetNull)
+  filingItems StatutoryFilingItem[]
+  allocations TdsChallanAllocation[]
 
+  @@unique([id, companyId])
   @@unique([companyId, bsrCode, challanDate, challanSerialNo])
   @@index([companyId, financialYear, quarter])
   @@index([statutoryFilingId])
@@ -2227,6 +2237,11 @@ model StatutoryFiling {
   stateCode          String?
   payrollRunId       String
   status             StatutoryFilingStatus @default(DRAFT)
+  
+  statutoryFormCode  String                @default("24Q")
+  formatVersion      String                @default("6.3")
+  tokenNumberPrn     String?               @db.VarChar(30)
+  filingReceiptDate  DateTime?             @db.Date
   
   totalEmployees     Int                   @default(0)
   totalGrossWages    Float                 @default(0)
@@ -2246,13 +2261,15 @@ model StatutoryFiling {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  payrollRun PayrollRun            @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
-  items      StatutoryFilingItem[]
-  challans   TdsChallan[]
-  epfChallans EpfChallan[]
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  payrollRun   PayrollRun            @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
+  items        StatutoryFilingItem[]
+  challans     TdsChallan[]
+  allocations  TdsChallanAllocation[]
+  epfChallans  EpfChallan[]
   esicChallans EsicChallan[]
 
+  @@unique([id, companyId])
   @@unique([companyId, domain, periodYear, periodMonth, quarter, stateCode, filingType])
   @@index([companyId, domain, periodYear])
   @@index([payrollRunId])
@@ -2262,13 +2279,18 @@ model StatutoryFilingItem {
   id                   String          @id @default(uuid())
   filingId             String
   employeeId           String
+  tdsChallanId         String?
   
   snapshotEmployeeCode String
   snapshotEmployeeName String
   snapshotUan          String?
   snapshotPan          String?
   snapshotEsicIp       String?
-  snapshotLastWorkingDay DateTime? @db.Date
+  snapshotLastWorkingDay DateTime?     @db.Date
+  
+  panStatus            String          @default("NOT_APPLICABLE")
+  deducteeReasonCode   String?         @db.VarChar(1)
+  allocations          TdsChallanAllocation[]
   
   workingDays          Float           @default(0)
   payableDays          Float           @default(0)
@@ -2289,12 +2311,42 @@ model StatutoryFilingItem {
   calculationDetails   Json?
   createdAt            DateTime        @default(now())
 
-  filing   StatutoryFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
-  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  filing     StatutoryFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  employee   Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  tdsChallan TdsChallan?     @relation(fields: [tdsChallanId], references: [id], onDelete: SetNull)
 
+  @@unique([id, filingId])
   @@unique([filingId, employeeId])
   @@index([filingId])
   @@index([employeeId])
+  @@index([tdsChallanId])
+}
+
+model TdsChallanAllocation {
+  id                    String          @id @default(uuid())
+  companyId             String
+  statutoryFilingId     String
+  tdsChallanId          String
+  statutoryFilingItemId String
+
+  allocatedTds          Float           @default(0)
+  allocatedSurcharge    Float           @default(0)
+  allocatedCess         Float           @default(0)
+  allocatedTotal        Float           @default(0)
+
+  createdAt             DateTime        @default(now())
+  createdById           String?
+
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  filing     StatutoryFiling     @relation(fields: [statutoryFilingId, companyId], references: [id, companyId], onDelete: Cascade)
+  challan    TdsChallan          @relation(fields: [tdsChallanId, companyId], references: [id, companyId], onDelete: Restrict)
+  filingItem StatutoryFilingItem @relation(fields: [statutoryFilingItemId, statutoryFilingId], references: [id, filingId], onDelete: Cascade)
+
+  @@unique([statutoryFilingItemId, tdsChallanId])
+  @@index([companyId])
+  @@index([statutoryFilingId])
+  @@index([tdsChallanId])
+  @@index([statutoryFilingItemId])
 }
 
 model EpfChallan {
