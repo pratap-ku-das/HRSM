@@ -13,6 +13,7 @@ import {
 } from "./payrollEngine.js";
 import { startConfiguredWorkflow } from "./workflows.js";
 import { emitNotification } from "./notifications.js";
+import { resolveEmployeePtState } from "./compliance/professionalTax/index.js";
 
 type PayrollRequest = Request & {
   auth?: { id: string; companyId: string; role: string; permissions: string[] };
@@ -843,8 +844,29 @@ export function createPayrollRouter(
               companyId,
               status: { in: ["ACTIVE", "ON_PROBATION", "ON_LEAVE"] },
             },
-            select: { id: true },
+            select: {
+              id: true,
+              employeeCode: true,
+              gender: true,
+              workLocationId: true,
+              location: { select: { state: true } },
+            },
           });
+
+          const companySettings = tx.companySettings
+            ? await tx.companySettings.findUnique({
+                where: { companyId },
+                select: { state: true },
+              })
+            : null;
+
+          const statutoryProfiles = tx.employeeStatutoryProfile
+            ? await tx.employeeStatutoryProfile.findMany({
+                where: { companyId, active: true },
+                select: { employeeId: true, ptState: true },
+              })
+            : [];
+          const profileMap = new Map(statutoryProfiles.map((p) => [p.employeeId, p.ptState]));
 
           const days = countWorkingDays(run.periodStart, run.periodEnd);
 
@@ -913,6 +935,65 @@ export function createPayrollRouter(
               orderBy: { startsOn: "asc" },
             });
 
+            const profilePtState = profileMap.get(employee.id);
+            let resolvedPtState: string | null = null;
+            try {
+              const res = resolveEmployeePtState({
+                employeeId: employee.id,
+                employeeCode: employee.employeeCode,
+                statutoryProfilePtState: profilePtState,
+                workLocationState: employee.location?.state,
+                workLocationId: employee.workLocationId,
+                companySettingsState: companySettings?.state,
+              });
+              resolvedPtState = res.stateCode;
+            } catch {
+              // Gracefully handle unconfigured/unsupported state
+              resolvedPtState = null;
+            }
+
+            const nonPtRules = rules.filter((item) => item.type !== "PROFESSIONAL_TAX");
+            const ptRules = rules.filter((item) => item.type === "PROFESSIONAL_TAX");
+
+            // RSK-PT-001 Invariant: Pre-filter down to exactly ONE applicable state rule
+            let applicablePtRule = ptRules.find(
+              (item) =>
+                item.stateCode &&
+                resolvedPtState &&
+                item.stateCode.toUpperCase() === resolvedPtState.toUpperCase(),
+            );
+            if (!applicablePtRule && resolvedPtState) {
+              applicablePtRule = ptRules.find((item) => !item.stateCode);
+            }
+
+            const employeeRules: StatutoryRuleInput[] = [
+              ...nonPtRules.map((item) => ({
+                type: item.type as StatutoryRuleInput["type"],
+                configuration: item.configuration as Record<string, unknown>,
+                stateCode: item.stateCode,
+              })),
+              ...(applicablePtRule
+                ? [
+                    {
+                      type: "PROFESSIONAL_TAX" as const,
+                      configuration: applicablePtRule.configuration as Record<string, unknown>,
+                      stateCode: applicablePtRule.stateCode || resolvedPtState,
+                    },
+                  ]
+                : resolvedPtState
+                ? [
+                    {
+                      type: "PROFESSIONAL_TAX" as const,
+                      configuration: { stateCode: resolvedPtState },
+                      stateCode: resolvedPtState,
+                    },
+                  ]
+                : []),
+            ];
+
+            const payrollMonth = run.periodStart.getUTCMonth() + 1;
+            const payrollYear = run.periodStart.getUTCFullYear();
+
             const calculated = calculatePayroll({
               components: revision.structure.components as SalaryComponentInput[],
               overrides: (revision.componentValues || undefined) as
@@ -921,15 +1002,16 @@ export function createPayrollRouter(
               adjustments: adjustments.filter(
                 (item) => item.employeeId === employee.id,
               ),
-              rules: rules.map((item) => ({
-                type: item.type,
-                configuration: item.configuration as Record<string, unknown>,
-              })) as StatutoryRuleInput[],
+              rules: employeeRules,
               workingDays: days,
               payableDays,
               loanInstallment: loan
                 ? Math.min(loan.installment, loan.outstanding)
                 : 0,
+              gender: employee.gender,
+              payrollMonth,
+              payrollYear,
+              ptState: resolvedPtState,
             });
             lines.push({ employeeId: employee.id, ...calculated });
           }

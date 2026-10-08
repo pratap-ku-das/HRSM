@@ -443,6 +443,8 @@ model Company {
   employeeStatutoryProfiles EmployeeStatutoryProfile[]
   tdsChallans              TdsChallan[]
   tdsChallanAllocations   TdsChallanAllocation[]
+  ptRegistrations          ProfessionalTaxRegistration[]
+  ptChallans               PtChallan[]
   statutoryFilings         StatutoryFiling[]
   epfChallans              EpfChallan[]
   esicChallans             EsicChallan[]
@@ -815,6 +817,7 @@ model WorkLocation {
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branch    Branch?    @relation(fields: [branchId], references: [id])
   employees Employee[]
+  ptRegistrations ProfessionalTaxRegistration[]
 
   @@unique([companyId, code])
   @@index([companyId, branchId])
@@ -2268,6 +2271,7 @@ model StatutoryFiling {
   allocations  TdsChallanAllocation[]
   epfChallans  EpfChallan[]
   esicChallans EsicChallan[]
+  ptChallan    PtChallan?
 
   @@unique([id, companyId])
   @@unique([companyId, domain, periodYear, periodMonth, quarter, stateCode, filingType])
@@ -2429,5 +2433,76 @@ model EsicChallan {
   @@index([companyId, challanPeriodYear, challanPeriodMonth])
   @@index([statutoryFilingId])
   @@index([cprnNumber])
+}
+
+enum PtRegistrationType {
+  PT_RC
+  PT_EC
+}
+
+enum PtRegistrationStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum PtChallanStatus {
+  CHALLAN_GENERATED
+  PAID
+  RECONCILED
+  CANCELLED
+}
+
+model ProfessionalTaxRegistration {
+  id                String               @id @default(uuid())
+  companyId         String
+  stateCode         String               @db.VarChar(10)
+  registrationType  PtRegistrationType   @default(PT_RC)
+  certificateNumber String               @db.VarChar(50)
+  issuingAuthority  String?              @db.VarChar(100)
+  effectiveFrom     DateTime             @db.Date
+  effectiveTo       DateTime?            @db.Date
+  status            PtRegistrationStatus @default(ACTIVE)
+  workLocationId    String?
+  notes             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workLocation WorkLocation? @relation(fields: [workLocationId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, stateCode, registrationType, certificateNumber])
+  @@index([companyId, stateCode, status])
+  @@index([workLocationId])
+}
+
+model PtChallan {
+  id                 String          @id @default(uuid())
+  companyId          String
+  statutoryFilingId  String          @unique
+  stateCode          String          @db.VarChar(10)
+  challanNumber      String          @db.VarChar(50)
+  challanPeriodYear  Int
+  challanPeriodMonth Int
+  totalEmployees     Int             @default(0)
+  totalAmount        Float           @default(0)
+  challanDate        DateTime        @db.Date
+  paidDate           DateTime?       @db.Date
+  cinNumber          String?         @db.VarChar(50)
+  bankReference      String?         @db.VarChar(100)
+  status             PtChallanStatus @default(CHALLAN_GENERATED)
+  notes              String?
+  createdById        String
+  reconciledById     String?
+  reconciledAt       DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  filing  StatutoryFiling @relation(fields: [statutoryFilingId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, stateCode, challanPeriodYear, challanPeriodMonth])
+  @@index([statutoryFilingId])
+  @@index([challanNumber])
 }
 

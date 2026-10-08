@@ -36,6 +36,7 @@ import {
   calculateEsicChallanTotals,
 } from "./esicEngine.js";
 import { createTdsComplianceRouter } from "./tdsRoutes.js";
+import { createPtComplianceRouter } from "./ptRoutes.js";
 
 export function createComplianceRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
@@ -1620,6 +1621,9 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
 
   // Mount TDS Form 24Q / Form 138 Compliance Sub-Router (P2.8)
   router.use(createTdsComplianceRouter(prisma, authenticate));
+
+  // Mount Multi-State Professional Tax Compliance Sub-Router (P2.9)
+  router.use(createPtComplianceRouter(prisma, authenticate));
 
   return router;
 }
