@@ -445,6 +445,7 @@ model Company {
   tdsChallanAllocations   TdsChallanAllocation[]
   ptRegistrations          ProfessionalTaxRegistration[]
   ptChallans               PtChallan[]
+  calendarObligations      ComplianceCalendarObligation[]
   statutoryFilings         StatutoryFiling[]
   epfChallans              EpfChallan[]
   esicChallans             EsicChallan[]
@@ -480,6 +481,7 @@ model User {
   savedReports            SavedReport[]
   reportExports           ReportExport[]
   aiInteractions          AiInteraction[]
+  calendarObligations     ComplianceCalendarObligation[]
 
   @@index([companyId])
 }
@@ -2272,6 +2274,7 @@ model StatutoryFiling {
   epfChallans  EpfChallan[]
   esicChallans EsicChallan[]
   ptChallan    PtChallan?
+  calendarObligations ComplianceCalendarObligation[]
 
   @@unique([id, companyId])
   @@unique([companyId, domain, periodYear, periodMonth, quarter, stateCode, filingType])
@@ -2505,4 +2508,51 @@ model PtChallan {
   @@index([statutoryFilingId])
   @@index([challanNumber])
 }
+
+enum ComplianceObligationStatus {
+  UPCOMING
+  DUE_SOON
+  DUE_TODAY
+  OVERDUE
+  FILED
+  PAID
+  COMPLETED
+  EXEMPT
+  NEEDS_REVIEW
+}
+
+model ComplianceCalendarObligation {
+  id                 String                     @id @default(uuid())
+  companyId          String
+  domain             StatutoryFilingDomain
+  obligationType     String                     @db.VarChar(50)
+  jurisdiction       String                     @default("IN") @db.VarChar(10)
+  periodYear         Int
+  periodMonth        Int?
+  quarter            String?                    @db.VarChar(5)
+  statutoryDueDate   DateTime                   @db.Date
+  extendedDueDate    DateTime?                  @db.Date
+  extensionReason    String?
+  internalTargetDate DateTime?                  @db.Date
+  status             ComplianceObligationStatus @default(UPCOMING)
+  statutoryFilingId  String?
+  assignedUserId     String?
+  remindedAt         DateTime?
+  completedAt        DateTime?
+  completedById      String?
+  notes              String?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignedUser    User?            @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
+  statutoryFiling StatutoryFiling? @relation(fields: [statutoryFilingId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, domain, obligationType, periodYear, periodMonth, quarter, jurisdiction])
+  @@index([companyId, status])
+  @@index([companyId, statutoryDueDate])
+  @@index([statutoryFilingId])
+  @@index([assignedUserId])
+}
+
 

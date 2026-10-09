@@ -37,6 +37,7 @@ import {
 } from "./esicEngine.js";
 import { createTdsComplianceRouter } from "./tdsRoutes.js";
 import { createPtComplianceRouter } from "./ptRoutes.js";
+import { createCalendarRouter } from "./calendar/index.js";
 
 export function createComplianceRouter(prisma: PrismaClient, authenticate: RequestHandler) {
   const router = Router();
@@ -1624,6 +1625,9 @@ export function createComplianceRouter(prisma: PrismaClient, authenticate: Reque
 
   // Mount Multi-State Professional Tax Compliance Sub-Router (P2.9)
   router.use(createPtComplianceRouter(prisma, authenticate));
+
+  // Mount Unified Statutory Compliance Calendar Sub-Router (P2.10)
+  router.use(createCalendarRouter(prisma, authenticate));
 
   return router;
 }
