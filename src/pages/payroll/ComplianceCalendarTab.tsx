@@ -225,7 +225,7 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
 
       {/* 2. Executive Metrics */}
       {overview && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
             <span className="text-xs font-medium text-slate-400">Total Obligations</span>
             <div className="mt-1 text-2xl font-bold text-white">{overview.metrics.total}</div>
@@ -253,13 +253,19 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
           <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
             <span className="text-xs font-semibold text-blue-300">Returns Filed</span>
             <div className="mt-1 text-2xl font-bold text-blue-200">{overview.metrics.filed}</div>
-            <div className="mt-1 text-[11px] text-blue-400/80">Validated / Locked returns</div>
+            <div className="mt-1 text-[11px] text-blue-400/80">Confirmed Portal Submissions</div>
           </div>
 
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <span className="text-xs font-semibold text-emerald-300">Fully Completed</span>
-            <div className="mt-1 text-2xl font-bold text-emerald-200">{overview.metrics.completed}</div>
-            <div className="mt-1 text-[11px] text-emerald-400/80">Filed & Challan Reconciled</div>
+            <span className="text-xs font-semibold text-emerald-300">Challan Paid</span>
+            <div className="mt-1 text-2xl font-bold text-emerald-200">{overview.metrics.paid || 0}</div>
+            <div className="mt-1 text-[11px] text-emerald-400/80">Challan Cleared · Return Pending</div>
+          </div>
+
+          <div className="rounded-xl border border-teal-500/30 bg-teal-500/10 p-4">
+            <span className="text-xs font-semibold text-teal-300">Fully Completed</span>
+            <div className="mt-1 text-2xl font-bold text-teal-200">{overview.metrics.completed}</div>
+            <div className="mt-1 text-[11px] text-teal-400/80">Filed & Challan Reconciled</div>
           </div>
         </div>
       )}
@@ -314,6 +320,7 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
             <option value="OVERDUE">Overdue</option>
             <option value="UPCOMING">Upcoming</option>
             <option value="FILED">Filed</option>
+            <option value="PAID">Challan Paid</option>
             <option value="COMPLETED">Completed</option>
           </select>
         </div>

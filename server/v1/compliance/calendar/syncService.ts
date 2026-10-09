@@ -15,37 +15,15 @@ export function deriveObligationStatus(params: {
   extendedDueDate?: Date | null;
   internalTargetDate?: Date | null;
   filing?: (StatutoryFiling & {
-    ptChallan?: { status: string } | null;
-    epfChallans?: Array<{ status: string }>;
-    esicChallans?: Array<{ status: string }>;
-    challans?: Array<{ id: string }>;
+    ptChallan?: { status: string; challanNumber?: string | null } | null;
+    epfChallans?: Array<{ status: string; trrnNumber?: string | null }>;
+    esicChallans?: Array<{ status: string; challanNumber?: string | null }>;
+    challans?: Array<{ id: string; challanNumber?: string | null }>;
   }) | null;
   manualCompletedAt?: Date | null;
 }): ComplianceObligationStatus {
   if (params.manualCompletedAt) {
     return "COMPLETED";
-  }
-
-  const filing = params.filing;
-  if (filing) {
-    const hasPaidEpf = filing.epfChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
-    const hasPaidEsic = filing.esicChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
-    const hasPaidPt = filing.ptChallan && ["PAID", "RECONCILED"].includes(filing.ptChallan.status);
-    const hasTdsChallan = filing.challans && filing.challans.length > 0;
-
-    const isFullyPaid = hasPaidEpf || hasPaidEsic || hasPaidPt || hasTdsChallan;
-
-    if (filing.status === "LOCKED" || filing.status === "EXPORTED") {
-      return isFullyPaid ? "COMPLETED" : "FILED";
-    }
-
-    if (filing.status === "APPROVED" || filing.status === "PENDING_APPROVAL") {
-      return "FILED";
-    }
-
-    if (filing.status === "VALIDATED") {
-      return "FILED";
-    }
   }
 
   const effectiveDue = params.extendedDueDate || params.dueDate;
@@ -54,9 +32,52 @@ export function deriveObligationStatus(params: {
   // Normalize to UTC dates for day-level comparison
   const nowDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const dueDay = Date.UTC(effectiveDue.getUTCFullYear(), effectiveDue.getUTCMonth(), effectiveDue.getUTCDate());
-
   const diffDays = Math.round((dueDay - nowDay) / 86_400_000);
 
+  const filing = params.filing;
+  if (filing) {
+    // 1. External submission confirmation evidence:
+    // Requires verified government portal reference (PRN, Token No, TRRN, or Challan No)
+    // A local locked state or exported artifact alone does NOT establish external filing.
+    const hasTdsReceipt = Boolean(filing.tokenNumberPrn || filing.filingReceiptDate);
+    const hasEpfTrrn = Boolean(filing.epfChallans?.some((c) => c.trrnNumber && c.trrnNumber.trim().length > 0));
+    const hasEsicChallanNum = Boolean(filing.esicChallans?.some((c) => c.challanNumber && c.challanNumber.trim().length > 0));
+    const hasPtChallanNum = Boolean(filing.ptChallan?.challanNumber && filing.ptChallan.challanNumber.trim().length > 0);
+
+    const isExternallySubmitted = hasTdsReceipt || hasEpfTrrn || hasEsicChallanNum || hasPtChallanNum;
+
+    // 2. Payment reconciliation evidence:
+    const hasPaidEpf = filing.epfChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
+    const hasPaidEsic = filing.esicChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
+    const hasPaidPt = filing.ptChallan && ["PAID", "RECONCILED"].includes(filing.ptChallan.status);
+    const hasTdsChallan = filing.challans && filing.challans.length > 0;
+
+    const isFullyPaid = Boolean(hasPaidEpf || hasPaidEsic || hasPaidPt || hasTdsChallan);
+
+    // 3. Status Derivation based on verified evidence:
+    if (isExternallySubmitted && isFullyPaid) {
+      return "COMPLETED";
+    }
+
+    if (isExternallySubmitted && !isFullyPaid) {
+      return "FILED";
+    }
+
+    if (!isExternallySubmitted && isFullyPaid) {
+      return "PAID";
+    }
+
+    // 4. Handle Rejected or Cancelled filings:
+    if (filing.status === "CANCELLED" || Boolean(filing.rejectionReason)) {
+      if (diffDays < 0) return "OVERDUE";
+      return "NEEDS_REVIEW";
+    }
+
+    // Internal workflow stages (DRAFT, VALIDATED, PENDING_APPROVAL, APPROVED, or EXPORTED without portal receipt)
+    // do NOT constitute filing. They evaluate against statutory due date proximity below.
+  }
+
+  // 5. Statutory deadline proximity evaluation:
   if (diffDays < 0) {
     return "OVERDUE";
   }

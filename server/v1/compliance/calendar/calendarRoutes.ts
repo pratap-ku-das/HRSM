@@ -87,7 +87,8 @@ export function createCalendarRouter(
           dueToday: obligations.filter((o) => o.status === "DUE_TODAY").length,
           overdue: obligations.filter((o) => o.status === "OVERDUE").length,
           filed: obligations.filter((o) => o.status === "FILED").length,
-          completed: obligations.filter((o) => o.status === "COMPLETED" || o.status === "PAID").length,
+          paid: obligations.filter((o) => o.status === "PAID").length,
+          completed: obligations.filter((o) => o.status === "COMPLETED").length,
           exempt: obligations.filter((o) => o.status === "EXEMPT").length,
         };
 

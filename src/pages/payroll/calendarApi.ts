@@ -7,6 +7,7 @@ export interface CalendarOverview {
     dueToday: number;
     overdue: number;
     filed: number;
+    paid: number;
     completed: number;
     exempt: number;
   };

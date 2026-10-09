@@ -66,14 +66,23 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
     auditLogs = [];
     notifications = [];
     users = [
-      { id: userIdA, companyId: companyA, firstName: "Aarav", lastName: "Sharma", email: "aarav@alphacorp.com" },
-      { id: userIdB, companyId: companyB, firstName: "Rohan", lastName: "Verma", email: "rohan@betacorp.com" },
+      { id: userIdA, companyId: companyA, role: "COMPANY_ADMIN", firstName: "Aarav", lastName: "Sharma", email: "aarav@alphacorp.com" },
+      { id: userIdB, companyId: companyB, role: "COMPANY_ADMIN", firstName: "Rohan", lastName: "Verma", email: "rohan@betacorp.com" },
     ];
   };
 
   const prismaMock: any = {
-    $transaction: async (queries: any[]) => {
-      return Promise.all(queries);
+    $transaction: async function (this: any, arg: any) {
+      if (typeof arg === "function") {
+        return arg(this);
+      }
+      return Promise.all(arg);
+    },
+    $queryRawUnsafe: async (query: string, ..._params: any[]) => {
+      if (query.includes("pg_try_advisory_xact_lock")) {
+        return [{ acquired: true }];
+      }
+      return [];
     },
     employeeDocument: {
       findMany: async () => [],
@@ -226,10 +235,19 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
     },
     user: {
       findFirst: async ({ where }: any) => {
-        return users.find(u => u.id === where.id && u.companyId === where.companyId) || null;
+        return users.find(u => {
+          if (where?.id && u.id !== where.id) return false;
+          if (where?.companyId && u.companyId !== where.companyId) return false;
+          if (where?.role && u.role !== where.role) return false;
+          return true;
+        }) || null;
       },
       findMany: async ({ where }: any) => {
-        return users.filter(u => u.companyId === where.companyId);
+        return users.filter(u => {
+          if (where?.companyId && u.companyId !== where.companyId) return false;
+          if (where?.role && u.role !== where.role) return false;
+          return true;
+        });
       },
     },
     auditLog: {
@@ -241,12 +259,19 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
     },
     notification: {
       create: async ({ data }: any) => {
-        const item = { id: `notif-${Date.now()}`, ...data, createdAt: new Date() };
+        const item = { id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date() };
         notifications.push(item);
         return item;
       },
       findFirst: async ({ where }: any) => {
-        return notifications.find(n => n.userId === where.userId && n.eventKey === where.eventKey) || null;
+        return notifications.find(n => {
+          if (where?.companyId && n.companyId !== where.companyId) return false;
+          if (where?.userId && n.userId !== where.userId) return false;
+          if (where?.eventKey && n.eventKey !== where.eventKey) return false;
+          if (where?.entityId && n.entityId !== where.entityId) return false;
+          if (where?.createdAt?.gte && n.createdAt < where.createdAt.gte) return false;
+          return true;
+        }) || null;
       },
     },
   };
@@ -313,18 +338,80 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
   });
 
   describe("Status Derivation and Filing Integration", () => {
-    it("distinguishes UPCOMING vs FILED vs COMPLETED based on linked filing and challan", async () => {
-      // 1. Initial sync produces UPCOMING
+    it("does not map VALIDATED or PENDING_APPROVAL to FILED", async () => {
+      // 1. Initial sync
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      // 2. Add a filing in VALIDATED status (internal draft)
+      const filingId = "filing-epf-validated";
+      statutoryFilings.push({
+        id: filingId,
+        companyId: companyA,
+        domain: "EPF_ECR",
+        periodYear: 2026,
+        periodMonth: 9,
+        status: "VALIDATED",
+        epfChallans: [],
+      });
+
       await request(app)
         .post("/api/v1/compliance/calendar/sync")
         .send({ periodYear: 2026, periodMonth: 9 });
 
       let listRes = await request(app).get("/api/v1/compliance/calendar/obligations");
       let epf = listRes.body.data.find((i: any) => i.domain === "EPF_ECR");
-      expect(["UPCOMING", "DUE_SOON", "DUE_TODAY"]).toContain(epf.status);
+      expect(epf.status).not.toBe("FILED");
+      expect(["UPCOMING", "DUE_SOON", "DUE_TODAY", "OVERDUE"]).toContain(epf.status);
 
-      // 2. Add an approved/exported StatutoryFiling without paid challan
-      const filingId = "filing-epf-01";
+      // 3. Move filing to PENDING_APPROVAL status (internal review)
+      statutoryFilings[0].status = "PENDING_APPROVAL";
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      listRes = await request(app).get("/api/v1/compliance/calendar/obligations");
+      epf = listRes.body.data.find((i: any) => i.domain === "EPF_ECR");
+      expect(epf.status).not.toBe("FILED");
+      expect(["UPCOMING", "DUE_SOON", "DUE_TODAY", "OVERDUE"]).toContain(epf.status);
+    });
+
+    it("does not map EXPORTED without portal receipt to FILED", async () => {
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      // Add filing in EXPORTED state but without portal acknowledgment/receipt
+      statutoryFilings.push({
+        id: "filing-epf-exported-only",
+        companyId: companyA,
+        domain: "EPF_ECR",
+        periodYear: 2026,
+        periodMonth: 9,
+        status: "EXPORTED",
+        tokenNumberPrn: null,
+        epfChallans: [],
+      });
+
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      const listRes = await request(app).get("/api/v1/compliance/calendar/obligations");
+      const epf = listRes.body.data.find((i: any) => i.domain === "EPF_ECR");
+      // An exported file alone must not masquerade as FILED
+      expect(epf.status).not.toBe("FILED");
+      expect(["UPCOMING", "DUE_SOON", "DUE_TODAY", "OVERDUE"]).toContain(epf.status);
+    });
+
+    it("distinguishes FILED, PAID, and COMPLETED based on verified external evidence", async () => {
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      // 1. External submission confirmed via TRRN, but challan not paid -> FILED
+      const filingId = "filing-epf-with-trrn";
       statutoryFilings.push({
         id: filingId,
         companyId: companyA,
@@ -332,21 +419,31 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
         periodYear: 2026,
         periodMonth: 9,
         status: "EXPORTED",
-        epfChallans: [],
+        epfChallans: [{ trrnNumber: "TRRN-99887766", status: "CHALLAN_GENERATED" }],
       });
 
-      // Re-sync
+      await request(app)
+        .post("/api/v1/compliance/calendar/sync")
+        .send({ periodYear: 2026, periodMonth: 9 });
+
+      let listRes = await request(app).get("/api/v1/compliance/calendar/obligations");
+      let epf = listRes.body.data.find((i: any) => i.domain === "EPF_ECR");
+      expect(epf.status).toBe("FILED");
+      expect(epf.statutoryFilingId).toBe(filingId);
+
+      // 2. Paid challan prior to portal receipt -> PAID
+      statutoryFilings[0].epfChallans = [{ trrnNumber: null, status: "PAID" }];
+
       await request(app)
         .post("/api/v1/compliance/calendar/sync")
         .send({ periodYear: 2026, periodMonth: 9 });
 
       listRes = await request(app).get("/api/v1/compliance/calendar/obligations");
       epf = listRes.body.data.find((i: any) => i.domain === "EPF_ECR");
-      expect(epf.status).toBe("FILED");
-      expect(epf.statutoryFilingId).toBe(filingId);
+      expect(epf.status).toBe("PAID");
 
-      // 3. Mark challan as PAID -> status transitions to COMPLETED
-      statutoryFilings[0].epfChallans = [{ status: "PAID" }];
+      // 3. Both external receipt (TRRN) and payment confirmed -> COMPLETED
+      statutoryFilings[0].epfChallans = [{ trrnNumber: "TRRN-99887766", status: "PAID" }];
 
       await request(app)
         .post("/api/v1/compliance/calendar/sync")
@@ -500,6 +597,50 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
       const countBefore = notifications.length;
       await runComplianceReminders(prismaMock, companyA);
       expect(notifications.length).toBe(countBefore);
+    });
+
+    it("routes unassigned obligation reminders to active COMPANY_ADMIN", async () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      obligations.push({
+        id: "ob-unassigned-urgent",
+        companyId: companyA,
+        domain: "TDS_24Q",
+        obligationType: "QUARTERLY_STATEMENT_24Q",
+        status: "DUE_SOON",
+        statutoryDueDate: tomorrow,
+        extendedDueDate: null,
+        periodKey: "2026-Q2",
+        assignedUserId: null, // Unassigned!
+      });
+
+      const res = await runComplianceReminders(prismaMock, companyA);
+      expect(res.emitted).toBeGreaterThanOrEqual(1);
+
+      // Verify notification went to the company admin (userIdA)
+      const unassignedNotif = notifications.find(
+        (n: any) => n.userId === userIdA && n.eventKey === "STATUTORY_DEADLINE_UNASSIGNED_APPROACHING"
+      );
+      expect(unassignedNotif).toBeDefined();
+      expect(unassignedNotif.body).toContain("Unassigned statutory obligation");
+    });
+
+    it("yields cleanly when advisory lock is held by concurrent worker", async () => {
+      // Simulate advisory lock denial by another active worker
+      const lockedPrismaMock = {
+        ...prismaMock,
+        $queryRawUnsafe: async (query: string) => {
+          if (query.includes("pg_try_advisory_xact_lock")) {
+            return [{ acquired: false }];
+          }
+          return [];
+        },
+      };
+
+      const result = await runComplianceReminders(lockedPrismaMock, companyA);
+      expect(result.skippedLocked).toBe(true);
+      expect(result.emitted).toBe(0);
     });
   });
 
