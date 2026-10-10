@@ -33,11 +33,12 @@ describe("PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-C
       );
     }
 
-    // 2. Production safety: Restrict integration tests to local or isolated test instances
+    // 2. Production safety: Restrict integration tests strictly to local loopback test instances
     const parsedUrl = new URL(databaseUrl);
-    if (parsedUrl.hostname.includes("rds.amazonaws.com") || process.env.NODE_ENV === "production") {
+    const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(parsedUrl.hostname);
+    if (!isLoopback || parsedUrl.hostname.includes("rds.amazonaws.com") || process.env.NODE_ENV === "production") {
       throw new Error(
-        `[FAIL-CLOSED SAFETY] Concurrency test refused connection to production host '${parsedUrl.hostname}'. Concurrency tests must only target isolated test databases.`
+        `[FAIL-CLOSED SAFETY] Concurrency test refused connection to host '${parsedUrl.hostname}'. Concurrency integration tests are strictly restricted to local loopback (localhost / 127.0.0.1 / ::1) test databases.`
       );
     }
 
