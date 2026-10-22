@@ -136,12 +136,23 @@ export async function claimPendingJobs(
   const claimedJobs: ComplianceReminderJob[] = [];
 
   for (const candidate of candidates) {
-    // Atomic updateMany: exactly one worker will successfully update the row where lockedBy is still unleased
+    // Atomic updateMany: exactly one worker will successfully update the row where status and attemptCount match
+    // and where the lock is unleased or expired
     const res = await prisma.complianceReminderJob.updateMany({
       where: {
         id: candidate.id,
+        status: candidate.status,
         attemptCount: candidate.attemptCount,
-        OR: [{ lockedBy: null }, { leaseExpiresAt: { lt: now } }],
+        OR: [
+          {
+            status: { in: ["PENDING", "FAILED"] },
+            OR: [{ lockedBy: null }, { leaseExpiresAt: { lt: now } }],
+          },
+          {
+            status: "CLAIMED",
+            leaseExpiresAt: { lt: now },
+          },
+        ],
       },
       data: {
         status: "CLAIMED",
@@ -252,13 +263,15 @@ export async function processJob(
 
     if (obligation && obligation.companyId !== job.companyId) {
       // Cross-tenant boundary violation: Fail-closed immediately!
+      const violationMsg = `Tenant isolation violation: obligation ${job.obligationId} does not belong to company ${job.companyId}`;
       await prisma.complianceReminderJob.update({
         where: { id: job.id },
         data: {
           status: "DEAD_LETTER",
           lockedBy: null,
           leaseExpiresAt: null,
-          lastError: `Tenant isolation violation: obligation ${job.obligationId} does not belong to company ${job.companyId}`,
+          nextAttemptAt: null,
+          lastError: violationMsg,
         },
       });
       return { success: false, error: "Tenant isolation violation", deadLetter: true };
@@ -390,6 +403,7 @@ export class ComplianceWorkerDaemon {
   private isStopping = false;
   private activeJobsCount = 0;
   private timer: NodeJS.Timeout | null = null;
+  private initialTimer: NodeJS.Timeout | null = null;
   private readonly config: Required<WorkerDaemonConfig>;
 
   constructor(
@@ -415,14 +429,15 @@ export class ComplianceWorkerDaemon {
    * Starts the background scheduler loop.
    */
   public start(): void {
-    if (this.timer) return;
+    if (this.timer || this.initialTimer) return;
     this.isStopping = false;
 
     // Trigger initial tick after a brief start delay
-    const initialTimer = setTimeout(() => {
+    this.initialTimer = setTimeout(() => {
+      this.initialTimer = null;
       void this.tick();
     }, 1_000);
-    initialTimer.unref();
+    this.initialTimer.unref();
 
     this.timer = setInterval(() => {
       void this.tick();
@@ -472,6 +487,11 @@ export class ComplianceWorkerDaemon {
    */
   public async stop(): Promise<void> {
     this.isStopping = true;
+
+    if (this.initialTimer) {
+      clearTimeout(this.initialTimer);
+      this.initialTimer = null;
+    }
 
     if (this.timer) {
       clearInterval(this.timer);

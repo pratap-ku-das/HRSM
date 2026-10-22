@@ -118,14 +118,25 @@ describe("OrbitHR P2.11 Distributed Compliance Reminder Worker Daemon Suite", ()
           for (let i = 0; i < jobs.length; i++) {
             const j = jobs[i];
             if (where.id && j.id !== where.id) continue;
+            if (where.companyId && j.companyId !== where.companyId) continue;
             if (where.status && j.status !== where.status) continue;
+            if (where.lockedBy && j.lockedBy !== where.lockedBy) continue;
             if (where.attemptCount !== undefined && j.attemptCount !== where.attemptCount) continue;
 
             // Lease checking condition: lockedBy is null or leaseExpiresAt < now
             if (where.OR) {
               const matchesOR = where.OR.some((cond: any) => {
+                if (cond.status?.in && !cond.status.in.includes(j.status)) return false;
+                if (cond.status && typeof cond.status === "string" && j.status !== cond.status) return false;
                 if (cond.lockedBy === null && j.lockedBy === null) return true;
                 if (cond.leaseExpiresAt?.lt && j.leaseExpiresAt && j.leaseExpiresAt.getTime() < cond.leaseExpiresAt.lt.getTime()) return true;
+                if (cond.OR) {
+                  return cond.OR.some((sub: any) => {
+                    if (sub.lockedBy === null && j.lockedBy === null) return true;
+                    if (sub.leaseExpiresAt?.lt && j.leaseExpiresAt && j.leaseExpiresAt.getTime() < sub.leaseExpiresAt.lt.getTime()) return true;
+                    return false;
+                  });
+                }
                 return false;
               });
               if (!matchesOR) continue;
@@ -161,6 +172,15 @@ describe("OrbitHR P2.11 Distributed Compliance Reminder Worker Daemon Suite", ()
         findMany: vi.fn().mockImplementation(async () => obligations),
         findUnique: vi.fn().mockImplementation(async ({ where }: any) => {
           return obligations.find((o) => o.id === where.id) || null;
+        }),
+        findFirst: vi.fn().mockImplementation(async ({ where }: any) => {
+          return (
+            obligations.find((o) => {
+              if (where?.id && o.id !== where.id) return false;
+              if (where?.companyId && o.companyId !== where.companyId) return false;
+              return true;
+            }) || null
+          );
         }),
         update: vi.fn().mockImplementation(async ({ where, data }: any) => {
           const idx = obligations.findIndex((o) => o.id === where.id);
