@@ -20,6 +20,7 @@ import {
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 import { calendarApi, type CalendarOverview, type CalendarObligation } from "./calendarApi";
+import { ObligationDetailModal } from "../../components/compliance/ObligationDetailModal";
 
 interface Props {
   onNavigateTab?: (tab: string) => void;
@@ -69,6 +70,9 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
   // Target Date Modal
   const [editingTargetObligation, setEditingTargetObligation] = useState<CalendarObligation | null>(null);
   const [newTargetDate, setNewTargetDate] = useState<string>("");
+
+  // Detail Modal
+  const [selectedDetailObligation, setSelectedDetailObligation] = useState<CalendarObligation | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -405,9 +409,13 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
                             </span>
                           </div>
 
-                          <div className="mt-2 text-xs font-semibold text-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDetailObligation(ob)}
+                            className="mt-2 text-left text-xs font-semibold text-slate-200 hover:text-brand-300 hover:underline"
+                          >
                             {ob.obligationType.replace(/_/g, " ")}
-                          </div>
+                          </button>
                           <div className="text-[11px] text-slate-400">
                             Jurisdiction: <b className="text-slate-300">{ob.jurisdiction}</b> | Period:{" "}
                             {ob.quarter ? ob.quarter : `${ob.periodYear}-${String(ob.periodMonth || 0).padStart(2, "0")}`}
@@ -436,6 +444,12 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
                             </button>
 
                             <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setSelectedDetailObligation(ob)}
+                                className="text-[10px] text-slate-300 hover:text-white hover:underline"
+                              >
+                                Details
+                              </button>
                               {["UPCOMING", "DUE_SOON", "DUE_TODAY", "OVERDUE"].includes(ob.status) && (
                                 <button
                                   onClick={() => void handleCompleteManual(ob)}
@@ -502,7 +516,13 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-slate-200">
-                          <div className="font-semibold">{ob.obligationType.replace(/_/g, " ")}</div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDetailObligation(ob)}
+                            className="text-left font-semibold hover:text-brand-300 hover:underline"
+                          >
+                            {ob.obligationType.replace(/_/g, " ")}
+                          </button>
                           <div className="text-[10px] text-slate-500">Jurisdiction: {ob.jurisdiction}</div>
                         </td>
                         <td className="px-4 py-3 text-slate-300">
@@ -536,6 +556,12 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setSelectedDetailObligation(ob)}
+                              className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white"
+                            >
+                              Details
+                            </button>
                             {["UPCOMING", "DUE_SOON", "DUE_TODAY", "OVERDUE"].includes(ob.status) && (
                               <button
                                 onClick={() => void handleCompleteManual(ob)}
@@ -611,6 +637,15 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
           </div>
         </div>
       )}
+
+      {/* 7. Obligation Detail Modal */}
+      <ObligationDetailModal
+        isOpen={Boolean(selectedDetailObligation)}
+        obligationId={selectedDetailObligation?.id || null}
+        initialObligation={selectedDetailObligation}
+        onClose={() => setSelectedDetailObligation(null)}
+        onNavigateFiling={(domain) => navigateToDomainModule(domain)}
+      />
     </div>
   );
 };

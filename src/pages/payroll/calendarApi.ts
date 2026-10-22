@@ -20,6 +20,95 @@ export interface CalendarOverview {
   recentUpcoming: CalendarObligation[];
 }
 
+export interface StatutoryFilingDetail {
+  id: string;
+  status: string;
+  statutoryFormCode: string;
+  domain?: string;
+  filingType?: string;
+  periodYear?: number;
+  periodMonth?: number | null;
+  quarter?: string | null;
+  stateCode?: string | null;
+  tokenNumberPrn?: string | null;
+  filingReceiptDate?: string | null;
+  totalEmployees?: number;
+  totalGrossWages?: number;
+  totalTaxDeducted?: number;
+  sha256Checksum?: string | null;
+  createdById?: string;
+  validatedAt?: string | null;
+  approvedById?: string | null;
+  approvedAt?: string | null;
+  lockedAt?: string | null;
+  rejectionReason?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  ptChallan?: {
+    id: string;
+    challanNumber: string;
+    cinNumber?: string | null;
+    stateCode: string;
+    challanPeriodYear: number;
+    challanPeriodMonth: number;
+    totalAmount: number;
+    totalEmployees: number;
+    challanDate: string;
+    paidDate?: string | null;
+    bankReference?: string | null;
+    status: string;
+    reconciledById?: string | null;
+    reconciledAt?: string | null;
+  } | null;
+  epfChallans?: Array<{
+    id: string;
+    establishmentCode: string;
+    wageMonth: number;
+    wageYear: number;
+    trrnNumber?: string | null;
+    crnNumber?: string | null;
+    totalAmount: number;
+    challanDate: string;
+    paidDate?: string | null;
+    bankReference?: string | null;
+    status: string;
+    reconciledById?: string | null;
+    reconciledAt?: string | null;
+  }>;
+  esicChallans?: Array<{
+    id: string;
+    cprnNumber?: string | null;
+    challanPeriodYear: number;
+    challanPeriodMonth: number;
+    totalAmount: number;
+    totalEmployees: number;
+    challanDate: string;
+    paidDate?: string | null;
+    transactionReference?: string | null;
+    bankReference?: string | null;
+    status: string;
+    reconciledById?: string | null;
+    reconciledAt?: string | null;
+  }>;
+  challans?: Array<{
+    id: string;
+    financialYear?: string;
+    quarter?: string;
+    bsrCode?: string;
+    challanDate?: string;
+    challanSerialNo?: string;
+    minorHead?: string;
+    tdsAmount?: number;
+    surcharge?: number;
+    cess?: number;
+    interest?: number;
+    fee?: number;
+    totalAmount?: number;
+    chequeOrDdNo?: string | null;
+    status?: string;
+  }>;
+}
+
 export interface CalendarObligation {
   id: string;
   companyId: string;
@@ -48,15 +137,7 @@ export interface CalendarObligation {
     lastName?: string;
     email: string;
   } | null;
-  statutoryFiling?: {
-    id: string;
-    status: string;
-    statutoryFormCode: string;
-    ptChallan?: { status: string } | null;
-    epfChallans?: Array<{ status: string }>;
-    esicChallans?: Array<{ status: string }>;
-    challans?: Array<{ id: string }>;
-  } | null;
+  statutoryFiling?: StatutoryFilingDetail | null;
 }
 
 export interface CalendarFilterParams {
