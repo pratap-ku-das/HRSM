@@ -449,6 +449,7 @@ model Company {
   statutoryFilings         StatutoryFiling[]
   epfChallans              EpfChallan[]
   esicChallans             EsicChallan[]
+  complianceReminderJobs   ComplianceReminderJob[]
 }
 
 // --------------------------------------------------------
@@ -2547,6 +2548,7 @@ model ComplianceCalendarObligation {
   company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   assignedUser    User?            @relation(fields: [assignedUserId], references: [id], onDelete: SetNull)
   statutoryFiling StatutoryFiling? @relation(fields: [statutoryFilingId], references: [id], onDelete: SetNull)
+  reminderJobs    ComplianceReminderJob[]
 
   @@unique([companyId, domain, obligationType, periodYear, periodMonth, quarter, jurisdiction])
   @@index([companyId, status])
@@ -2554,5 +2556,40 @@ model ComplianceCalendarObligation {
   @@index([statutoryFilingId])
   @@index([assignedUserId])
 }
+
+enum ComplianceJobStatus {
+  PENDING
+  CLAIMED
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
+model ComplianceReminderJob {
+  id             String              @id @default(uuid())
+  companyId      String
+  obligationId   String?
+  jobType        String              @default("COMPLIANCE_REMINDER") @db.VarChar(50)
+  status         ComplianceJobStatus @default(PENDING)
+  attemptCount   Int                 @default(0)
+  maxAttempts    Int                 @default(5)
+  nextAttemptAt  DateTime?           @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?             @db.VarChar(100)
+  leaseExpiresAt DateTime?
+  lastError      String?
+  payload        Json?
+  completedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  company    Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  obligation ComplianceCalendarObligation? @relation(fields: [obligationId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status, nextAttemptAt])
+  @@index([status, leaseExpiresAt])
+  @@index([obligationId])
+}
+
 
 

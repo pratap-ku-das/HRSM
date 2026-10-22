@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import { androidRelease } from "./mobileRelease.js";
 import { emitNotification } from "./notifications.js";
 import { runComplianceReminders } from "./reminders.js";
+import { startComplianceWorkerDaemon, runWorkerCycle } from "./compliance/calendar/workerDaemon.js";
 import { reconcileMidnightAbsentMissingClockOut } from "./attendancePolicies.js";
 import { escalateOverdueWorkflowSteps } from "./workflows.js";
 
@@ -141,6 +142,7 @@ export function startNotificationWorkers(prisma: PrismaClient) {
     slaRunning = true;
     try { await escalateOverdueWorkflowSteps(prisma); } catch (error) { console.error("SLA escalation job failed.", error); } finally { slaRunning = false; }
   };
+  const complianceDaemon = startComplianceWorkerDaemon(prisma);
   void queueAndroidReleaseNotifications(prisma).catch((error) => console.error("Update notification queue failed.", error));
   void runAutomaticReminders(prisma).catch((error) => console.error("Automatic reminder job failed.", error));
   void reconcileMidnightAbsentMissingClockOut(prisma).catch((error) => console.error("Midnight absent auto-reconciliation failed.", error));
@@ -151,5 +153,11 @@ export function startNotificationWorkers(prisma: PrismaClient) {
   const slaTimer = setInterval(() => void runSlaEscalation(), 5 * 60_000);
   pushTimer.unref(); reminderTimer.unref(); midnightAbsentTimer.unref(); slaTimer.unref();
   setTimeout(() => void push(), 2_000).unref();
-  return () => { clearInterval(pushTimer); clearInterval(reminderTimer); clearInterval(midnightAbsentTimer); clearInterval(slaTimer); };
+  return () => {
+    clearInterval(pushTimer);
+    clearInterval(reminderTimer);
+    clearInterval(midnightAbsentTimer);
+    clearInterval(slaTimer);
+    void complianceDaemon.stop();
+  };
 }
