@@ -235,4 +235,47 @@ describe("P2.11 Compliance Obligation Status Derivation Engine", () => {
       expect(status).toBe("UPCOMING");
     });
   });
+
+  describe("6. P2.11 7-Day Lead-Time Proximity Windows (OBS-P2.10-04, AC-3)", () => {
+    it("returns DUE_SOON exactly 7 days before statutory due date", () => {
+      const status = deriveObligationStatus({
+        dueDate: new Date("2026-10-15T00:00:00Z"),
+        now: new Date("2026-10-08T00:00:00Z"), // 7 days prior
+      });
+      expect(status).toBe("DUE_SOON");
+    });
+
+    it("returns UPCOMING 8 days before statutory due date", () => {
+      const status = deriveObligationStatus({
+        dueDate: new Date("2026-10-15T00:00:00Z"),
+        now: new Date("2026-10-07T00:00:00Z"), // 8 days prior
+      });
+      expect(status).toBe("UPCOMING");
+    });
+
+    it("returns DUE_SOON 3 days before statutory due date", () => {
+      const status = deriveObligationStatus({
+        dueDate: new Date("2026-10-15T00:00:00Z"),
+        now: new Date("2026-10-12T00:00:00Z"), // 3 days prior
+      });
+      expect(status).toBe("DUE_SOON");
+    });
+
+    it("returns DUE_TODAY on the statutory due date", () => {
+      const status = deriveObligationStatus({
+        dueDate: new Date("2026-10-15T00:00:00Z"),
+        now: new Date("2026-10-15T12:00:00Z"), // Same day
+      });
+      expect(status).toBe("DUE_TODAY");
+    });
+
+    it("returns OVERDUE when now is past statutory due date", () => {
+      const status = deriveObligationStatus({
+        dueDate: new Date("2026-10-15T00:00:00Z"),
+        now: new Date("2026-10-16T00:00:00Z"), // 1 day overdue
+      });
+      expect(status).toBe("OVERDUE");
+    });
+  });
 });
+

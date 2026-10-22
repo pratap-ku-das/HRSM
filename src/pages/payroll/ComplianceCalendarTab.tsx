@@ -34,7 +34,7 @@ const DOMAIN_LABELS: Record<string, { label: string; color: string }> = {
 
 const STATUS_BADGES: Record<string, { label: string; bg: string; text: string }> = {
   UPCOMING: { label: "Upcoming", bg: "bg-slate-800", text: "text-slate-300" },
-  DUE_SOON: { label: "Due Soon (≤3d)", bg: "bg-amber-500/20", text: "text-amber-300" },
+  DUE_SOON: { label: "Due Soon (≤7d)", bg: "bg-amber-500/20", text: "text-amber-300" },
   DUE_TODAY: { label: "Due Today", bg: "bg-orange-500/20", text: "text-orange-300 font-semibold" },
   OVERDUE: { label: "OVERDUE", bg: "bg-rose-500/20", text: "text-rose-300 font-bold" },
   FILED: { label: "Return Filed", bg: "bg-blue-500/20", text: "text-blue-300" },
@@ -233,7 +233,7 @@ export const ComplianceCalendarTab: React.FC<Props> = ({ onNavigateTab }) => {
           </div>
 
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <span className="text-xs font-semibold text-amber-300">Due Soon (≤3d)</span>
+            <span className="text-xs font-semibold text-amber-300">Due Soon (≤7d)</span>
             <div className="mt-1 text-2xl font-bold text-amber-200">{overview.metrics.dueSoon}</div>
             <div className="mt-1 text-[11px] text-amber-400/80">Pending filing or deposit</div>
           </div>

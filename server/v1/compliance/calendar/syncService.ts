@@ -92,7 +92,7 @@ export function deriveObligationStatus(params: {
   if (diffDays === 0) {
     return "DUE_TODAY";
   }
-  if (diffDays <= 3) {
+  if (diffDays <= 7) {
     return "DUE_SOON";
   }
   return "UPCOMING";

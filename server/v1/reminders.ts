@@ -106,15 +106,17 @@ export async function runComplianceReminders(prisma: PrismaClient, companyId: st
       : [];
 
     for (const obl of obligations) {
-      let recipientUserId = obl.assignedUserId;
-      let isUnassigned = false;
+      const isUnassigned = !obl.assignedUserId;
+      let targetUserIds: string[] = [];
 
-      if (!recipientUserId) {
-        // Fallback: Resolve authorized, active COMPANY_ADMIN in this tenant
-        const admin = await tx.user.findFirst({
+      if (!isUnassigned) {
+        targetUserIds = [obl.assignedUserId!];
+      } else {
+        // Fallback: Resolve all authorized, active administrators (COMPANY_ADMIN and PAYROLL_ADMIN) in this tenant
+        const activeAdmins = await tx.user.findMany({
           where: {
             companyId,
-            role: "COMPANY_ADMIN",
+            role: { in: ["COMPANY_ADMIN", "PAYROLL_ADMIN"] },
             OR: [
               { employee: null },
               { employee: { status: { in: ["ACTIVE", "ON_PROBATION"] } } },
@@ -124,84 +126,70 @@ export async function runComplianceReminders(prisma: PrismaClient, companyId: st
           orderBy: { createdAt: "asc" },
         });
 
-        if (admin) {
-          recipientUserId = admin.id;
-          isUnassigned = true;
-        } else {
-          // Secondary fallback to PAYROLL_ADMIN
-          const payrollAdmin = await tx.user.findFirst({
-            where: {
-              companyId,
-              role: "PAYROLL_ADMIN",
-              OR: [
-                { employee: null },
-                { employee: { status: { in: ["ACTIVE", "ON_PROBATION"] } } },
-              ],
-            },
-            select: { id: true },
-            orderBy: { createdAt: "asc" },
-          });
-          if (payrollAdmin) {
-            recipientUserId = payrollAdmin.id;
-            isUnassigned = true;
-          }
-        }
+        targetUserIds = activeAdmins.map((a: { id: string }) => a.id);
       }
 
-      if (!recipientUserId) continue; // No eligible administrator found
+      if (targetUserIds.length === 0) continue; // No eligible administrator found
+
+      const days = daysUntil(obl.extendedDueDate || obl.statutoryDueDate, now);
+      const isOverdue = obl.status === "OVERDUE" || days < 0;
 
       const eventKey = isUnassigned
-        ? obl.status === "OVERDUE"
+        ? isOverdue
           ? "STATUTORY_DEADLINE_UNASSIGNED_OVERDUE"
           : "STATUTORY_DEADLINE_UNASSIGNED_APPROACHING"
-        : obl.status === "OVERDUE"
+        : isOverdue
         ? "STATUTORY_DEADLINE_OVERDUE"
         : "STATUTORY_DEADLINE_APPROACHING";
 
-      const existing = await tx.notification.findFirst({
-        where: {
-          companyId,
-          userId: recipientUserId,
-          eventKey,
-          entityType: "ComplianceCalendarObligation",
-          entityId: obl.id,
-          createdAt: { gte: since },
-        },
-      });
+      const title = isUnassigned
+        ? isOverdue
+          ? `[URGENT] Unassigned Overdue: ${obl.domain}`
+          : `[Action Required] Unassigned: ${obl.domain}`
+        : isOverdue
+        ? `OVERDUE: ${obl.domain} ${obl.obligationType}`
+        : `Statutory deadline approaching: ${obl.domain}`;
 
-      if (!existing) {
-        const days = daysUntil(obl.extendedDueDate || obl.statutoryDueDate, now);
-        const title = isUnassigned
-          ? obl.status === "OVERDUE"
-            ? `[URGENT] Unassigned Overdue: ${obl.domain}`
-            : `[Action Required] Unassigned: ${obl.domain}`
-          : obl.status === "OVERDUE"
-          ? `OVERDUE: ${obl.domain} ${obl.obligationType}`
-          : `Statutory deadline approaching: ${obl.domain}`;
-        const body = isUnassigned
-          ? obl.status === "OVERDUE"
-            ? `Unassigned statutory obligation ${obl.domain} (${obl.obligationType}) was due ${Math.abs(days)} day(s) ago. Please assign an owner or take action.`
-            : `Unassigned statutory obligation ${obl.domain} (${obl.obligationType}) is due in ${days} day(s). Please assign an owner or take action.`
-          : obl.status === "OVERDUE"
-          ? `${obl.domain} obligation was due ${Math.abs(days)} day(s) ago.`
-          : `${obl.domain} obligation is due in ${days} day(s).`;
+      const body = isUnassigned
+        ? isOverdue
+          ? `Unassigned statutory obligation ${obl.domain} (${obl.obligationType}) was due ${Math.abs(days)} day(s) ago. Please assign an owner or take action.`
+          : `Unassigned statutory obligation ${obl.domain} (${obl.obligationType}) is due in ${days} day(s). Please assign an owner or take action.`
+        : isOverdue
+        ? `${obl.domain} obligation was due ${Math.abs(days)} day(s) ago.`
+        : `${obl.domain} obligation is due in ${days} day(s).`;
 
-        await emitNotification(tx, {
-          companyId,
-          userId: recipientUserId,
-          eventKey,
-          title,
-          body,
-          entityType: "ComplianceCalendarObligation",
-          entityId: obl.id,
-          actionUrl: "/compliance/calendar",
+      for (const recipientUserId of targetUserIds) {
+        const existing = await tx.notification.findFirst({
+          where: {
+            companyId,
+            userId: recipientUserId,
+            eventKey,
+            entityType: "ComplianceCalendarObligation",
+            entityId: obl.id,
+            createdAt: { gte: since },
+          },
         });
 
+        if (!existing) {
+          await emitNotification(tx, {
+            companyId,
+            userId: recipientUserId,
+            eventKey,
+            title,
+            body,
+            entityType: "ComplianceCalendarObligation",
+            entityId: obl.id,
+            actionUrl: "/compliance/calendar",
+          });
+          emitted++;
+        }
+      }
+
+      if (tx.complianceCalendarObligation?.update) {
         await tx.complianceCalendarObligation.update({
           where: { id: obl.id },
           data: { remindedAt: now },
         });
-        emitted++;
       }
     }
 

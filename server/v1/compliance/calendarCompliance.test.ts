@@ -238,14 +238,16 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
         return users.find(u => {
           if (where?.id && u.id !== where.id) return false;
           if (where?.companyId && u.companyId !== where.companyId) return false;
-          if (where?.role && u.role !== where.role) return false;
+          if (where?.role?.in && !where.role.in.includes(u.role)) return false;
+          if (where?.role && typeof where.role === "string" && u.role !== where.role) return false;
           return true;
         }) || null;
       },
       findMany: async ({ where }: any) => {
         return users.filter(u => {
           if (where?.companyId && u.companyId !== where.companyId) return false;
-          if (where?.role && u.role !== where.role) return false;
+          if (where?.role?.in && !where.role.in.includes(u.role)) return false;
+          if (where?.role && typeof where.role === "string" && u.role !== where.role) return false;
           return true;
         });
       },
@@ -624,6 +626,48 @@ describe("P2.10 Unified Statutory Compliance Calendar Integration Suite", () => 
       );
       expect(unassignedNotif).toBeDefined();
       expect(unassignedNotif.body).toContain("Unassigned statutory obligation");
+    });
+
+    it("fans out unassigned obligation escalation to all active tenant admins (COMPANY_ADMIN and PAYROLL_ADMIN)", async () => {
+      const payrollAdminId = "user-payroll-admin-1";
+      users.push({
+        id: payrollAdminId,
+        companyId: companyA,
+        role: "PAYROLL_ADMIN",
+        firstName: "Priya",
+        lastName: "Nair",
+        email: "priya@alphacorp.com",
+      });
+
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 2);
+
+      obligations.push({
+        id: "ob-unassigned-fanout",
+        companyId: companyA,
+        domain: "EPF_ECR",
+        obligationType: "MONTHLY_ECR_AND_CONTRIBUTION",
+        status: "DUE_SOON",
+        statutoryDueDate: tomorrow,
+        extendedDueDate: null,
+        periodKey: "2026-10",
+        assignedUserId: null,
+      });
+
+      const res = await runComplianceReminders(prismaMock, companyA);
+      expect(res.emitted).toBeGreaterThanOrEqual(2);
+
+      const notifAdmin = notifications.find(
+        (n: any) => n.userId === userIdA && n.entityId === "ob-unassigned-fanout"
+      );
+      const notifPayroll = notifications.find(
+        (n: any) => n.userId === payrollAdminId && n.entityId === "ob-unassigned-fanout"
+      );
+
+      expect(notifAdmin).toBeDefined();
+      expect(notifPayroll).toBeDefined();
+      expect(notifAdmin.companyId).toBe(companyA);
+      expect(notifPayroll.companyId).toBe(companyA);
     });
 
     it("yields cleanly when advisory lock is held by concurrent worker", async () => {
