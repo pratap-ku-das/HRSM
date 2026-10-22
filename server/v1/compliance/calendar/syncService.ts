@@ -17,8 +17,8 @@ export function deriveObligationStatus(params: {
   filing?: (StatutoryFiling & {
     ptChallan?: { status: string; challanNumber?: string | null } | null;
     epfChallans?: Array<{ status: string; trrnNumber?: string | null }>;
-    esicChallans?: Array<{ status: string; challanNumber?: string | null }>;
-    challans?: Array<{ id: string; challanNumber?: string | null }>;
+    esicChallans?: Array<{ status: string; challanNumber?: string | null; cprnNumber?: string | null }>;
+    challans?: Array<{ id: string; challanNumber?: string | null; challanSerialNo?: string | null; bsrCode?: string | null }>;
   }) | null;
   manualCompletedAt?: Date | null;
 }): ComplianceObligationStatus {
@@ -37,11 +37,15 @@ export function deriveObligationStatus(params: {
   const filing = params.filing;
   if (filing) {
     // 1. External submission confirmation evidence:
-    // Requires verified government portal reference (PRN, Token No, TRRN, or Challan No)
+    // Requires verified government portal reference (PRN, Token No, TRRN, CPRN, or Challan No)
     // A local locked state or exported artifact alone does NOT establish external filing.
     const hasTdsReceipt = Boolean(filing.tokenNumberPrn || filing.filingReceiptDate);
     const hasEpfTrrn = Boolean(filing.epfChallans?.some((c) => c.trrnNumber && c.trrnNumber.trim().length > 0));
-    const hasEsicChallanNum = Boolean(filing.esicChallans?.some((c) => c.challanNumber && c.challanNumber.trim().length > 0));
+    const hasEsicChallanNum = Boolean(
+      filing.esicChallans?.some(
+        (c) => (c.challanNumber && c.challanNumber.trim().length > 0) || (c.cprnNumber && c.cprnNumber.trim().length > 0)
+      )
+    );
     const hasPtChallanNum = Boolean(filing.ptChallan?.challanNumber && filing.ptChallan.challanNumber.trim().length > 0);
 
     const isExternallySubmitted = hasTdsReceipt || hasEpfTrrn || hasEsicChallanNum || hasPtChallanNum;
@@ -50,7 +54,11 @@ export function deriveObligationStatus(params: {
     const hasPaidEpf = filing.epfChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
     const hasPaidEsic = filing.esicChallans?.some((c) => ["PAID", "RECONCILED"].includes(c.status));
     const hasPaidPt = filing.ptChallan && ["PAID", "RECONCILED"].includes(filing.ptChallan.status);
-    const hasTdsChallan = filing.challans && filing.challans.length > 0;
+    const hasTdsChallan = Boolean(
+      filing.challans &&
+      filing.challans.length > 0 &&
+      filing.challans.some((c) => Boolean(c.challanNumber || c.challanSerialNo || c.id))
+    );
 
     const isFullyPaid = Boolean(hasPaidEpf || hasPaidEsic || hasPaidPt || hasTdsChallan);
 
@@ -67,8 +75,8 @@ export function deriveObligationStatus(params: {
       return "PAID";
     }
 
-    // 4. Handle Rejected or Cancelled filings:
-    if (filing.status === "CANCELLED" || Boolean(filing.rejectionReason)) {
+    // 4. Handle Rejected, Cancelled, or Superseded filings:
+    if (filing.status === "CANCELLED" || filing.status === "SUPERSEDED" || Boolean(filing.rejectionReason)) {
       if (diffDays < 0) return "OVERDUE";
       return "NEEDS_REVIEW";
     }
