@@ -202,7 +202,7 @@ export async function runComplianceReminders(prisma: PrismaClient, companyId: st
   };
 
   if (typeof (prisma as any).$transaction === "function") {
-    return (prisma as any).$transaction(runInsideTx);
+    return (prisma as any).$transaction(runInsideTx, { timeout: 30_000, maxWait: 15_000 });
   }
   return runInsideTx(prisma);
 }

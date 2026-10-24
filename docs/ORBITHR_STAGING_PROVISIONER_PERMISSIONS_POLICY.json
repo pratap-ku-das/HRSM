@@ -1,0 +1,323 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EC2Describe",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeInternetGateways",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeTags",
+        "ec2:DescribeImages",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeVpcAttribute"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "VPCNetworking",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc",
+        "ec2:DeleteVpc",
+        "ec2:ModifyVpcAttribute",
+        "ec2:CreateSubnet",
+        "ec2:DeleteSubnet",
+        "ec2:ModifySubnetAttribute",
+        "ec2:CreateInternetGateway",
+        "ec2:DeleteInternetGateway",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:CreateRouteTable",
+        "ec2:DeleteRouteTable",
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable",
+        "ec2:CreateRoute",
+        "ec2:DeleteRoute",
+        "ec2:CreateSecurityGroup",
+        "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "EC2LaunchInstance",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": [
+        "arn:aws:ec2:eu-north-1:402545554824:instance/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1",
+          "ec2:InstanceType": "t3.small",
+          "aws:RequestTag/Environment": "Staging",
+          "aws:RequestTag/Project": "OrbitHR"
+        }
+      }
+    },
+    {
+      "Sid": "EC2LaunchVolume",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": [
+        "arn:aws:ec2:eu-north-1:402545554824:volume/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1",
+          "aws:RequestTag/Environment": "Staging",
+          "aws:RequestTag/Project": "OrbitHR"
+        }
+      }
+    },
+    {
+      "Sid": "EC2LaunchENI",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": [
+        "arn:aws:ec2:eu-north-1:402545554824:network-interface/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "EC2LaunchSubnetSG",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": [
+        "arn:aws:ec2:eu-north-1:402545554824:subnet/*",
+        "arn:aws:ec2:eu-north-1:402545554824:security-group/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1",
+          "aws:ResourceTag/Environment": "Staging"
+        }
+      }
+    },
+    {
+      "Sid": "EC2OfficialAMI",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:eu-north-1::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Owner": "amazon"
+        }
+      }
+    },
+    {
+      "Sid": "EC2TerminateInstance",
+      "Effect": "Allow",
+      "Action": "ec2:TerminateInstances",
+      "Resource": "arn:aws:ec2:eu-north-1:402545554824:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "EC2DeleteVolumeScoped",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DeleteVolume"
+      ],
+      "Resource": "arn:aws:ec2:eu-north-1:402545554824:volume/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1",
+          "aws:ResourceTag/Environment": "Staging"
+        }
+      }
+    },
+    {
+      "Sid": "RDSDescribe",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBSubnetGroups",
+        "rds:DescribeDBInstances",
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:DescribeDBSnapshots",
+        "rds:DescribeDBInstanceAutomatedBackups",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "RDSLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:CreateDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:AddTagsToResource",
+        "rds:DeleteDBInstanceAutomatedBackup",
+        "rds:DeleteDBSnapshot"
+      ],
+      "Resource": [
+        "arn:aws:rds:eu-north-1:402545554824:subgrp:orbithr-staging-db-subnet-group",
+        "arn:aws:rds:eu-north-1:402545554824:db:hrms-database-staging",
+        "arn:aws:rds:eu-north-1:402545554824:auto-backup:*",
+        "arn:aws:rds:eu-north-1:402545554824:snapshot:*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-north-1"
+        }
+      }
+    },
+    {
+      "Sid": "S3Management",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:GetBucketTagging",
+        "s3:PutBucketTagging",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:AbortMultipartUpload",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": [
+        "arn:aws:s3:::orbithr-staging-deployments-402545554824",
+        "arn:aws:s3:::orbithr-staging-deployments-402545554824/*"
+      ]
+    },
+    {
+      "Sid": "IAMPassRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::402545554824:role/OrbitHR-EC2-Staging-Role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ec2.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "IAMRoleRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetInstanceProfile",
+        "iam:ListRoleTags"
+      ],
+      "Resource": [
+        "arn:aws:iam::402545554824:role/OrbitHR-EC2-Staging-Role",
+        "arn:aws:iam::402545554824:instance-profile/OrbitHR-EC2-Staging-Role"
+      ]
+    },
+    {
+      "Sid": "IAMHostPolicyLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:TagPolicy"
+      ],
+      "Resource": "arn:aws:iam::402545554824:policy/OrbitHR-EC2-Staging-Host-Policy"
+    },
+    {
+      "Sid": "IAMPolicyAttachmentRestricted",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::402545554824:role/OrbitHR-EC2-Staging-Role",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+            "arn:aws:iam::402545554824:policy/OrbitHR-EC2-Staging-Host-Policy"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "IAMListRolesGlobal",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListRoles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SSMParams",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath",
+        "ssm:PutParameter",
+        "ssm:DeleteParameter",
+        "ssm:DeleteParameters"
+      ],
+      "Resource": "arn:aws:ssm:eu-north-1:402545554824:parameter/orbithr/staging/*"
+    },
+    {
+      "Sid": "Rekognition",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:CreateCollection",
+        "rekognition:DeleteCollection",
+        "rekognition:DescribeCollection",
+        "rekognition:ListCollections"
+      ],
+      "Resource": [
+        "arn:aws:rekognition:eu-north-1:402545554824:collection/orbithr-staging",
+        "*"
+      ]
+    }
+  ]
+}

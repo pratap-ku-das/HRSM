@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowStagingS3DeploymentArtifactRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::orbithr-staging-deployments-402545554824",
+        "arn:aws:s3:::orbithr-staging-deployments-402545554824/*"
+      ]
+    },
+    {
+      "Sid": "AllowStagingRekognitionScopedCollection",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:SearchFacesByImage",
+        "rekognition:IndexFaces",
+        "rekognition:DeleteFaces",
+        "rekognition:ListFaces"
+      ],
+      "Resource": "arn:aws:rekognition:eu-north-1:402545554824:collection/orbithr-staging"
+    },
+    {
+      "Sid": "AllowStagingSSMAppPasswordRead",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters"
+      ],
+      "Resource": "arn:aws:ssm:eu-north-1:402545554824:parameter/orbithr/staging/database/app_password"
+    },
+    {
+      "Sid": "AllowStagingSSMKMSDecryptViaSSMOnly",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "ssm.eu-north-1.amazonaws.com",
+          "kms:CallerAccount": "402545554824"
+        }
+      }
+    }
+  ]
+}

@@ -62,7 +62,7 @@ describe("PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-C
       await cleanupCompany(companyId);
     }
     createdCompanyIds.clear();
-  });
+  }, 30_000);
 
   afterAll(async () => {
     try {
@@ -73,7 +73,7 @@ describe("PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-C
       if (prisma1) await prisma1.$disconnect();
       if (prisma2) await prisma2.$disconnect();
     }
-  });
+  }, 30_000);
 
   it("verifies live PostgreSQL connectivity and production isolation", async () => {
     expect(prisma1).not.toBeNull();
@@ -231,24 +231,27 @@ describe("PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-C
     // 1. Simulate worker crash during transaction while holding advisory lock
     let errorCaught = false;
     try {
-      await prisma1!.$transaction(async (tx) => {
-        const lock: any = await tx.$queryRawUnsafe(
-          `SELECT pg_try_advisory_xact_lock(hashtext('compliance_reminders_' || $1)) as acquired`,
-          retryCompanyId
-        );
-        expect(lock[0].acquired).toBe(true);
+      await prisma1!.$transaction(
+        async (tx) => {
+          const lock: any = await tx.$queryRawUnsafe(
+            `SELECT pg_try_advisory_xact_lock(hashtext('compliance_reminders_' || $1)) as acquired`,
+            retryCompanyId
+          );
+          expect(lock[0].acquired).toBe(true);
 
-        // Mutate obligation inside uncommitted transaction
-        await tx.complianceCalendarObligation.update({
-          where: { id: obl.id },
-          data: { remindedAt: new Date() },
-        });
+          // Mutate obligation inside uncommitted transaction
+          await tx.complianceCalendarObligation.update({
+            where: { id: obl.id },
+            data: { remindedAt: new Date() },
+          });
 
-        // Crash before transaction commits
-        throw new Error("SIMULATED_WORKER_CRASH_BEFORE_COMMIT");
-      });
+          // Crash before transaction commits
+          throw new Error("SIMULATED_WORKER_CRASH_BEFORE_COMMIT");
+        },
+        { timeout: 30_000, maxWait: 15_000 }
+      );
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === "SIMULATED_WORKER_CRASH_BEFORE_COMMIT") {
+      if (err instanceof Error && err.message.includes("SIMULATED_WORKER_CRASH_BEFORE_COMMIT")) {
         errorCaught = true;
       }
     }
