@@ -55,6 +55,76 @@ export function createSettingsRouter(prisma: PrismaClient, authenticate: Request
   const ok = (res: Response, data: unknown) => res.json({ data, meta: { requestId: (res.req as AuthRequest).requestId } });
   const fail = (res: Response, status: number, code: string, message: string) => res.status(status).json({ error: { code, message } });
   router.use('/workspace-settings', authenticate);
+
+  router.get('/workspace-settings', async (req: AuthRequest, res, next) => {
+    try {
+      const companyId = req.auth!.companyId;
+      let settings = await prisma.companySettings.findUnique({ where: { companyId } });
+      if (!settings) {
+        const company = await prisma.company.findUnique({ where: { id: companyId } });
+        if (company) {
+          settings = await prisma.companySettings.create({
+            data: {
+              companyId: company.id,
+              companyName: company.name,
+              legalEntityName: `${company.name} Private Limited`,
+              taxRegistrationNumber: '',
+              currency: 'INR',
+              currencySymbol: '₹',
+              timezone: 'Asia/Kolkata',
+              workDays: [1, 2, 3, 4, 5],
+              businessHoursStart: '09:30',
+              businessHoursEnd: '18:30',
+              enableAutomaticOvertime: true,
+              enableAuditLogging: true,
+              defaultProbationPeriodMonths: 3,
+            },
+          });
+        }
+      }
+      return ok(res, settings);
+    } catch (error) { next(error); }
+  });
+
+  router.put('/workspace-settings', async (req: AuthRequest, res, next) => {
+    try {
+      if (!req.auth?.permissions.includes('company.manage') && !['SUPER_ADMIN', 'COMPANY_ADMIN'].includes(req.auth!.role)) {
+        return fail(res, 403, 'FORBIDDEN', 'Company management permission is required.');
+      }
+      const companyId = req.auth!.companyId;
+      const body = workspaceSettingsSchema.parse(req.body);
+      const settings = await prisma.companySettings.upsert({
+        where: { companyId },
+        create: {
+          ...body,
+          companyId,
+          incorporationDate: body.incorporationDate ?? null,
+        },
+        update: {
+          ...body,
+          incorporationDate: body.incorporationDate ?? null,
+        },
+      });
+
+      if (prisma.auditLog) {
+        await prisma.auditLog.create({
+          data: {
+            companyId,
+            userId: req.auth!.id,
+            userName: req.auth!.id,
+            userRole: req.auth!.role,
+            action: 'WORKSPACE_SETTINGS_UPDATED',
+            category: 'COMPLIANCE',
+            details: `Workspace settings updated: ${settings.companyName}`,
+            ipAddress: req.ip || 'unknown',
+          },
+        }).catch(() => {});
+      }
+
+      return ok(res, settings);
+    } catch (error) { next(error); }
+  });
+
   router.get('/workspace-settings/statutory-status', async (req: AuthRequest, res, next) => {
     try {
       const companyId = req.auth!.companyId;

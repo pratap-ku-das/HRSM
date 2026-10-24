@@ -101,5 +101,53 @@ describe('statutory setup API', () => {
     expect(res.body.data.status).toBe('VERIFIED');
     expect(prisma.auditLog.create).toHaveBeenCalled();
   });
+
+  it('GET /workspace-settings returns workspace settings for tenant', async () => {
+    const prisma = {
+      companySettings: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'set-1',
+          companyId: 'tenant-a',
+          companyName: 'OrbitHR',
+          legalEntityName: 'OrbitHR Private Limited',
+        }),
+      },
+    };
+    const app = appFor(['company.view'], 'EMPLOYEE', prisma);
+    const res = await request(app).get('/api/v1/workspace-settings');
+    expect(res.status).toBe(200);
+    expect(res.body.data.companyName).toBe('OrbitHR');
+    expect(res.body.data.legalEntityName).toBe('OrbitHR Private Limited');
+  });
+
+  it('PUT /workspace-settings updates workspace settings for authorized admin', async () => {
+    const prisma = {
+      companySettings: {
+        upsert: vi.fn().mockResolvedValue({
+          id: 'set-1',
+          companyId: 'tenant-a',
+          ...valid,
+        }),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const app = appFor(['company.manage'], 'COMPANY_ADMIN', prisma);
+    const res = await request(app)
+      .put('/api/v1/workspace-settings')
+      .send(valid);
+    expect(res.status).toBe(200);
+    expect(res.body.data.companyName).toBe('OrbitHR');
+    expect(prisma.companySettings.upsert).toHaveBeenCalled();
+  });
+
+  it('PUT /workspace-settings rejects unauthorized employee with 403', async () => {
+    const prisma = { companySettings: { upsert: vi.fn() } };
+    const app = appFor([], 'EMPLOYEE', prisma);
+    const res = await request(app)
+      .put('/api/v1/workspace-settings')
+      .send(valid);
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
 });
 
