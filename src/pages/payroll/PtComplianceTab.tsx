@@ -261,25 +261,50 @@ export const PtComplianceTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Statutory Certification & Boundary Banner */}
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
-        <div className="flex items-start gap-3">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-          <div className="space-y-1 text-sm">
-            <p className="font-semibold text-amber-300">
-              UNVERIFIED_PORTAL_SCHEMA — CALCULATION CERTIFIED ONLY
-            </p>
-            <p className="text-xs text-amber-200/80">
+      <div className="rounded-2xl border border-amber-300/80 bg-amber-50/90 p-5 shadow-xs transition-all">
+        <div className="flex items-start gap-3.5">
+          <div className="rounded-xl bg-amber-100 p-2 text-amber-800 shrink-0 border border-amber-200 shadow-2xs">
+            <ShieldAlert className="h-5 w-5" />
+          </div>
+          <div className="space-y-2 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-sm tracking-tight text-amber-950">
+                UNVERIFIED_PORTAL_SCHEMA — CALCULATION CERTIFIED ONLY
+              </h3>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
+                Statutory Advisory
+              </span>
+            </div>
+            <p className="text-xs text-amber-900/90 leading-relaxed max-w-4xl">
               Multi-state Professional Tax deductions are certified for Karnataka (KA), Maharashtra (MH),
               Telangana (TS), and West Bengal (WB). Direct electronic portal upload schemas remain subject to state
               portal sandbox certification. Audit summaries and schedules are available for verified export.
             </p>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs">
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">KA: Certified</span>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">MH: Certified (Female ₹25k Exemption)</span>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">TS: Certified</span>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300">WB: Certified (Oct 2026 Transition)</span>
-              <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">TN: Deferred (Municipal Model)</span>
-              <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">GJ: Deferred (Municipal Split)</span>
+            <div className="pt-1 flex flex-wrap items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-300 px-2.5 py-1 font-semibold text-emerald-800 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                KA: Certified
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-300 px-2.5 py-1 font-semibold text-emerald-800 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                MH: Certified (Female ₹25k Exemption)
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-300 px-2.5 py-1 font-semibold text-emerald-800 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                TS: Certified
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-300 px-2.5 py-1 font-semibold text-emerald-800 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600"></span>
+                WB: Certified (Oct 2026 Transition)
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 border border-slate-300 px-2.5 py-1 font-medium text-slate-700 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+                TN: Deferred (Municipal Model)
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 border border-slate-300 px-2.5 py-1 font-medium text-slate-700 shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+                GJ: Deferred (Municipal Split)
+              </span>
             </div>
           </div>
         </div>

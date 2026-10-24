@@ -24,7 +24,8 @@ import {
   Check,
   X,
   FileCheck2,
-  AlertCircle
+  AlertCircle,
+  Sliders
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { WorkflowDefinition, WorkflowModule } from '../../types';
@@ -419,26 +420,28 @@ export const WorkflowBuilderPage: React.FC = () => {
   return (
     <div className="neo-page neo-workflows flex flex-col h-[calc(100vh-80px)] space-y-4">
       {/* Top Header & Actions Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-4">
         <div>
-          <div className="flex items-center gap-2">
-            <GitPullRequestArrow className="w-6 h-6 text-brand-400" />
-            <h1 className="text-xl font-bold tracking-tight text-white">Visual Workflow Designer</h1>
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-2xs">
+              <GitPullRequestArrow className="w-5 h-5" />
+            </span>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">Visual Workflow Designer</h1>
             {selectedDefinition && (
               <span
-                className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border ${
+                className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border font-semibold ${
                   selectedDefinition.status === 'ACTIVE'
-                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : selectedDefinition.status === 'DRAFT'
-                    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-300'
                 }`}
               >
                 {selectedDefinition.status} · v{selectedDefinition.version}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-500 mt-1">
             Sequential approval pipeline designer compiled into OrbitHR's immutable state machine.
           </p>
         </div>
@@ -452,7 +455,7 @@ export const WorkflowBuilderPage: React.FC = () => {
               const found = items.find((d) => d.id === e.target.value);
               if (found) selectWorkflow(found);
             }}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
+            className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 shadow-2xs focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
           >
             {items.map((def) => (
               <option key={def.id} value={def.id}>
@@ -463,17 +466,17 @@ export const WorkflowBuilderPage: React.FC = () => {
 
           <button
             onClick={() => void loadDefinitions()}
-            className="p-2 border border-slate-800 hover:border-slate-700 rounded-xl text-slate-300"
+            className="p-2 border border-slate-200 hover:border-slate-300 rounded-xl text-slate-600 hover:text-slate-900 bg-white shadow-2xs transition"
             title="Refresh"
           >
-            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin text-brand-600' : ''}`} />
           </button>
 
           <button
             onClick={() => void openTemplates()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-2xs transition"
           >
-            <Layers className="w-3.5 h-3.5 text-brand-400" />
+            <Layers className="w-3.5 h-3.5 text-brand-600" />
             Templates
           </button>
 
@@ -481,7 +484,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             <button
               onClick={() => void forkNewDraft()}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 rounded-xl text-xs font-medium text-indigo-200"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-xs font-semibold text-indigo-700 shadow-2xs transition"
             >
               <Sparkles className="w-3.5 h-3.5" />
               Fork New Draft
@@ -490,7 +493,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             <button
               onClick={() => void saveDraft()}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-brand-500 hover:bg-brand-600 rounded-xl text-xs font-bold text-white shadow-lg shadow-brand-500/20"
+              className="flex items-center gap-1.5 px-4 py-2 bg-brand-500 hover:bg-brand-600 rounded-xl text-xs font-bold text-white shadow-xs transition"
             >
               <Save className="w-3.5 h-3.5" />
               {saving ? 'Saving...' : 'Save Draft'}
@@ -499,17 +502,17 @@ export const WorkflowBuilderPage: React.FC = () => {
 
           <button
             onClick={() => void validateGraph()}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-2xs transition"
           >
-            <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
+            <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
             Validate
           </button>
 
           <button
             onClick={() => setShowSimulateModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-xs font-medium text-slate-200"
+            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-2xs transition"
           >
-            <Play className="w-3.5 h-3.5 text-amber-400" />
+            <Play className="w-3.5 h-3.5 text-amber-600" />
             Simulate
           </button>
 
@@ -517,7 +520,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             <button
               onClick={() => void publishWorkflow()}
               disabled={busy}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-bold text-white shadow-lg shadow-emerald-600/20"
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-xs font-bold text-white shadow-xs transition"
             >
               <Rocket className="w-3.5 h-3.5" />
               Publish
@@ -527,40 +530,40 @@ export const WorkflowBuilderPage: React.FC = () => {
       </div>
 
       {/* Main Designer Workspace */}
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-[260px_1fr_340px] gap-4 min-h-0 overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 xl:grid-cols-[280px_1fr_340px] gap-4 min-h-0 overflow-hidden">
         {/* Left Component Palette */}
-        <aside className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 flex flex-col space-y-4 overflow-y-auto">
+        <aside className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs flex flex-col space-y-5 overflow-y-auto">
           <div>
-            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-400">Workflow Metadata</h2>
-            <div className="mt-2 space-y-2">
+            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-500">Workflow Metadata</h2>
+            <div className="mt-3 space-y-3">
               <div>
-                <label className="text-[10px] text-slate-400">Workflow Name</label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Workflow Name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={selectedDefinition?.status !== 'DRAFT'}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white disabled:opacity-60"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-[10px] text-slate-400">Code</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Code</label>
                   <input
                     type="text"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs font-mono text-white disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-mono font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-400">Module</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Module</label>
                   <select
                     value={module}
                     onChange={(e) => setModule(e.target.value as WorkflowModule)}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   >
                     {MODULES.map((m) => (
                       <option key={m} value={m}>
@@ -573,29 +576,31 @@ export const WorkflowBuilderPage: React.FC = () => {
             </div>
           </div>
 
-          <hr className="border-slate-800" />
+          <hr className="border-slate-100" />
 
           {/* Node Palette */}
           <div>
-            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-400 mb-2">Add Approval Stage</h2>
-            <p className="text-[11px] text-slate-500 mb-3">Click or add a stage to insert into the sequential approval pipeline.</p>
+            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-1">Add Approval Stage</h2>
+            <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+              Click or select a stage to insert into the sequential approval pipeline.
+            </p>
             <div className="space-y-2">
               {APPROVER_TYPES.map(({ type, label, icon: Icon, desc }) => (
                 <button
                   key={type}
                   onClick={() => addStep(type)}
                   disabled={selectedDefinition?.status !== 'DRAFT'}
-                  className="w-full text-left p-2.5 bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-brand-500/50 rounded-xl transition-all group flex items-start gap-2.5 disabled:opacity-50"
+                  className="w-full text-left p-3 bg-white hover:bg-slate-50 border border-slate-200/90 hover:border-brand-300 rounded-xl transition-all shadow-2xs group flex items-start gap-3 disabled:opacity-50"
                 >
-                  <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 group-hover:border-brand-500/30 text-brand-400">
+                  <div className="p-2 rounded-xl bg-brand-50 border border-brand-100 group-hover:border-brand-200 text-brand-600 shrink-0 transition">
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-slate-200 group-hover:text-brand-300 flex items-center justify-between">
+                    <div className="text-xs font-bold text-slate-800 group-hover:text-brand-700 flex items-center justify-between">
                       {label}
-                      <Plus className="w-3 h-3 text-slate-500 group-hover:text-brand-400" />
+                      <Plus className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand-600 transition" />
                     </div>
-                    <p className="text-[10px] text-slate-400 truncate mt-0.5">{desc}</p>
+                    <p className="text-[11px] text-slate-500 truncate mt-0.5">{desc}</p>
                   </div>
                 </button>
               ))}
@@ -604,20 +609,20 @@ export const WorkflowBuilderPage: React.FC = () => {
         </aside>
 
         {/* Center Canvas Area */}
-        <main className="bg-slate-950 border border-slate-800/80 rounded-2xl relative flex flex-col overflow-hidden select-none">
+        <main className="bg-slate-50/70 border border-slate-200/90 rounded-2xl relative flex flex-col overflow-hidden select-none shadow-xs">
           {/* Canvas Floating Controls */}
-          <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-slate-900/90 backdrop-blur border border-slate-800 rounded-xl p-1 shadow-xl">
+          <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 bg-white/95 backdrop-blur border border-slate-200 rounded-xl p-1 shadow-md">
             <button
               onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition"
               title="Zoom In"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
-            <span className="text-[10px] font-mono text-slate-400 px-1">{Math.round(zoom * 100)}%</span>
+            <span className="text-xs font-mono font-semibold text-slate-700 px-1.5">{Math.round(zoom * 100)}%</span>
             <button
               onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition"
               title="Zoom Out"
             >
               <ZoomOut className="w-4 h-4" />
@@ -627,7 +632,7 @@ export const WorkflowBuilderPage: React.FC = () => {
                 setZoom(1);
                 autoArrange(nodes);
               }}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300"
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition"
               title="Reset View & Auto-Arrange"
             >
               <Maximize2 className="w-4 h-4" />
@@ -638,8 +643,9 @@ export const WorkflowBuilderPage: React.FC = () => {
           <div
             className="flex-1 overflow-auto relative p-12 flex items-center min-w-full"
             style={{
-              backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)',
+              backgroundImage: 'radial-gradient(#cbd5e1 1.2px, transparent 1.2px)',
               backgroundSize: '24px 24px',
+              backgroundColor: '#f8fafc',
             }}
           >
             <div
@@ -657,25 +663,25 @@ export const WorkflowBuilderPage: React.FC = () => {
                     {/* Node Card */}
                     <div
                       onClick={() => setSelectedNodeId(node.id)}
-                      className={`relative w-64 p-4 rounded-2xl border transition-all cursor-pointer shadow-xl ${
+                      className={`relative w-72 min-h-[160px] p-5 rounded-2xl border transition-all cursor-pointer shadow-xs hover:shadow-md ${
                         isSelected
-                          ? 'bg-slate-900 border-brand-500 shadow-brand-500/10 ring-2 ring-brand-500/20'
+                          ? 'bg-white border-2 border-brand-500 shadow-brand-500/10 ring-4 ring-brand-500/10'
                           : isTrigger
-                          ? 'bg-slate-900/90 border-slate-700/80 hover:border-slate-600'
+                          ? 'bg-white border border-indigo-200/90 hover:border-indigo-400'
                           : isTerminal
-                          ? 'bg-slate-900/90 border-emerald-500/40 hover:border-emerald-500/60'
-                          : 'bg-slate-900/95 border-slate-800 hover:border-slate-700'
+                          ? 'bg-white border border-emerald-200/90 hover:border-emerald-400'
+                          : 'bg-white border border-slate-200/90 hover:border-brand-300'
                       }`}
                     >
                       {/* Top Header */}
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <span
-                          className={`text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-md ${
+                          className={`text-[10px] font-bold tracking-wider uppercase px-2.5 py-0.5 rounded-md border ${
                             isTrigger
-                              ? 'bg-indigo-500/20 text-indigo-300'
+                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                               : isTerminal
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : 'bg-brand-500/20 text-brand-300'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-brand-50 text-brand-700 border-brand-200'
                           }`}
                         >
                           {isTrigger ? 'Trigger' : isTerminal ? 'Terminal' : `Stage ${node.data.sequence || index}`}
@@ -688,7 +694,7 @@ export const WorkflowBuilderPage: React.FC = () => {
                                 e.stopPropagation();
                                 moveStep(node.id, 'LEFT');
                               }}
-                              className="text-slate-400 hover:text-white p-1 text-[10px]"
+                              className="text-slate-400 hover:text-slate-800 p-1 text-[11px]"
                               title="Move Earlier"
                             >
                               ◀
@@ -698,7 +704,7 @@ export const WorkflowBuilderPage: React.FC = () => {
                                 e.stopPropagation();
                                 moveStep(node.id, 'RIGHT');
                               }}
-                              className="text-slate-400 hover:text-white p-1 text-[10px]"
+                              className="text-slate-400 hover:text-slate-800 p-1 text-[11px]"
                               title="Move Later"
                             >
                               ▶
@@ -708,7 +714,7 @@ export const WorkflowBuilderPage: React.FC = () => {
                                 e.stopPropagation();
                                 removeStep(node.id);
                               }}
-                              className="text-rose-400 hover:text-rose-300 p-1"
+                              className="text-rose-500 hover:text-rose-700 p-1"
                               title="Delete Step"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -718,29 +724,33 @@ export const WorkflowBuilderPage: React.FC = () => {
                       </div>
 
                       {/* Title */}
-                      <h3 className="text-sm font-bold text-white tracking-tight truncate">{node.data.label}</h3>
+                      <h3 className="text-sm font-bold text-slate-900 tracking-tight leading-snug line-clamp-2 mt-1">
+                        {node.data.label}
+                      </h3>
 
                       {/* Body Attributes */}
                       {isApproval && (
-                        <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5 text-[11px] text-slate-300">
+                        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 text-xs">
                           <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Approver:</span>
-                            <span className="font-medium text-slate-200 truncate max-w-[140px]">
+                            <span className="text-slate-500 font-medium">Approver:</span>
+                            <span className="font-semibold text-slate-800 truncate max-w-[150px]">
                               {node.data.approverType === 'ROLE'
                                 ? `Role: ${node.data.approverReference || 'Unspecified'}`
-                                : node.data.approverType}
+                                : node.data.approverType
+                                ? node.data.approverType.replace('_', ' ')
+                                : 'Unassigned'}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-slate-500">SLA:</span>
-                            <span className="font-medium text-amber-300 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
+                            <span className="text-slate-500 font-medium">SLA:</span>
+                            <span className="font-semibold text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md text-[11px] inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600" />
                               {node.data.slaHours ? `${node.data.slaHours} hours` : 'No SLA'}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Approvals:</span>
-                            <span className="font-medium text-slate-300">
+                            <span className="text-slate-500 font-medium">Requirement:</span>
+                            <span className="font-semibold text-slate-700 text-[11px]">
                               {node.data.minimumApprovals || 1} required
                             </span>
                           </div>
@@ -748,23 +758,27 @@ export const WorkflowBuilderPage: React.FC = () => {
                       )}
 
                       {isTrigger && (
-                        <p className="text-[11px] text-slate-400 mt-2">
-                          Initiated when an employee submits a <span className="text-brand-300 font-mono">{module}</span> request.
-                        </p>
+                        <div className="mt-3 pt-3 border-t border-indigo-100/60">
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            Initiated when an employee submits a <span className="font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">{module}</span> request.
+                          </p>
+                        </div>
                       )}
 
                       {isTerminal && (
-                        <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-                          <CheckCircle2 className="w-4 h-4" />
-                          Request Approved & State Executed
+                        <div className="mt-3 pt-3 border-t border-emerald-100/60 flex items-center gap-2 text-xs font-semibold text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/60">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>Request Approved & State Executed</span>
                         </div>
                       )}
                     </div>
 
                     {/* Connector Arrow */}
                     {index < nodes.length - 1 && (
-                      <div className="flex items-center justify-center text-slate-600 animate-pulse">
-                        <ArrowRight className="w-6 h-6 text-brand-500/70" />
+                      <div className="flex items-center justify-center px-1">
+                        <div className="p-2 rounded-full bg-white border border-slate-200/90 shadow-2xs text-brand-600">
+                          <ArrowRight className="w-4 h-4" />
+                        </div>
                       </div>
                     )}
                   </React.Fragment>
@@ -775,36 +789,36 @@ export const WorkflowBuilderPage: React.FC = () => {
         </main>
 
         {/* Right Step Inspector Sidebar */}
-        <aside className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 flex flex-col space-y-4 overflow-y-auto">
+        <aside className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs flex flex-col space-y-4 overflow-y-auto">
           <div>
-            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-400">Step Inspector</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <h2 className="text-xs font-bold tracking-wider uppercase text-slate-500">Step Inspector</h2>
+            <p className="text-xs text-slate-500 mt-1 leading-normal">
               {selectedNode ? `Configuring: ${selectedNode.data.label}` : 'Select a node on the canvas to configure properties.'}
             </p>
           </div>
 
-          <hr className="border-slate-800" />
+          <hr className="border-slate-100" />
 
           {selectedNode && selectedNode.type === 'APPROVAL_STEP' ? (
             <div className="space-y-4">
               <div>
-                <label className="text-[10px] text-slate-400 font-medium">Step Label</label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Step Label</label>
                 <input
                   type="text"
                   value={selectedNode.data.label}
                   disabled={selectedDefinition?.status !== 'DRAFT'}
                   onChange={(e) => updateSelectedNode('label', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 disabled:opacity-60"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] text-slate-400 font-medium">Approver Routing Type</label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Approver Routing Type</label>
                 <select
                   value={selectedNode.data.approverType}
                   disabled={selectedDefinition?.status !== 'DRAFT'}
                   onChange={(e) => updateSelectedNode('approverType', e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 disabled:opacity-60"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                 >
                   <option value="REPORTING_MANAGER">Reporting Manager</option>
                   <option value="DEPARTMENT_HEAD">Department Head</option>
@@ -816,35 +830,35 @@ export const WorkflowBuilderPage: React.FC = () => {
 
               {selectedNode.data.approverType === 'ROLE' && (
                 <div>
-                  <label className="text-[10px] text-slate-400 font-medium">System Role Code</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">System Role Code</label>
                   <input
                     type="text"
                     value={selectedNode.data.approverReference || ''}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
                     onChange={(e) => updateSelectedNode('approverReference', e.target.value)}
                     placeholder="e.g. HR_MANAGER, COMPANY_ADMIN"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 font-mono disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   />
                 </div>
               )}
 
               {selectedNode.data.approverType === 'USER' && (
                 <div>
-                  <label className="text-[10px] text-slate-400 font-medium">User UUID</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">User UUID</label>
                   <input
                     type="text"
                     value={selectedNode.data.approverReference || ''}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
                     onChange={(e) => updateSelectedNode('approverReference', e.target.value)}
                     placeholder="User ID UUID"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 font-mono disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   />
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] text-slate-400 font-medium">Min Approvals</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">Min Approvals</label>
                   <input
                     type="number"
                     min="1"
@@ -852,11 +866,11 @@ export const WorkflowBuilderPage: React.FC = () => {
                     value={selectedNode.data.minimumApprovals || 1}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
                     onChange={(e) => updateSelectedNode('minimumApprovals', Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-400 font-medium">SLA (Hours)</label>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">SLA (Hours)</label>
                   <input
                     type="number"
                     min="1"
@@ -864,7 +878,7 @@ export const WorkflowBuilderPage: React.FC = () => {
                     value={selectedNode.data.slaHours || 24}
                     disabled={selectedDefinition?.status !== 'DRAFT'}
                     onChange={(e) => updateSelectedNode('slaHours', Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1 disabled:opacity-60"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 shadow-2xs focus:bg-white focus:border-brand-500 disabled:opacity-60 transition"
                   />
                 </div>
               </div>
@@ -876,30 +890,40 @@ export const WorkflowBuilderPage: React.FC = () => {
                   checked={selectedNode.data.allowDelegation ?? true}
                   disabled={selectedDefinition?.status !== 'DRAFT'}
                   onChange={(e) => updateSelectedNode('allowDelegation', e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-950 text-brand-500 focus:ring-brand-500"
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 h-4 w-4"
                 />
-                <label htmlFor="allowDelegation" className="text-xs text-slate-300 font-medium cursor-pointer">
+                <label htmlFor="allowDelegation" className="text-xs text-slate-700 font-semibold cursor-pointer">
                   Allow Out-of-Office Delegation
                 </label>
               </div>
             </div>
           ) : selectedNode?.type === 'TRIGGER' ? (
-            <div className="space-y-3 text-xs text-slate-300">
-              <p>The Trigger initiates this workflow whenever an event for module <strong className="text-brand-300">{module}</strong> is submitted by an authorized employee.</p>
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400">
-                Incoming triggers automatically seed Step 1 as <span className="text-amber-300 font-mono">PENDING</span> and notify eligible approvers.
+            <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
+              <p>
+                The Trigger initiates this workflow whenever an event for module <strong className="text-indigo-700 font-bold">{module}</strong> is submitted by an authorized employee.
+              </p>
+              <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
+                Incoming triggers automatically seed Stage 1 as <span className="font-semibold text-amber-800">PENDING</span> and dispatch notifications to designated approvers.
               </div>
             </div>
           ) : selectedNode?.type === 'TERMINAL' ? (
-            <div className="space-y-3 text-xs text-slate-300">
-              <p>When all sequential approval stages conclude successfully, the workflow transitions to <strong className="text-emerald-300">APPROVED</strong>.</p>
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-400">
+            <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
+              <p>
+                When all sequential approval stages conclude successfully, the workflow transitions to <strong className="text-emerald-700 font-bold">APPROVED</strong>.
+              </p>
+              <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
                 The originating subject (Leave, Expense, Service Request, Regularization) is atomically updated and side-effects are committed.
               </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-slate-500 text-xs">
-              Click on any node in the canvas to inspect its parameters.
+            <div className="text-center py-12 px-3 text-slate-500 text-xs flex flex-col items-center justify-center">
+              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 text-slate-400 mb-2.5 shadow-2xs">
+                <Sliders className="w-6 h-6" />
+              </div>
+              <p className="font-semibold text-slate-700 text-sm">No node selected</p>
+              <p className="text-slate-400 text-xs mt-1 max-w-[200px]">
+                Select any stage or node on the canvas to configure its approvers and SLA rules.
+              </p>
             </div>
           )}
         </aside>
