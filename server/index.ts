@@ -84,8 +84,14 @@ const employeeToClient = (employee: any) => ({
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/v1', createV1Router(prisma));
-app.get('/downloads/orbithr-android.apk', (_req, res) => {
-  res.download(path.resolve('public/downloads/OrbitHR.apk'), 'OrbitHR.apk');
+app.get(['/downloads/OrbitHR.apk', '/downloads/orbithr-android.apk'], (_req, res) => {
+  const apkPath = path.resolve('public/downloads/OrbitHR.apk');
+  if (!existsSync(apkPath)) {
+    return res.status(404).json({ error: 'Android APK package not found on server.' });
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.download(apkPath, 'OrbitHR.apk');
 });
 
 // Healthcheck
@@ -399,10 +405,26 @@ app.post('/api/employees', async (req, res) => {
   }
 });
 
-app.delete('/api/employees/:id', async (req, res) => {
+app.delete('/api/employees/:id', requireAttendanceAdmin, async (req: AttendanceAdminRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
+    const companyId = req.attendanceAdmin?.companyId;
+    if (!companyId) return res.status(401).json({ error: 'Valid company administrator session is required.' });
+    const employee = await prisma.employee.findFirst({ where: { id, companyId } });
+    if (!employee) return res.status(404).json({ error: 'Employee was not found in your company.' });
+    if (employee.userId === req.attendanceAdmin?.id) {
+      return res.status(409).json({ error: 'You cannot delete your own employee profile.' });
+    }
+    const hasHistory = (await prisma.attendanceRecord.count({ where: { employeeId: id } })) > 0 ||
+                       (await prisma.leaveRequest.count({ where: { employeeId: id } })) > 0 ||
+                       (await prisma.payslip.count({ where: { employeeId: id } })) > 0;
+    if (hasHistory) {
+      return res.status(409).json({ error: 'This employee has operational history. Mark them resigned or terminated instead.' });
+    }
     await prisma.employee.delete({ where: { id } });
+    if (employee.userId) {
+      await prisma.user.delete({ where: { id: employee.userId } }).catch(() => {});
+    }
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

@@ -17,7 +17,17 @@ import kotlinx.serialization.Serializable
 @Serializable data class DesignationDto(val id: String, val title: String, val departmentId: String)
 @Serializable data class EmployeeDto(val id: String, val employeeCode: String, val firstName: String, val lastName: String, val email: String, val phone: String? = null, val avatarUrl: String? = null, val status: String, val workLocation: String? = null, val workdayGpsTrackingEnabled:Boolean=false,val departmentId:String?=null,val designationId:String?=null,val reportingManagerId:String?=null,val dateOfJoining:String?=null,val employmentType:String="FULL_TIME",val department: DepartmentDto? = null, val designation: DesignationDto? = null)
 @Serializable data class MeDto(val user: UserDto, val company: CompanyDto, val employee: EmployeeDto? = null)
-@Serializable data class AndroidReleaseDto(val versionCode: Int, val versionName: String, val downloadUrl: String, val releaseNotes: String, val publishedAt: String)
+@Serializable data class AndroidReleaseDto(
+    val versionCode: Int,
+    val versionName: String,
+    val downloadUrl: String,
+    val releaseNotes: String,
+    val publishedAt: String,
+    val sha256: String? = null,
+    val fileSizeBytes: Long? = null,
+    val minSupportedVersionCode: Int? = null,
+    val mandatory: Boolean = false
+)
 @Serializable data class AnnouncementDto(val id: String, val title: String, val content: String, val priority: String, val createdAt: String)
 @Serializable data class HolidayDto(val id: String, val name: String, val date: String, val type: String)
 @Serializable data class DashboardDto(val activeEmployees: Int, val presentToday: Int, val pendingLeaves: Int, val announcements: List<AnnouncementDto>, val holidays: List<HolidayDto>)

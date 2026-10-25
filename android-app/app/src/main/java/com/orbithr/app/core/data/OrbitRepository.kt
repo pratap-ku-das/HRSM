@@ -219,6 +219,84 @@ import dagger.hilt.android.qualifiers.ApplicationContext
         val uri=FileProvider.getUriForFile(context,"${context.packageName}.files",file)
         return OpenedDocument(uri.toString(),body.contentType()?.toString()?:"application/octet-stream",safeName)
     }
+
+    suspend fun downloadAndVerifyApk(release: AndroidReleaseDto, onProgress: (Float) -> Unit = {}): File = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val folder = File(context.cacheDir, "updates").apply { mkdirs() }
+        val targetFile = File(folder, "OrbitHR-${release.versionName}.apk")
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val request = okhttp3.Request.Builder()
+            .url(release.downloadUrl)
+            .header("User-Agent", "OrbitHR-Android/${com.orbithr.app.BuildConfig.VERSION_NAME}")
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) throw java.io.IOException("Failed to download APK: HTTP ${response.code}")
+        val body = response.body ?: throw java.io.IOException("Empty response body from update server")
+        val totalBytes = body.contentLength()
+        var downloadedBytes = 0L
+
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val tempFile = File(folder, "download-${System.currentTimeMillis()}.tmp")
+
+        body.byteStream().use { input ->
+            tempFile.outputStream().use { output ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    output.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    downloadedBytes += read
+                    if (totalBytes > 0) {
+                        onProgress(downloadedBytes.toFloat() / totalBytes.toFloat())
+                    }
+                }
+                output.flush()
+            }
+        }
+
+        val computedHash = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!release.sha256.isNullOrBlank() && !computedHash.equals(release.sha256.trim(), ignoreCase = true)) {
+            tempFile.delete()
+            throw SecurityException("Downloaded APK hash ($computedHash) does not match expected hash (${release.sha256})")
+        }
+
+        if (targetFile.exists()) targetFile.delete()
+        if (!tempFile.renameTo(targetFile)) {
+            tempFile.copyTo(targetFile, overwrite = true)
+            tempFile.delete()
+        }
+        targetFile
+    }
+
+    fun canInstallPackages(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    fun openInstallPermissionSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                data = android.net.Uri.parse("package:${context.packageName}")
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    fun installApk(apkFile: File) {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", apkFile)
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
 }
 
 fun Throwable.userMessage(): String = when (this) {

@@ -3,12 +3,18 @@ import { PrismaClient } from "@prisma/client";
 import { normalizeDatabaseUrl } from "../../../databaseUrl.js";
 import { runComplianceReminders } from "../../reminders.js";
 
-describe("PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-Closed)", () => {
-  const rawUrl = process.env.DATABASE_URL;
-  const databaseUrl = rawUrl ? normalizeDatabaseUrl(rawUrl) : undefined;
+const runLivePostgresConcurrency =
+  process.env.RUN_LIVE_POSTGRES_TESTS === "true" ||
+  process.env.STAGING_VERIFICATION === "true";
 
-  let prisma1: PrismaClient | null = null;
-  let prisma2: PrismaClient | null = null;
+describe.skipIf(!runLivePostgresConcurrency)(
+  "PostgreSQL Real Multi-Connection Concurrency Integration Suite (Fail-Closed)",
+  () => {
+    const rawUrl = process.env.DATABASE_URL;
+    const databaseUrl = rawUrl ? normalizeDatabaseUrl(rawUrl) : undefined;
+
+    let prisma1: PrismaClient | null = null;
+    let prisma2: PrismaClient | null = null;
 
   const createdCompanyIds = new Set<string>();
 

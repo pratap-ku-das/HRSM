@@ -35,6 +35,8 @@ import com.orbithr.app.core.model.AttendanceVerificationResult
 import com.orbithr.app.core.model.MeDto
 import com.orbithr.app.core.model.AndroidReleaseDto
 
+import com.orbithr.app.UpdateState
+
 @Composable
 fun RootApp(
     state: SessionState,
@@ -51,17 +53,41 @@ fun RootApp(
     clearRecoveryMessage:()->Unit,
     notificationRoute:String? = null,
     notificationRouteConsumed:()->Unit = {},
+    updateState: UpdateState = UpdateState.Idle,
+    onDownloadUpdate: (AndroidReleaseDto) -> Unit = {},
+    onInstallUpdate: (java.io.File) -> Unit = {},
 ) {
     when (state) {
         SessionState.Loading -> OrbitSplash()
         SessionState.SignedOut -> LoginScreen(error, login, recoveryMessage, forgotPassword, activateAccount, resetPassword, clearRecoveryMessage)
         is SessionState.SignedIn -> SignedInApp(state.me, logout, verifyAttendance, notificationRoute, notificationRouteConsumed)
     }
-    availableUpdate?.let { release -> UpdateAvailableDialog(release, dismissUpdate) }
+
+    val activeRelease = (updateState as? UpdateState.Available)?.release
+        ?: (updateState as? UpdateState.Downloading)?.release
+        ?: (updateState as? UpdateState.ReadyToInstall)?.release
+        ?: (updateState as? UpdateState.Error)?.release
+        ?: availableUpdate
+
+    activeRelease?.let { release ->
+        UpdateAvailableDialog(
+            release = release,
+            updateState = updateState,
+            dismiss = dismissUpdate,
+            onDownload = { onDownloadUpdate(release) },
+            onInstall = { (updateState as? UpdateState.ReadyToInstall)?.apkFile?.let(onInstallUpdate) }
+        )
+    }
 }
 
 @Composable
-private fun UpdateAvailableDialog(release: AndroidReleaseDto, dismiss: () -> Unit) {
+private fun UpdateAvailableDialog(
+    release: AndroidReleaseDto,
+    updateState: UpdateState,
+    dismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+) {
     val uriHandler = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = dismiss,
@@ -70,17 +96,67 @@ private fun UpdateAvailableDialog(release: AndroidReleaseDto, dismiss: () -> Uni
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(release.releaseNotes, color = OrbitInk)
-                Text("Update now opens the secure OrbitHR APK. Android will ask you to confirm installation.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+                when (updateState) {
+                    is UpdateState.Downloading -> {
+                        val pct = (updateState.progress * 100).toInt()
+                        Text("Downloading package... ($pct%)", style = MaterialTheme.typography.bodySmall, color = OrbitViolet)
+                        LinearProgressIndicator(
+                            progress = { if (updateState.progress > 0) updateState.progress else 0f },
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                        )
+                    }
+                    is UpdateState.ReadyToInstall -> {
+                        Text("Download complete and verified. Ready to install.", style = MaterialTheme.typography.bodySmall, color = OrbitMint)
+                    }
+                    is UpdateState.Error -> {
+                        Text("Download failed: ${updateState.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    else -> {
+                        Text("Update now downloads and installs the verified OrbitHR APK.", style = MaterialTheme.typography.bodySmall, color = OrbitMuted)
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { uriHandler.openUri(release.downloadUrl) }) {
-                Icon(Icons.Outlined.Download, null)
-                Spacer(Modifier.width(7.dp))
-                Text("Update now")
+            when (updateState) {
+                is UpdateState.Downloading -> {
+                    Button(onClick = {}, enabled = false) {
+                        Text("Downloading…")
+                    }
+                }
+                is UpdateState.ReadyToInstall -> {
+                    Button(onClick = onInstall) {
+                        Icon(Icons.Outlined.SystemUpdate, null)
+                        Spacer(Modifier.width(7.dp))
+                        Text("Install now")
+                    }
+                }
+                is UpdateState.Error -> {
+                    Button(onClick = onDownload) {
+                        Icon(Icons.Outlined.Refresh, null)
+                        Spacer(Modifier.width(7.dp))
+                        Text("Retry download")
+                    }
+                }
+                else -> {
+                    Button(onClick = onDownload) {
+                        Icon(Icons.Outlined.Download, null)
+                        Spacer(Modifier.width(7.dp))
+                        Text("Download & Install")
+                    }
+                }
             }
         },
-        dismissButton = { TextButton(onClick = dismiss) { Text("Later") } },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { uriHandler.openUri(release.downloadUrl) }) {
+                    Text("Browser link", style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = dismiss) {
+                    Text("Later")
+                }
+            }
+        },
         shape = RoundedCornerShape(28.dp),
     )
 }

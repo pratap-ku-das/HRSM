@@ -142,13 +142,22 @@ try {
     }
 
     Copy-Item -LiteralPath $releaseApk -Destination $publicApk -Force
-    $hash = (Get-FileHash -LiteralPath $publicApk -Algorithm SHA256).Hash
+    $hash = (Get-FileHash -LiteralPath $publicApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    $fileSize = (Get-Item -LiteralPath $publicApk).Length
     Write-Host "Verified OrbitHR $VersionName ($VersionCode)"
     Write-Host "Signer: BalajiOne Enterprises"
     Write-Host "SHA256: $hash"
+    Write-Host "Size: $fileSize bytes"
+
+    if (Test-Path -LiteralPath $mobileReleaseFile) {
+        $mrContent = [IO.File]::ReadAllText($mobileReleaseFile)
+        $mrContent = [regex]::Replace($mrContent, 'sha256:\s*"[^"]*"', "sha256:`r`n    `"$hash`"")
+        $mrContent = [regex]::Replace($mrContent, 'fileSizeBytes:\s*\d+', "fileSizeBytes: $fileSize")
+        [IO.File]::WriteAllText($mobileReleaseFile, $mrContent, (New-Object Text.UTF8Encoding($false)))
+    }
 
     if (-not $NoCommit) {
-        & git add -- android-app public/downloads/OrbitHR.apk
+        & git add -- android-app public/downloads/OrbitHR.apk server/v1/mobileRelease.ts
         Assert-LastExitCode "Could not stage Android release files."
         & git diff --cached --quiet
         if ($LASTEXITCODE -ne 0) {

@@ -18,6 +18,7 @@
     "db:test": "tsx server/test-db.ts",
     "lint": "oxlint",
     "test": "vitest run",
+    "test:concurrency": "vitest run server/v1/compliance/calendar/reminderPostgresConcurrency.test.ts --env.RUN_LIVE_POSTGRES_TESTS=true",
     "test:watch": "vitest",
     "preview": "vite preview"
   },

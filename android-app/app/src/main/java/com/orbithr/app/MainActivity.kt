@@ -65,6 +65,7 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 val error by vm.error.collectAsState()
                 val availableUpdate by vm.availableUpdate.collectAsState()
+                val updateState by vm.updateState.collectAsState()
                 val recoveryMessage by vm.recoveryMessage.collectAsState()
                 LaunchedEffect(state) {
                     if (state is SessionState.SignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -83,19 +84,35 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
-                RootApp(state, error, vm::login, {
-                    WorkdayTrackingService.stop(this@MainActivity)
-                    if (FirebaseApp.getApps(this@MainActivity).isNotEmpty()) {
-                        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                            lifecycleScope.launch {
-                                if (task.isSuccessful) runCatching { repository.unregisterPushToken(task.result) }
-                                vm.logout()
+                RootApp(
+                    state = state,
+                    error = error,
+                    login = vm::login,
+                    logout = {
+                        WorkdayTrackingService.stop(this@MainActivity)
+                        if (FirebaseApp.getApps(this@MainActivity).isNotEmpty()) {
+                            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                                lifecycleScope.launch {
+                                    if (task.isSuccessful) runCatching { repository.unregisterPushToken(task.result) }
+                                    vm.logout()
+                                }
                             }
-                        }
-                    } else vm.logout()
-                }, ::verifyFaceAndLocation, availableUpdate, vm::dismissUpdate, recoveryMessage, vm::forgotPassword, vm::activateAccount, vm::resetPassword, vm::clearRecoveryMessage, pendingNotificationRoute) {
-                    pendingNotificationRoute = null
-                }
+                        } else vm.logout()
+                    },
+                    verifyAttendance = ::verifyFaceAndLocation,
+                    availableUpdate = availableUpdate,
+                    dismissUpdate = vm::dismissUpdate,
+                    recoveryMessage = recoveryMessage,
+                    forgotPassword = vm::forgotPassword,
+                    activateAccount = vm::activateAccount,
+                    resetPassword = vm::resetPassword,
+                    clearRecoveryMessage = vm::clearRecoveryMessage,
+                    notificationRoute = pendingNotificationRoute,
+                    notificationRouteConsumed = { pendingNotificationRoute = null },
+                    updateState = updateState,
+                    onDownloadUpdate = vm::startUpdateDownload,
+                    onInstallUpdate = vm::installDownloadedUpdate,
+                )
                 if (showLiveCamera) LiveFaceCamera(
                     onVerified = { selfie -> showLiveCamera = false; requestPreciseLocation(selfie) },
                     onFailure = { message -> finishVerification(AttendanceVerificationResult.Failed(message)) },
