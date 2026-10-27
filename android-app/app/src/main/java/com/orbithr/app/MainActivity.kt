@@ -44,6 +44,7 @@ class MainActivity : FragmentActivity() {
     private var showLiveCamera by mutableStateOf(false)
     private var pendingNotificationRoute by mutableStateOf<String?>(null)
     private var pendingNotificationId: String? = null
+    private var mainViewModel: MainViewModel? = null
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
@@ -62,6 +63,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             OrbitTheme {
                 val vm: MainViewModel = hiltViewModel()
+                mainViewModel = vm
                 val state by vm.state.collectAsState()
                 val error by vm.error.collectAsState()
                 val availableUpdate by vm.availableUpdate.collectAsState()
@@ -112,6 +114,7 @@ class MainActivity : FragmentActivity() {
                     updateState = updateState,
                     onDownloadUpdate = vm::startUpdateDownload,
                     onInstallUpdate = vm::installDownloadedUpdate,
+                    onCancelUpdate = vm::cancelUpdateDownload,
                 )
                 if (showLiveCamera) LiveFaceCamera(
                     onVerified = { selfie -> showLiveCamera = false; requestPreciseLocation(selfie) },
@@ -120,6 +123,10 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
     }
 
     override fun onNewIntent(intent: Intent) {

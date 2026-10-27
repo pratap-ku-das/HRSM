@@ -5,6 +5,7 @@ import { Router, type Request, type RequestHandler, type Response } from 'expres
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { encryptMfaSecret, newMfaSecret, verifyMfaCode } from './mfa.js';
+import { getStorageService } from './storage/storageService.js';
 
 type Req = Request & { auth?: { id: string; companyId: string; role: string; employeeId?: string; permissions: string[]; accessScopes?: Array<{ scope: string; scopeEntityId?: string | null; permissions: string[] }> }; requestId?: string };
 
@@ -82,15 +83,24 @@ export function createGovernanceRouter(prisma: PrismaClient, authenticate: Reque
       });
       if (!employee) return fail(res, 403, 'DOCUMENT_FORBIDDEN', 'This document is outside your employee access scope.');
       const [companyId, storageName] = document.objectKey.split('/');
-      if (companyId !== auth.companyId || !storageName || storageName !== path.basename(storageName)) {
+      if (
+        companyId !== auth.companyId ||
+        !storageName ||
+        storageName !== path.basename(storageName) ||
+        document.objectKey.includes('..')
+      ) {
         return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
       }
-      const contents = await readFile(path.join(documentStorageRoot, companyId, storageName));
-      res.setHeader('Content-Type', document.mimeType);
+      const storage = getStorageService();
+      const stored = await storage.getObject(document.objectKey);
+      res.setHeader('Content-Type', document.mimeType || stored.contentType);
       res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
-      return res.send(contents);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return res.send(stored.buffer);
+    } catch (error: any) {
+      if (error?.code === 'STORAGE_KEY_INVALID') {
+        return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
+      }
+      if (error?.code === 'STORAGE_OBJECT_NOT_FOUND' || (error as NodeJS.ErrnoException).code === 'ENOENT') {
         return fail(res, 404, 'DOCUMENT_FILE_NOT_FOUND', 'The stored document file was not found.');
       }
       next(error);

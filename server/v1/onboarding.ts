@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { z } from 'zod';
 import { createOpaqueToken, deliverOnboardingEmail } from './email.js';
+import { getStorageService, assertValidStorageKey } from './storage/storageService.js';
 
 type Req = Request & {
   auth?: { id: string; companyId: string; role: string; permissions: string[] };
@@ -181,17 +182,25 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
         }
         const extension = path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '');
         const storageName = `${crypto.randomUUID()}${extension}`;
-        const companyDirectory = path.join(documentStorageRoot, req.auth!.companyId);
-        await mkdir(companyDirectory, { recursive: true });
-        await writeFile(path.join(companyDirectory, storageName), req.file.buffer, { flag: 'wx' });
+        const objectKey = `${req.auth!.companyId}/${storageName}`;
+        const storage = getStorageService();
+        const stored = await storage.putObject({
+          key: objectKey,
+          buffer: req.file.buffer,
+          contentType: req.file.mimetype,
+          metadata: {
+            originalName: req.file.originalname,
+            companyId: req.auth!.companyId,
+          },
+        });
         const title = path.basename(req.file.originalname, path.extname(req.file.originalname)).trim() || 'Document';
         return ok(res, {
           documentType: 'OTHER',
           title: title.length < 2 ? 'Document' : title.slice(0, 180),
-          objectKey: `${req.auth!.companyId}/${storageName}`,
+          objectKey,
           fileName: req.file.originalname.slice(0, 255),
           mimeType: req.file.mimetype,
-          sizeBytes: req.file.size,
+          sizeBytes: stored.sizeBytes,
         }, 201);
       } catch (error) { next(error); }
     },
@@ -212,15 +221,24 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
         });
         if (!document) return fail(res, 404, 'DOCUMENT_NOT_FOUND', 'Document was not found.');
         const [companyId, storageName] = document.objectKey.split('/');
-        if (companyId !== req.auth!.companyId || !storageName || storageName !== path.basename(storageName)) {
+        if (
+          companyId !== req.auth!.companyId ||
+          !storageName ||
+          storageName !== path.basename(storageName) ||
+          document.objectKey.includes('..')
+        ) {
           return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
         }
-        const contents = await readFile(path.join(documentStorageRoot, companyId, storageName));
-        res.setHeader('Content-Type', document.mimeType);
+        const storage = getStorageService();
+        const stored = await storage.getObject(document.objectKey);
+        res.setHeader('Content-Type', document.mimeType || stored.contentType);
         res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
-        return res.send(contents);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return res.send(stored.buffer);
+      } catch (error: any) {
+        if (error?.code === 'STORAGE_KEY_INVALID') {
+          return fail(res, 400, 'DOCUMENT_KEY_INVALID', 'Document storage reference is invalid.');
+        }
+        if (error?.code === 'STORAGE_OBJECT_NOT_FOUND' || (error as NodeJS.ErrnoException).code === 'ENOENT') {
           return fail(res, 404, 'DOCUMENT_FILE_NOT_FOUND', 'The stored document file was not found.');
         }
         next(error);
@@ -243,6 +261,20 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
       const draft = await prisma.employeeOnboarding.findFirst({ where: { id: String(req.params.id), companyId: req.auth!.companyId, createdEmployeeId: null } });
       if (!draft) return fail(res, 409, 'ONBOARDING_NOT_EDITABLE', 'This onboarding draft cannot be edited.');
       const value = config.schema.parse(req.body);
+      if (section === 'documents') {
+        const docList = (value as { documents: Array<{ objectKey: string; title: string }> }).documents;
+        for (const doc of docList) {
+          try {
+            assertValidStorageKey(doc.objectKey);
+          } catch {
+            return fail(res, 400, 'DOCUMENT_KEY_INVALID', `Document storage key is invalid: "${doc.title || doc.objectKey}".`);
+          }
+          const [keyCompanyId] = doc.objectKey.split('/');
+          if (keyCompanyId !== req.auth!.companyId) {
+            return fail(res, 400, 'DOCUMENT_KEY_INVALID', `Document storage key "${doc.objectKey}" does not belong to your company.`);
+          }
+        }
+      }
       const derived = section === 'additional' ? value as z.infer<typeof additionalSchema> : null;
       return ok(res, await prisma.employeeOnboarding.update({
         where: { id: draft.id },
@@ -283,6 +315,19 @@ export function createOnboardingRouter(prisma: PrismaClient, authenticate: Reque
       const additional = additionalSchema.parse(draft.additionalDetails);
       if (face.required && face.status !== 'REGISTERED') return fail(res, 409, 'FACE_ENROLLMENT_REQUIRED', 'Face registration is mandatory before onboarding can be completed.');
       const companyId = req.auth!.companyId;
+
+      for (const doc of documents) {
+        try {
+          assertValidStorageKey(doc.objectKey);
+        } catch {
+          return fail(res, 400, 'DOCUMENT_KEY_INVALID', `Document storage key is invalid: "${doc.title || doc.objectKey}".`);
+        }
+        const [keyCompanyId] = doc.objectKey.split('/');
+        if (keyCompanyId !== companyId) {
+          return fail(res, 400, 'DOCUMENT_KEY_INVALID', `Document storage key "${doc.objectKey}" does not belong to your company.`);
+        }
+      }
+
       const [department, designation, structure] = await Promise.all([
         prisma.department.findFirst({ where: { id: additional.departmentId, companyId } }),
         prisma.designation.findFirst({ where: { id: additional.designationId, companyId, departmentId: additional.departmentId } }),

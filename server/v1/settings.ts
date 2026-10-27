@@ -5,6 +5,7 @@ import multer from 'multer';
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { getStorageService } from './storage/storageService.js';
 
 type AuthRequest = Request & { auth?: { id: string; companyId: string; role: string; permissions: string[] }; requestId?: string };
 
@@ -213,27 +214,42 @@ export function createSettingsRouter(prisma: PrismaClient, authenticate: Request
         const id = crypto.randomUUID();
         const extension = path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '');
         const storageName = `${id}${extension}`;
-        const dir = path.join(statutoryStorage, companyId);
-        await mkdir(dir, { recursive: true });
-        await writeFile(path.join(dir, storageName), req.file.buffer, { flag: 'wx' });
-
         const objectKey = `${companyId}/${storageName}`;
-        const titleWithTag = `[${body.docType}:PENDING] ${body.title}`;
-        const item = await prisma.companyDocument.create({
-          data: {
-            id,
+        const storage = getStorageService();
+
+        const stored = await storage.putObject({
+          key: objectKey,
+          buffer: req.file.buffer,
+          contentType: req.file.mimetype,
+          metadata: {
+            originalName: req.file.originalname,
             companyId,
-            title: titleWithTag,
-            category: 'STATUTORY',
-            fileSize: `${req.file.size}`,
-            fileType: req.file.mimetype,
-            downloadUrl: `/api/v1/operations/company-documents/${id}/file`,
-            objectKey,
-            fileName: req.file.originalname.slice(0, 255),
-            mimeType: req.file.mimetype,
-            sizeBytes: req.file.size,
+            docType: body.docType,
           },
         });
+
+        const titleWithTag = `[${body.docType}:PENDING] ${body.title}`;
+        let item;
+        try {
+          item = await prisma.companyDocument.create({
+            data: {
+              id,
+              companyId,
+              title: titleWithTag,
+              category: 'STATUTORY',
+              fileSize: `${stored.sizeBytes}`,
+              fileType: req.file.mimetype,
+              downloadUrl: `/api/v1/operations/company-documents/${id}/file`,
+              objectKey,
+              fileName: req.file.originalname.slice(0, 255),
+              mimeType: req.file.mimetype,
+              sizeBytes: stored.sizeBytes,
+            },
+          });
+        } catch (dbError) {
+          await storage.deleteObject(objectKey).catch(() => {});
+          throw dbError;
+        }
 
         await prisma.auditLog.create({
           data: {

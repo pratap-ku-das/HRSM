@@ -17,6 +17,7 @@ import {
   MAX_RECEIPT_SIZE_BYTES,
   RECEIPT_STORAGE_ROOT,
 } from "./expensePolicyEngine.js";
+import { getStorageService, assertValidStorageKey } from "./storage/storageService.js";
 import {
   createOpaqueToken,
   deliverOnboardingEmail,
@@ -399,6 +400,70 @@ export function createV1Router(prisma: PrismaClient) {
     next();
   });
   router.use(createMobileReleaseRouter());
+
+  router.get("/storage/download", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const key = String(req.query.key || "").trim();
+      const expires = String(req.query.expires || "").trim();
+      const sig = String(req.query.sig || "").trim();
+      const fileName = req.query.fileName ? String(req.query.fileName).trim() : undefined;
+      const contentType = req.query.contentType ? String(req.query.contentType).trim() : undefined;
+
+      if (!key || !expires || !sig) {
+        return res.status(400).json({
+          error: { code: "PRESIGNED_URL_INVALID", message: "Missing required presigned URL parameters." },
+        });
+      }
+
+      try {
+        assertValidStorageKey(key);
+      } catch (err: any) {
+        return res.status(400).json({
+          error: { code: "STORAGE_KEY_INVALID", message: err?.message || "Storage key is invalid." },
+        });
+      }
+
+      const expiresNum = Number.parseInt(expires, 10);
+      const now = Math.floor(Date.now() / 1000);
+      if (!Number.isFinite(expiresNum) || expiresNum <= now) {
+        return res.status(403).json({
+          error: { code: "PRESIGNED_URL_EXPIRED", message: "Presigned download URL has expired." },
+        });
+      }
+
+      const secret = process.env.JWT_ACCESS_SECRET || "local-presign-secret";
+      const expectedSig = crypto
+        .createHmac("sha256", secret)
+        .update(`${key}:${expires}`)
+        .digest("hex");
+
+      const sigBuffer = Buffer.from(sig, "hex");
+      const expectedBuffer = Buffer.from(expectedSig, "hex");
+
+      if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+        return res.status(403).json({
+          error: { code: "PRESIGNED_URL_SIGNATURE_INVALID", message: "Signature is invalid." },
+        });
+      }
+
+      const storage = getStorageService();
+      const stored = await storage.getObject(key);
+
+      res.setHeader("Content-Type", contentType || stored.contentType || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename*=UTF-8''${encodeURIComponent(fileName || path.basename(key))}`
+      );
+      return res.send(stored.buffer);
+    } catch (err: any) {
+      if (err?.code === "STORAGE_OBJECT_NOT_FOUND" || (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return res.status(404).json({
+          error: { code: "DOCUMENT_FILE_NOT_FOUND", message: "The requested document file was not found." },
+        });
+      }
+      next(err);
+    }
+  });
   const deleteEmployeeSafely=async(req:AuthedRequest)=>{
     const companyId=req.auth!.companyId,e=await prisma.employee.findFirst({where:{id:String(req.params.id),companyId}});
     if(!e)throw Object.assign(new Error("Employee was not found."),{status:404,code:"EMPLOYEE_NOT_FOUND"});
@@ -2048,6 +2113,7 @@ export function createV1Router(prisma: PrismaClient) {
     receiptUpload.single("receipt"),
     async (req: AuthedRequest, res, next) => {
       let uploadedFilePath: string | null = null;
+      let uploadedObjectKey: string | null = null;
       try {
         const body = z
           .object({
@@ -2134,13 +2200,18 @@ export function createV1Router(prisma: PrismaClient) {
           }
           docId = crypto.randomUUID();
           storageName = `${docId}${ext}`;
-          const companyReceiptDir = path.join(
-            RECEIPT_STORAGE_ROOT,
-            req.auth!.companyId,
-          );
-          await mkdir(companyReceiptDir, { recursive: true });
-          uploadedFilePath = path.join(companyReceiptDir, storageName);
-          await writeFile(uploadedFilePath, req.file.buffer, { flag: "wx" });
+          const objectKey = `${req.auth!.companyId}/${storageName}`;
+          uploadedObjectKey = objectKey;
+          const storage = getStorageService();
+          await storage.putObject({
+            key: objectKey,
+            buffer: req.file.buffer,
+            contentType: req.file.mimetype,
+            metadata: {
+              originalName: req.file.originalname,
+              companyId: req.auth!.companyId,
+            },
+          });
         }
 
         const result = await prisma.$transaction(async (tx) => {
@@ -2241,6 +2312,10 @@ export function createV1Router(prisma: PrismaClient) {
           201,
         );
       } catch (e) {
+        if (uploadedObjectKey) {
+          const storage = getStorageService();
+          await storage.deleteObject(uploadedObjectKey).catch(() => {});
+        }
         if (uploadedFilePath) {
           await unlink(uploadedFilePath).catch(() => {});
         }

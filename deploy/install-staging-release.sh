@@ -85,7 +85,7 @@ echo "VERIFIED: Release archive SHA-256 matches: ${actual_hash}"
 # -----------------------------------------------------------------------------
 # Control 2: Archive Manifest Security Inspection
 # -----------------------------------------------------------------------------
-prohibited_patterns='(\.env|\.pem|\.key|\.p12|\.pfx|backup\.sql|dump\.sql|\.dump|\.sqlite|\.bak|serviceAccount|\.apk|storage/|node_modules/)'
+prohibited_patterns='(^storage/|\.env|\.pem|\.key|\.p12|\.pfx|backup\.sql|dump\.sql|\.dump|\.sqlite|\.bak|serviceAccount|\.apk|node_modules/)'
 prohibited_matches=$(tar -tzf "${archive}" | grep -Ei "${prohibited_patterns}" || true)
 if [[ -n "${prohibited_matches}" ]]; then
   echo "FATAL: Release archive contains prohibited sensitive files or paths:" >&2

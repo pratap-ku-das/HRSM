@@ -1000,5 +1000,154 @@ describe('OrbitHR Deep Tenant Isolation Audit Across Modules', () => {
       expect(createdNotifications[1].eventKey).toBe('STATUTORY_DEADLINE_UNASSIGNED_OVERDUE');
     });
   });
+
+  // --------------------------------------------------------------------------
+  // SECTION H: Onboarding Document Tenant Ownership & Key Validation (SEC-P2-004)
+  // --------------------------------------------------------------------------
+  describe('H. Onboarding Document Tenant Ownership & Key Validation (SEC-P2-004)', () => {
+    it('rejects saving onboarding documents with cross-tenant objectKey', async () => {
+      const prisma = buildPrismaBase(userA, {
+        employeeOnboarding: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'onb-draft-1',
+            companyId: 'tenant-a',
+            progress: 17,
+            createdEmployeeId: null,
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      });
+
+      const app = createTestApp(prisma);
+      const res = await request(app)
+        .put('/api/v1/employees/onboarding/onb-draft-1/documents')
+        .set('Authorization', `Bearer ${signToken(userA)}`)
+        .send({
+          documents: [
+            {
+              documentType: 'PASSPORT',
+              title: 'Passport Copy',
+              objectKey: 'tenant-b/confidential-passport.pdf',
+              fileName: 'passport.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 1024,
+            },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('DOCUMENT_KEY_INVALID');
+      expect(prisma.employeeOnboarding.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects saving onboarding documents with path traversal objectKey', async () => {
+      const prisma = buildPrismaBase(userA, {
+        employeeOnboarding: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'onb-draft-1',
+            companyId: 'tenant-a',
+            progress: 17,
+            createdEmployeeId: null,
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      });
+
+      const app = createTestApp(prisma);
+      const res = await request(app)
+        .put('/api/v1/employees/onboarding/onb-draft-1/documents')
+        .set('Authorization', `Bearer ${signToken(userA)}`)
+        .send({
+          documents: [
+            {
+              documentType: 'PASSPORT',
+              title: 'Passport Copy',
+              objectKey: 'tenant-a/../../etc/shadow',
+              fileName: 'passport.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 1024,
+            },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('DOCUMENT_KEY_INVALID');
+      expect(prisma.employeeOnboarding.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects completing onboarding if draft documents contain cross-tenant key', async () => {
+      const prisma = buildPrismaBase(userA, {
+        employeeOnboarding: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'onb-draft-1',
+            companyId: 'tenant-a',
+            status: 'REVIEW',
+            createdEmployeeId: null,
+            personalDetails: {
+              firstName: 'Alice',
+              lastName: 'Smith',
+              gender: 'FEMALE',
+              dateOfBirth: '1990-01-01',
+              personalEmail: 'alice@example.com',
+              mobileNumber: '+919876543210',
+              nationality: 'Indian',
+              currentAddress: '123 Main St, Tech Park',
+              permanentAddress: '123 Main St, Tech Park',
+              city: 'Bengaluru',
+              state: 'Karnataka',
+              country: 'India',
+              pinCode: '560001',
+              emergencyContactName: 'Bob Smith',
+              emergencyContactNumber: '+919876543211',
+              emergencyContactRelationship: 'Spouse',
+            },
+            documentDetails: {
+              documents: [
+                {
+                  documentType: 'PASSPORT',
+                  title: 'Passport Copy',
+                  objectKey: 'tenant-b/other-company-file.pdf',
+                  fileName: 'passport.pdf',
+                  mimeType: 'application/pdf',
+                  sizeBytes: 1024,
+                },
+              ],
+            },
+            salaryDetails: {
+              structureId: '00000000-0000-4000-8000-000000000010',
+              annualCtc: 1200000,
+              effectiveFrom: '2026-04-01',
+            },
+            faceDetails: {
+              required: false,
+              status: 'NOT_REGISTERED',
+            },
+            additionalDetails: {
+              employeeCode: 'EMP-A-100',
+              workEmail: 'alice@tenant-a.com',
+              departmentId: '00000000-0000-4000-8000-000000000020',
+              designationId: '00000000-0000-4000-8000-000000000030',
+              dateOfJoining: '2026-04-01',
+              probationPeriodMonths: 3,
+            },
+          }),
+        },
+        department: { findFirst: vi.fn().mockResolvedValue({ id: 'dept-1' }) },
+        designation: { findFirst: vi.fn().mockResolvedValue({ id: 'desig-1' }) },
+        salaryStructure: { findFirst: vi.fn().mockResolvedValue({ id: 'struct-1' }) },
+        employeeDocument: { createMany: vi.fn() },
+      });
+
+      const app = createTestApp(prisma);
+      const res = await request(app)
+        .post('/api/v1/employees/onboarding/onb-draft-1/complete')
+        .set('Authorization', `Bearer ${signToken(userA)}`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('DOCUMENT_KEY_INVALID');
+      expect(prisma.employeeDocument.createMany).not.toHaveBeenCalled();
+    });
+  });
 });
+
 

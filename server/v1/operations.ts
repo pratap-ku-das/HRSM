@@ -11,6 +11,7 @@ import type { PrismaClient } from "@prisma/client";
 import multer from "multer";
 import { z } from "zod";
 import { emitNotification } from "./notifications.js";
+import { getStorageService } from "./storage/storageService.js";
 import {
   resolveCompanyExpensePolicy,
   attachReceiptToNotes,
@@ -375,9 +376,19 @@ export function createOperationsRouter(
 
         const id = crypto.randomUUID();
         const storageName = `${id}${ext}`;
-        const companyReceiptDir = path.join(RECEIPT_STORAGE_ROOT, companyId);
-        await mkdir(companyReceiptDir, { recursive: true });
-        await writeFile(path.join(companyReceiptDir, storageName), req.file.buffer, { flag: "wx" });
+        const objectKey = `${companyId}/${storageName}`;
+        const storage = getStorageService();
+
+        const stored = await storage.putObject({
+          key: objectKey,
+          buffer: req.file.buffer,
+          contentType: req.file.mimetype,
+          metadata: {
+            originalName: req.file.originalname,
+            companyId,
+            claimId: claim.id,
+          },
+        });
 
         // Clean up previous receipt if one was attached
         const oldReceipt = parseReceiptFromNotes(claim.notes);
@@ -388,55 +399,57 @@ export function createOperationsRouter(
             });
             if (oldDoc) {
               await prisma.employeeDocument.deleteMany({ where: { id: oldDoc.id, companyId } });
-              const [cId, oldStorageName] = oldDoc.objectKey.split("/");
-              if (cId === companyId && oldStorageName) {
-                await unlink(path.join(RECEIPT_STORAGE_ROOT, companyId, oldStorageName)).catch(() => {});
-              }
+              await storage.deleteObject(oldDoc.objectKey).catch(() => {});
             }
           } catch {
             // non-fatal cleanup
           }
         }
 
-        const objectKey = `${companyId}/${storageName}`;
-        const doc = await prisma.employeeDocument.create({
-          data: {
-            id,
-            companyId,
-            employeeId: claim.employeeId,
-            documentType: "EXPENSE_RECEIPT",
-            title: `Receipt for ${claim.title}`.slice(0, 160),
-            objectKey,
+        let doc;
+        try {
+          doc = await prisma.employeeDocument.create({
+            data: {
+              id,
+              companyId,
+              employeeId: claim.employeeId,
+              documentType: "EXPENSE_RECEIPT",
+              title: `Receipt for ${claim.title}`.slice(0, 160),
+              objectKey,
+              fileName: req.file.originalname.slice(0, 200),
+              mimeType: req.file.mimetype,
+              sizeBytes: stored.sizeBytes,
+              issueDate: claim.expenseDate,
+              verificationStatus: "VERIFIED",
+              verifiedById: req.auth!.id,
+              verifiedAt: new Date(),
+            },
+          });
+
+          const updatedNotes = attachReceiptToNotes(claim.notes, {
+            docId: doc.id,
             fileName: req.file.originalname.slice(0, 200),
-            mimeType: req.file.mimetype,
-            sizeBytes: req.file.size,
-            issueDate: claim.expenseDate,
-            verificationStatus: "VERIFIED",
-            verifiedById: req.auth!.id,
-            verifiedAt: new Date(),
-          },
-        });
+            mime: req.file.mimetype,
+            size: req.file.size,
+          });
 
-        const updatedNotes = attachReceiptToNotes(claim.notes, {
-          docId: doc.id,
-          fileName: req.file.originalname.slice(0, 200),
-          mime: req.file.mimetype,
-          size: req.file.size,
-        });
+          const updatedClaim = await prisma.expenseClaim.update({
+            where: { id: claim.id },
+            data: { notes: updatedNotes },
+          });
 
-        const updatedClaim = await prisma.expenseClaim.update({
-          where: { id: claim.id },
-          data: { notes: updatedNotes },
-        });
+          await audit(
+            req,
+            "UPLOAD_EXPENSE_RECEIPT",
+            "EXPENSE",
+            `Receipt attached to expense claim ${claim.id}.`,
+          );
 
-        await audit(
-          req,
-          "UPLOAD_EXPENSE_RECEIPT",
-          "EXPENSE",
-          `Receipt attached to expense claim ${claim.id}.`,
-        );
-
-        return ok(res, { claim: updatedClaim, document: doc }, 201);
+          return ok(res, { claim: updatedClaim, document: doc }, 201);
+        } catch (dbError) {
+          await storage.deleteObject(objectKey).catch(() => {});
+          throw dbError;
+        }
       } catch (error) {
         next(error);
       }
@@ -487,20 +500,28 @@ export function createOperationsRouter(
         }
 
         const [cId, storageName] = doc.objectKey.split("/");
-        if (cId !== companyId || !storageName || storageName !== path.basename(storageName)) {
+        if (
+          cId !== companyId ||
+          !storageName ||
+          storageName !== path.basename(storageName) ||
+          doc.objectKey.includes("..")
+        ) {
           return fail(res, 400, "RECEIPT_KEY_INVALID", "Receipt storage key is invalid.");
         }
 
-        const filePath = path.join(RECEIPT_STORAGE_ROOT, companyId, storageName);
-        const contents = await readFile(filePath);
-        res.setHeader("Content-Type", doc.mimeType);
+        const storage = getStorageService();
+        const stored = await storage.getObject(doc.objectKey);
+        res.setHeader("Content-Type", doc.mimeType || stored.contentType);
         res.setHeader(
           "Content-Disposition",
           `inline; filename*=UTF-8''${encodeURIComponent(doc.fileName)}`,
         );
-        return res.send(contents);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return res.send(stored.buffer);
+      } catch (error: any) {
+        if (error?.code === "STORAGE_KEY_INVALID") {
+          return fail(res, 400, "RECEIPT_KEY_INVALID", "Receipt storage key is invalid.");
+        }
+        if (error?.code === "STORAGE_OBJECT_NOT_FOUND" || (error as NodeJS.ErrnoException).code === "ENOENT") {
           return fail(
             res,
             404,
@@ -558,10 +579,8 @@ export function createOperationsRouter(
           });
           if (doc) {
             await prisma.employeeDocument.deleteMany({ where: { id: doc.id, companyId } });
-            const [cId, storageName] = doc.objectKey.split("/");
-            if (cId === companyId && storageName) {
-              await unlink(path.join(RECEIPT_STORAGE_ROOT, companyId, storageName)).catch(() => {});
-            }
+            const storage = getStorageService();
+            await storage.deleteObject(doc.objectKey).catch(() => {});
           }
         }
 
@@ -717,25 +736,41 @@ export function createOperationsRouter(
         const id = crypto.randomUUID();
         const extension = path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, "");
         const storageName = `${id}${extension}`;
-        const companyDirectory = path.join(companyDocumentStorage, req.auth!.companyId);
-        await mkdir(companyDirectory, { recursive: true });
-        await writeFile(path.join(companyDirectory, storageName), req.file.buffer, { flag: "wx" });
         const objectKey = `${req.auth!.companyId}/${storageName}`;
-        const item = await prisma.companyDocument.create({
-          data: {
-            id,
+        const storage = getStorageService();
+
+        const stored = await storage.putObject({
+          key: objectKey,
+          buffer: req.file.buffer,
+          contentType: req.file.mimetype,
+          metadata: {
+            originalName: req.file.originalname,
             companyId: req.auth!.companyId,
-            title: body.title,
             category: body.category,
-            fileSize: `${req.file.size}`,
-            fileType: req.file.mimetype,
-            downloadUrl: `/api/v1/operations/company-documents/${id}/file`,
-            objectKey,
-            fileName: req.file.originalname.slice(0, 255),
-            mimeType: req.file.mimetype,
-            sizeBytes: req.file.size,
           },
         });
+
+        let item;
+        try {
+          item = await prisma.companyDocument.create({
+            data: {
+              id,
+              companyId: req.auth!.companyId,
+              title: body.title,
+              category: body.category,
+              fileSize: `${stored.sizeBytes}`,
+              fileType: req.file.mimetype,
+              downloadUrl: `/api/v1/operations/company-documents/${id}/file`,
+              objectKey,
+              fileName: req.file.originalname.slice(0, 255),
+              mimeType: req.file.mimetype,
+              sizeBytes: stored.sizeBytes,
+            },
+          });
+        } catch (dbError) {
+          await storage.deleteObject(objectKey).catch(() => {});
+          throw dbError;
+        }
         await audit(req, "UPLOAD_COMPANY_DOCUMENT", "DOCUMENT", `Company document ${item.id} uploaded.`);
         return ok(res, item, 201);
       } catch (error) {
@@ -755,14 +790,24 @@ export function createOperationsRouter(
         if (!document.objectKey || !document.fileName || !document.mimeType)
           return fail(res, 409, "DOCUMENT_FILE_UNAVAILABLE", "This legacy record contains a URL only and has no uploaded file.");
         const [companyId, storageName] = document.objectKey.split("/");
-        if (companyId !== req.auth!.companyId || !storageName || storageName !== path.basename(storageName))
+        if (
+          companyId !== req.auth!.companyId ||
+          !storageName ||
+          storageName !== path.basename(storageName) ||
+          document.objectKey.includes("..")
+        )
           return fail(res, 400, "DOCUMENT_KEY_INVALID", "Document storage reference is invalid.");
-        const contents = await readFile(path.join(companyDocumentStorage, companyId, storageName));
-        res.setHeader("Content-Type", document.mimeType);
+
+        const storage = getStorageService();
+        const stored = await storage.getObject(document.objectKey);
+        res.setHeader("Content-Type", document.mimeType || stored.contentType);
         res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
-        return res.send(contents);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return res.send(stored.buffer);
+      } catch (error: any) {
+        if (error?.code === "STORAGE_KEY_INVALID") {
+          return fail(res, 400, "DOCUMENT_KEY_INVALID", "Document storage reference is invalid.");
+        }
+        if (error?.code === "STORAGE_OBJECT_NOT_FOUND" || (error as NodeJS.ErrnoException).code === "ENOENT")
           return fail(res, 404, "DOCUMENT_FILE_NOT_FOUND", "The stored company document file was not found.");
         next(error);
       }

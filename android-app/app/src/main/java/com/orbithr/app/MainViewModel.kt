@@ -44,25 +44,55 @@ sealed interface UpdateState {
         }
     }
 
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
     fun dismissUpdate() {
+        cancelUpdateDownload()
         updateDismissedInSession = true
         _availableUpdate.value = null
         _updateState.value = UpdateState.Idle
     }
 
-    fun startUpdateDownload(release: AndroidReleaseDto) = viewModelScope.launch {
+    fun startUpdateDownload(release: AndroidReleaseDto) {
+        if (downloadJob?.isActive == true) return
         _updateState.value = UpdateState.Downloading(release, 0f)
-        runCatching {
-            repository.downloadAndVerifyApk(release) { progress ->
-                _updateState.value = UpdateState.Downloading(release, progress)
+        downloadJob = viewModelScope.launch {
+            runCatching {
+                repository.downloadAndVerifyApk(release) { progress ->
+                    _updateState.value = UpdateState.Downloading(release, progress)
+                }
+            }.onSuccess { apkFile ->
+                _updateState.value = UpdateState.ReadyToInstall(release, apkFile)
+                if (repository.canInstallPackages()) {
+                    repository.installApk(apkFile)
+                }
+            }.onFailure { err ->
+                if (err is kotlinx.coroutines.CancellationException) {
+                    _updateState.value = UpdateState.Available(release)
+                } else {
+                    _updateState.value = UpdateState.Error(release, err.userMessage())
+                }
             }
-        }.onSuccess { apkFile ->
-            _updateState.value = UpdateState.ReadyToInstall(release, apkFile)
-            if (repository.canInstallPackages()) {
-                repository.installApk(apkFile)
-            }
-        }.onFailure { err ->
-            _updateState.value = UpdateState.Error(release, err.userMessage())
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        downloadJob?.cancel()
+        downloadJob = null
+        val curRelease = _availableUpdate.value
+        if (curRelease != null) {
+            _updateState.value = UpdateState.Available(curRelease)
+        } else {
+            _updateState.value = UpdateState.Idle
+        }
+    }
+
+    fun checkInstalledVersionOnResume() {
+        val curRelease = _availableUpdate.value ?: return
+        if (BuildConfig.VERSION_CODE >= curRelease.versionCode) {
+            _availableUpdate.value = null
+            _updateState.value = UpdateState.Idle
+            updateDismissedInSession = false
         }
     }
 
@@ -97,4 +127,37 @@ internal fun isUpdateMandatory(
 ): Boolean {
     if (minSupportedVersionCode == null) return false
     return installedVersionCode < minSupportedVersionCode
+}
+
+internal fun validatePackageName(archivePackageName: String?, expectedPackageName: String): Boolean {
+    if (archivePackageName.isNullOrBlank() || expectedPackageName.isBlank()) return false
+    return archivePackageName == expectedPackageName
+}
+
+internal fun validateVersionCode(
+    archiveVersionCode: Long,
+    expectedVersionCode: Int,
+    installedVersionCode: Int
+): Boolean {
+    if (archiveVersionCode <= 0 || expectedVersionCode <= 0) return false
+    if (archiveVersionCode != expectedVersionCode.toLong()) return false
+    return archiveVersionCode > installedVersionCode.toLong()
+}
+
+internal fun validateSha256(computedHash: String, expectedHash: String?): Boolean {
+    if (computedHash.isBlank() || expectedHash.isNullOrBlank()) return false
+    val cleanComputed = computedHash.trim().lowercase()
+    val cleanExpected = expectedHash.trim().lowercase()
+    if (cleanComputed.length != 64 || cleanExpected.length != 64) return false
+    return cleanComputed == cleanExpected
+}
+
+internal fun matchCertificateBytes(
+    archiveCertBytes: List<ByteArray>,
+    installedCertBytes: List<ByteArray>
+): Boolean {
+    if (archiveCertBytes.isEmpty() || installedCertBytes.isEmpty()) return false
+    return archiveCertBytes.any { a ->
+        installedCertBytes.any { i -> java.util.Arrays.equals(a, i) }
+    }
 }

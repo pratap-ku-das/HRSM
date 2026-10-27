@@ -56,6 +56,7 @@ fun RootApp(
     updateState: UpdateState = UpdateState.Idle,
     onDownloadUpdate: (AndroidReleaseDto) -> Unit = {},
     onInstallUpdate: (java.io.File) -> Unit = {},
+    onCancelUpdate: () -> Unit = {},
 ) {
     when (state) {
         SessionState.Loading -> OrbitSplash()
@@ -75,7 +76,8 @@ fun RootApp(
             updateState = updateState,
             dismiss = dismissUpdate,
             onDownload = { onDownloadUpdate(release) },
-            onInstall = { (updateState as? UpdateState.ReadyToInstall)?.apkFile?.let(onInstallUpdate) }
+            onInstall = { (updateState as? UpdateState.ReadyToInstall)?.apkFile?.let(onInstallUpdate) },
+            onCancel = onCancelUpdate,
         )
     }
 }
@@ -87,10 +89,16 @@ private fun UpdateAvailableDialog(
     dismiss: () -> Unit,
     onDownload: () -> Unit,
     onInstall: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
     AlertDialog(
-        onDismissRequest = dismiss,
+        onDismissRequest = {
+            if (updateState is UpdateState.Downloading) {
+                onCancel()
+            }
+            dismiss()
+        },
         icon = { Icon(Icons.Outlined.SystemUpdate, null, tint = OrbitViolet) },
         title = { Text("OrbitHR ${release.versionName} is available") },
         text = {
@@ -98,12 +106,19 @@ private fun UpdateAvailableDialog(
                 Text(release.releaseNotes, color = OrbitInk)
                 when (updateState) {
                     is UpdateState.Downloading -> {
-                        val pct = (updateState.progress * 100).toInt()
-                        Text("Downloading package... ($pct%)", style = MaterialTheme.typography.bodySmall, color = OrbitViolet)
-                        LinearProgressIndicator(
-                            progress = { if (updateState.progress > 0) updateState.progress else 0f },
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
-                        )
+                        if (updateState.progress >= 0) {
+                            val pct = (updateState.progress * 100).toInt()
+                            Text("Downloading package... ($pct%)", style = MaterialTheme.typography.bodySmall, color = OrbitViolet)
+                            LinearProgressIndicator(
+                                progress = { updateState.progress },
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                            )
+                        } else {
+                            Text("Downloading package...", style = MaterialTheme.typography.bodySmall, color = OrbitViolet)
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                            )
+                        }
                     }
                     is UpdateState.ReadyToInstall -> {
                         Text("Download complete and verified. Ready to install.", style = MaterialTheme.typography.bodySmall, color = OrbitMint)
@@ -120,8 +135,8 @@ private fun UpdateAvailableDialog(
         confirmButton = {
             when (updateState) {
                 is UpdateState.Downloading -> {
-                    Button(onClick = {}, enabled = false) {
-                        Text("Downloading…")
+                    Button(onClick = onCancel) {
+                        Text("Cancel")
                     }
                 }
                 is UpdateState.ReadyToInstall -> {
@@ -149,11 +164,13 @@ private fun UpdateAvailableDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { uriHandler.openUri(release.downloadUrl) }) {
-                    Text("Browser link", style = MaterialTheme.typography.bodySmall)
-                }
-                TextButton(onClick = dismiss) {
-                    Text("Later")
+                if (updateState !is UpdateState.Downloading) {
+                    TextButton(onClick = { uriHandler.openUri(release.downloadUrl) }) {
+                        Text("Browser link", style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = dismiss) {
+                        Text("Later")
+                    }
                 }
             }
         },

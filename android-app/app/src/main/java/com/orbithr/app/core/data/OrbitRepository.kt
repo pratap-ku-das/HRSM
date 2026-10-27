@@ -22,6 +22,8 @@ import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 
 @Singleton class OrbitRepository @Inject constructor(private val api: OrbitApi, private val tokens: TokenStore,private val database:OrbitDatabase,private val json:Json,@ApplicationContext private val context:Context) {
     suspend fun androidRelease() = api.androidRelease().data
@@ -220,54 +222,124 @@ import dagger.hilt.android.qualifiers.ApplicationContext
         return OpenedDocument(uri.toString(),body.contentType()?.toString()?:"application/octet-stream",safeName)
     }
 
-    suspend fun downloadAndVerifyApk(release: AndroidReleaseDto, onProgress: (Float) -> Unit = {}): File = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val folder = File(context.cacheDir, "updates").apply { mkdirs() }
-        val targetFile = File(folder, "OrbitHR-${release.versionName}.apk")
-        val client = okhttp3.OkHttpClient.Builder()
-            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-        val request = okhttp3.Request.Builder()
-            .url(release.downloadUrl)
-            .header("User-Agent", "OrbitHR-Android/${com.orbithr.app.BuildConfig.VERSION_NAME}")
-            .build()
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) throw java.io.IOException("Failed to download APK: HTTP ${response.code}")
-        val body = response.body ?: throw java.io.IOException("Empty response body from update server")
-        val totalBytes = body.contentLength()
-        var downloadedBytes = 0L
+    fun verifyApkPackageAndCertificate(apkFile: File, expectedRelease: AndroidReleaseDto) {
+        val pm = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            android.content.pm.PackageManager.GET_SIGNATURES
+        }
+        val archiveInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, flags)
+            ?: throw SecurityException("Unable to parse downloaded APK. Package may be corrupted or malformed.")
 
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        archiveInfo.applicationInfo?.sourceDir = apkFile.absolutePath
+        archiveInfo.applicationInfo?.publicSourceDir = apkFile.absolutePath
+
+        if (!com.orbithr.app.validatePackageName(archiveInfo.packageName, context.packageName)) {
+            throw SecurityException("APK package name (${archiveInfo.packageName}) does not match expected package (${context.packageName})")
+        }
+
+        val apkVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            archiveInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            archiveInfo.versionCode.toLong()
+        }
+        if (!com.orbithr.app.validateVersionCode(apkVersionCode, expectedRelease.versionCode, com.orbithr.app.BuildConfig.VERSION_CODE)) {
+            throw SecurityException("APK version code ($apkVersionCode) violates release policy (expected ${expectedRelease.versionCode}, installed ${com.orbithr.app.BuildConfig.VERSION_CODE})")
+        }
+
+        val installedPkg = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(flags.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, flags)
+            }
+        }.getOrNull() ?: throw SecurityException("Unable to inspect installed application signing certificate.")
+
+        val archiveCertBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            archiveInfo.signingInfo?.let { si ->
+                if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+            }?.map { it.toByteArray() } ?: emptyList()
+        } else {
+            @Suppress("DEPRECATION")
+            archiveInfo.signatures?.map { it.toByteArray() } ?: emptyList()
+        }
+
+        val installedCertBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            installedPkg.signingInfo?.let { si ->
+                if (si.hasMultipleSigners()) si.apkContentsSigners else si.signingCertificateHistory
+            }?.map { it.toByteArray() } ?: emptyList()
+        } else {
+            @Suppress("DEPRECATION")
+            installedPkg.signatures?.map { it.toByteArray() } ?: emptyList()
+        }
+
+        if (!com.orbithr.app.matchCertificateBytes(archiveCertBytes, installedCertBytes)) {
+            throw SecurityException("Downloaded APK signing certificate does not match the installed application certificate.")
+        }
+    }
+
+    suspend fun downloadAndVerifyApk(release: AndroidReleaseDto, onProgress: (Float) -> Unit = {}): File = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val folder = File(context.cacheDir, "updates").apply { if (!exists()) mkdirs() }
+        val targetFile = File(folder, "OrbitHR-${release.versionName}.apk")
         val tempFile = File(folder, "download-${System.currentTimeMillis()}.tmp")
 
-        body.byteStream().use { input ->
-            tempFile.outputStream().use { output ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (input.read(buffer).also { read = it } != -1) {
-                    output.write(buffer, 0, read)
-                    digest.update(buffer, 0, read)
-                    downloadedBytes += read
-                    if (totalBytes > 0) {
-                        onProgress(downloadedBytes.toFloat() / totalBytes.toFloat())
+        try {
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val request = okhttp3.Request.Builder()
+                .url(release.downloadUrl)
+                .header("User-Agent", "OrbitHR-Android/${com.orbithr.app.BuildConfig.VERSION_NAME}")
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) throw java.io.IOException("Failed to download APK: HTTP ${response.code}")
+            val body = response.body ?: throw java.io.IOException("Empty response body from update server")
+            val totalBytes = body.contentLength()
+            var downloadedBytes = 0L
+
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+
+            body.byteStream().use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        currentCoroutineContext().ensureActive()
+                        output.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                        downloadedBytes += read
+                        if (totalBytes > 0) {
+                            onProgress(downloadedBytes.toFloat() / totalBytes.toFloat())
+                        } else {
+                            onProgress(-1f)
+                        }
                     }
+                    output.flush()
                 }
-                output.flush()
             }
-        }
 
-        val computedHash = digest.digest().joinToString("") { "%02x".format(it) }
-        if (!release.sha256.isNullOrBlank() && !computedHash.equals(release.sha256.trim(), ignoreCase = true)) {
-            tempFile.delete()
-            throw SecurityException("Downloaded APK hash ($computedHash) does not match expected hash (${release.sha256})")
-        }
+            val computedHash = digest.digest().joinToString("") { "%02x".format(it) }
+            if (release.sha256.isNullOrBlank() || !com.orbithr.app.validateSha256(computedHash, release.sha256)) {
+                throw SecurityException("Downloaded APK hash ($computedHash) does not match expected hash (${release.sha256})")
+            }
 
-        if (targetFile.exists()) targetFile.delete()
-        if (!tempFile.renameTo(targetFile)) {
-            tempFile.copyTo(targetFile, overwrite = true)
-            tempFile.delete()
+            verifyApkPackageAndCertificate(tempFile, release)
+
+            if (targetFile.exists()) targetFile.delete()
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+            targetFile
+        } catch (e: Throwable) {
+            if (tempFile.exists()) tempFile.delete()
+            throw e
         }
-        targetFile
     }
 
     fun canInstallPackages(): Boolean {
