@@ -632,19 +632,41 @@ export function createOperationsRouter(
             "EXPENSE_ALREADY_REVIEWED",
             `Expense claim has already been ${existingClaim.status.toLowerCase()}. Cannot review again.`,
           );
-        const updated = await prisma.expenseClaim.update({
-          where: { id: existingClaim.id },
+        // Atomic conditional update to prevent TOCTOU review race
+        const updateResult = await prisma.expenseClaim.updateMany({
+          where: {
+            id: existingClaim.id,
+            companyId: req.auth!.companyId,
+            status: "PENDING",
+          },
           data: {
             status: body.status,
             approvedById: req.auth!.id,
             approvedAt: new Date(),
           },
         });
+        if (updateResult.count === 0) {
+          const currentClaim = await prisma.expenseClaim.findFirst({
+            where: {
+              id: existingClaim.id,
+              companyId: req.auth!.companyId,
+            },
+          });
+          return fail(
+            res,
+            409,
+            "EXPENSE_ALREADY_REVIEWED",
+            `Expense claim has already been ${currentClaim?.status?.toLowerCase() || "reviewed"}. Cannot review again.`,
+          );
+        }
+        const updated = await prisma.expenseClaim.findFirst({
+          where: { id: existingClaim.id },
+        });
         await audit(
           req,
           "REVIEW_EXPENSE",
           "EXPENSE",
-          `Expense ${existingClaim.id} ${body.status.toLowerCase()}.`,
+          `Expense ${req.params.id} ${body.status.toLowerCase()}.`,
         );
         return ok(res, updated);
       } catch (error) {

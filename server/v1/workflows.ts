@@ -1359,65 +1359,60 @@ export function createWorkflowRouter(
           return ok(res, { status: "REJECTED" });
         }
         const approvalPrincipal = actingForUserId || req.auth!.id;
-        const duplicateApproval = await prisma.workflowAction.findFirst({
-          where: {
-            stepInstanceId: step.id,
-            action: "APPROVE",
-            OR: [
-              { actorUserId: approvalPrincipal },
-              { actingForUserId: approvalPrincipal },
-            ],
-          },
-        });
-        if (duplicateApproval)
-          return fail(
-            res,
-            409,
-            "ALREADY_APPROVED",
-            "This approver has already approved this step.",
-          );
-        const approvals = step.approvals + 1;
-        if (approvals < step.minimumApprovals) {
-          await prisma.$transaction([
-            prisma.workflowStepInstance.update({
-              where: { id: step.id },
-              data: { approvals },
-            }),
-            prisma.workflowAction.create({
-              data: {
-                instanceId: instance.id,
-                stepInstanceId: step.id,
-                actorUserId: req.auth!.id,
-                actingForUserId,
-                action: "APPROVE",
-                comment: body.comment,
-              },
-            }),
-          ]);
-          return ok(res, { status: "PENDING", approvals });
-        }
-        const nextStep = instance.stepInstances.find(
-          (value) => value.sequence === step.sequence + 1,
-        );
-        const operations = [
-          prisma.workflowStepInstance.update({
+        const result = await prisma.$transaction(async (tx) => {
+          const currentStep = await tx.workflowStepInstance.findUnique({
             where: { id: step.id },
-            data: { status: "APPROVED", approvals, completedAt: new Date() },
-          }),
-          prisma.workflowAction.create({
+            include: { step: true },
+          });
+          if (!currentStep || currentStep.status !== "PENDING") {
+            throw Object.assign(
+              new Error("This workflow step has already been completed or is not pending."),
+              { status: 409, code: "STEP_NOT_PENDING" },
+            );
+          }
+          const duplicateApproval = await tx.workflowAction.findFirst({
+            where: {
+              stepInstanceId: currentStep.id,
+              action: "APPROVE",
+              OR: [
+                { actorUserId: approvalPrincipal },
+                { actingForUserId: approvalPrincipal },
+              ],
+            },
+          });
+          if (duplicateApproval) {
+            throw Object.assign(
+              new Error("This approver has already approved this step."),
+              { status: 409, code: "ALREADY_APPROVED" },
+            );
+          }
+          const newApprovals = currentStep.approvals + 1;
+          await tx.workflowAction.create({
             data: {
               instanceId: instance.id,
-              stepInstanceId: step.id,
+              stepInstanceId: currentStep.id,
               actorUserId: req.auth!.id,
               actingForUserId,
               action: "APPROVE",
               comment: body.comment,
             },
-          }),
-        ];
-        if (nextStep)
-          operations.push(
-            prisma.workflowStepInstance.update({
+          });
+          if (newApprovals < currentStep.minimumApprovals) {
+            await tx.workflowStepInstance.update({
+              where: { id: currentStep.id },
+              data: { approvals: newApprovals },
+            });
+            return { actionType: "PARTIAL" as const, approvals: newApprovals, nextStep: null };
+          }
+          const nextStep = instance.stepInstances.find(
+            (value) => value.sequence === currentStep.sequence + 1,
+          );
+          await tx.workflowStepInstance.update({
+            where: { id: currentStep.id },
+            data: { status: "APPROVED", approvals: newApprovals, completedAt: new Date() },
+          });
+          if (nextStep) {
+            await tx.workflowStepInstance.update({
               where: { id: nextStep.id },
               data: {
                 status: "PENDING",
@@ -1426,63 +1421,56 @@ export function createWorkflowRouter(
                   ? new Date(Date.now() + nextStep.step.slaHours * 3_600_000)
                   : undefined,
               },
-            }) as never,
-          );
-        else {
-          operations.push(
-            prisma.workflowInstance.update({
+            });
+            return { actionType: "ADVANCED" as const, approvals: newApprovals, nextStep };
+          } else {
+            await tx.workflowInstance.update({
               where: { id: instance.id },
               data: { status: "APPROVED", completedAt: new Date() },
-            }) as never,
-          );
-          if (instance.subjectType === "LeaveRequest")
-            operations.push(
-              prisma.leaveRequest.updateMany({
-                where: { id: instance.subjectId, companyId },
-                data: {
-                  status: "APPROVED",
-                  approvedById: req.auth!.id,
-                  approvedAt: new Date(),
-                },
-              }) as never,
-            );
-          if (instance.subjectType === "ExpenseClaim")
-            operations.push(
-              prisma.expenseClaim.updateMany({
-                where: { id: instance.subjectId, companyId },
-                data: {
-                  status: "APPROVED",
-                  approvedById: req.auth!.id,
-                  approvedAt: new Date(),
-                },
-              }) as never,
-            );
-          if (instance.subjectType === "EmployeeServiceRequest") {
-            operations.push(
-              prisma.employeeServiceRequest.updateMany({
-                where: { id: instance.subjectId, companyId },
-                data: { status: "APPROVED" },
-              }) as never,
-            );
-            const svcReq = await prisma.employeeServiceRequest.findFirst({
-              where: { id: instance.subjectId, companyId },
             });
-            if (svcReq && svcReq.type === "LEAVE_ENCASHMENT") {
-              const p = (svcReq.payload || {}) as Record<string, unknown>;
-              const targetMonth = String(p.payrollMonth || new Date().toISOString().slice(0, 7));
-              const amount = Number(svcReq.amount || 0);
-              const existingAdj = await prisma.payrollAdjustment.findFirst({
-                where: {
-                  companyId,
-                  employeeId: svcReq.employeeId,
-                  month: targetMonth,
-                  code: "LEAVE_ENCASHMENT",
-                  reason: { contains: svcReq.id },
+            if (instance.subjectType === "LeaveRequest") {
+              await tx.leaveRequest.updateMany({
+                where: { id: instance.subjectId, companyId, status: "PENDING" },
+                data: {
+                  status: "APPROVED",
+                  approvedById: req.auth!.id,
+                  approvedAt: new Date(),
                 },
               });
-              if (!existingAdj) {
-                operations.push(
-                  prisma.payrollAdjustment.create({
+            }
+            if (instance.subjectType === "ExpenseClaim") {
+              await tx.expenseClaim.updateMany({
+                where: { id: instance.subjectId, companyId, status: "PENDING" },
+                data: {
+                  status: "APPROVED",
+                  approvedById: req.auth!.id,
+                  approvedAt: new Date(),
+                },
+              });
+            }
+            if (instance.subjectType === "EmployeeServiceRequest") {
+              await tx.employeeServiceRequest.updateMany({
+                where: { id: instance.subjectId, companyId, status: "PENDING" },
+                data: { status: "APPROVED" },
+              });
+              const svcReq = await tx.employeeServiceRequest.findFirst({
+                where: { id: instance.subjectId, companyId },
+              });
+              if (svcReq && svcReq.type === "LEAVE_ENCASHMENT") {
+                const p = (svcReq.payload || {}) as Record<string, unknown>;
+                const targetMonth = String(p.payrollMonth || new Date().toISOString().slice(0, 7));
+                const amount = Number(svcReq.amount || 0);
+                const existingAdj = await tx.payrollAdjustment.findFirst({
+                  where: {
+                    companyId,
+                    employeeId: svcReq.employeeId,
+                    month: targetMonth,
+                    code: "LEAVE_ENCASHMENT",
+                    reason: { contains: svcReq.id },
+                  },
+                });
+                if (!existingAdj) {
+                  await tx.payrollAdjustment.create({
                     data: {
                       companyId,
                       employeeId: svcReq.employeeId,
@@ -1494,22 +1482,24 @@ export function createWorkflowRouter(
                       reason: `Leave encashment payout (${p.days || 0} days of ${p.leaveTypeName || 'Leave'}) [${svcReq.id}]`,
                       createdById: req.auth!.id,
                     },
-                  }) as never,
-                );
+                  });
+                }
               }
             }
-          }
-          if (instance.subjectType === "AttendanceRequest")
-            operations.push(
-              prisma.attendanceRequest.updateMany({
-                where: { id: instance.subjectId, companyId },
+            if (instance.subjectType === "AttendanceRequest") {
+              await tx.attendanceRequest.updateMany({
+                where: { id: instance.subjectId, companyId, status: "PENDING" },
                 data: { status: "APPROVED" },
-              }) as never,
-            );
+              });
+            }
+            return { actionType: "COMPLETED" as const, approvals: newApprovals, nextStep: null };
+          }
+        });
+        if (result.actionType === "PARTIAL") {
+          return ok(res, { status: "PENDING", approvals: result.approvals });
         }
-        await prisma.$transaction(operations);
-        if (nextStep) {
-          for (const userId of nextStep.approverUserIds) {
+        if (result.nextStep) {
+          for (const userId of result.nextStep.approverUserIds) {
             await emitNotification(prisma, {
               companyId,
               userId,
@@ -1536,7 +1526,7 @@ export function createWorkflowRouter(
           "APPROVE_WORKFLOW_STEP",
           `Workflow ${instance.id} step ${step.sequence} approved.`,
         );
-        return ok(res, { status: nextStep ? "PENDING" : "APPROVED" });
+        return ok(res, { status: result.nextStep ? "PENDING" : "APPROVED" });
       } catch (error) {
         next(error);
       }

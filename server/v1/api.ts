@@ -1537,10 +1537,10 @@ export function createV1Router(prisma: PrismaClient) {
               new Error("Face verification was already used. Verify again."),
               { status: 409, code: "FACE_PROOF_ALREADY_USED" },
             );
-          const existing = body.action === "CLOCK_OUT"
-            ? await tx.attendanceRecord.findFirst({where:{companyId:req.auth!.companyId,employeeId:req.auth!.employeeId!,date,status:{not:"ABSENT"},clockInTime:{not:null},clockOutTime:null},orderBy:{clockInTime:"desc"}})
-            : await tx.attendanceRecord.findUnique({where:{employeeId_date:{employeeId:req.auth!.employeeId!,date}}});
-          const attendanceDate=existing?.date||date;
+          const existing = await tx.attendanceRecord.findUnique({
+            where: { employeeId_date: { employeeId: req.auth!.employeeId!, date } },
+          });
+          const attendanceDate = existing?.date || date;
           const locked = await tx.attendancePeriodLock.findFirst({
             where: {
               companyId: req.auth!.companyId,
@@ -1553,12 +1553,19 @@ export function createV1Router(prisma: PrismaClient) {
               new Error("Attendance is locked for payroll for this date."),
               { status: 423, code: "ATTENDANCE_PERIOD_LOCKED" },
             );
-          if (body.action === "CLOCK_IN" && existing?.clockInTime && !existing?.clockOutTime)
+          if (body.action === "CLOCK_IN" && existing?.clockInTime) {
+            if (existing.clockOutTime) {
+              throw Object.assign(
+                new Error("You have already completed attendance for today."),
+                { status: 409, code: "ALREADY_COMPLETED_TODAY" },
+              );
+            }
             throw Object.assign(
               new Error("You are already clocked in. Clock out before clocking in again."),
               { status: 409, code: "ALREADY_CLOCKED_IN" },
             );
-          if (body.action === "CLOCK_OUT" && !existing?.clockInTime)
+          }
+          if (body.action === "CLOCK_OUT" && (!existing || !existing.clockInTime))
             throw Object.assign(new Error("Clock in before clocking out."), {
               status: 409,
               code: "CLOCK_IN_REQUIRED",
@@ -1611,39 +1618,81 @@ export function createV1Router(prisma: PrismaClient) {
             }
           }
 
-          const data =
-            body.action === "CLOCK_IN"
-              ? {
-                  clockInTime: effectivePunchTime,
-                  clockOutTime: null,
-                  status: clockInStatus,
-                  locationLat: body.latitude,
-                  locationLng: body.longitude,
-                  deviceId: body.deviceId,
-                  faceAuthVerified: true,
-                  faceConfidenceScore: verification.similarity,
-                  source: "MOBILE_FACE" as const,
-                }
-              : { clockOutTime: effectivePunchTime };
-          const record = body.action === "CLOCK_OUT" ? await tx.attendanceRecord.update({where:{id:existing!.id},data}) : await tx.attendanceRecord.upsert({
-            where: {
-              employeeId_date: { employeeId: req.auth!.employeeId!, date },
-            },
-            update: data,
-            create: {
-              companyId: req.auth!.companyId,
-              employeeId: req.auth!.employeeId!,
-              date,
-              status: clockInStatus,
+          let record;
+          if (body.action === "CLOCK_OUT") {
+            const updateCount = await tx.attendanceRecord.updateMany({
+              where: {
+                id: existing!.id,
+                clockOutTime: null,
+              },
+              data: { clockOutTime: effectivePunchTime },
+            });
+            if (updateCount.count === 0) {
+              throw Object.assign(
+                new Error("You have already clocked out."),
+                { status: 409, code: "ALREADY_CLOCKED_OUT" },
+              );
+            }
+            record = (await tx.attendanceRecord.findUnique({
+              where: { id: existing!.id },
+            }))!;
+          } else {
+            const data = {
               clockInTime: effectivePunchTime,
+              clockOutTime: null,
+              status: clockInStatus,
               locationLat: body.latitude,
               locationLng: body.longitude,
               deviceId: body.deviceId,
               faceAuthVerified: true,
               faceConfidenceScore: verification.similarity,
-              source: "MOBILE_FACE",
-            },
-          });
+              source: "MOBILE_FACE" as const,
+            };
+            if (existing) {
+              const updateCount = await tx.attendanceRecord.updateMany({
+                where: {
+                  id: existing.id,
+                  clockInTime: null,
+                },
+                data,
+              });
+              if (updateCount.count === 0) {
+                throw Object.assign(
+                  new Error("You are already clocked in. Clock out before clocking in again."),
+                  { status: 409, code: "ALREADY_CLOCKED_IN" },
+                );
+              }
+              record = (await tx.attendanceRecord.findUnique({
+                where: { id: existing.id },
+              }))!;
+            } else {
+              try {
+                record = await tx.attendanceRecord.create({
+                  data: {
+                    companyId: req.auth!.companyId,
+                    employeeId: req.auth!.employeeId!,
+                    date,
+                    status: clockInStatus,
+                    clockInTime: effectivePunchTime,
+                    locationLat: body.latitude,
+                    locationLng: body.longitude,
+                    deviceId: body.deviceId,
+                    faceAuthVerified: true,
+                    faceConfidenceScore: verification.similarity,
+                    source: "MOBILE_FACE",
+                  },
+                });
+              } catch (createErr: any) {
+                if (createErr.code === "P2002") {
+                  throw Object.assign(
+                    new Error("You are already clocked in. Clock out before clocking in again."),
+                    { status: 409, code: "ALREADY_CLOCKED_IN" },
+                  );
+                }
+                throw createErr;
+              }
+            }
+          }
           if(employeeLocation?.workdayGpsTrackingEnabled){
             await tx.attendanceLocationPoint.create({data:{id:crypto.randomUUID(),companyId:req.auth!.companyId,employeeId:req.auth!.employeeId!,attendanceRecordId:record.id,latitude:body.latitude,longitude:body.longitude,accuracyMeters:body.locationAccuracyMeters,capturedAt:effectivePunchTime}});
           }
@@ -1893,6 +1942,33 @@ export function createV1Router(prisma: PrismaClient) {
             `Only ${available.toFixed(1)} leave days are available.`,
           );
         const result = await prisma.$transaction(async (tx) => {
+          if (!type.allowNegative) {
+            // Row-level lock on Employee row to serialize concurrent leave applications
+            await tx.$queryRaw`SELECT id FROM "Employee" WHERE id = ${req.auth!.employeeId} FOR UPDATE`;
+            const txUsed = (
+              await tx.leaveRequest.findMany({
+                where: {
+                  employeeId: req.auth!.employeeId,
+                  leaveTypeId: type.id,
+                  status: { in: ["PENDING", "APPROVED"] },
+                  startDate: { lte: yearEnd },
+                  endDate: { gte: yearStart },
+                },
+                select: { totalDays: true },
+              })
+            ).reduce((sum, item) => sum + item.totalDays, 0);
+            const txAvailable =
+              Math.min(
+                type.maximumBalance ?? Infinity,
+                entitlement + type.carryForwardDays,
+              ) - (txUsed + existingEncashed);
+            if (totalDays > txAvailable) {
+              throw Object.assign(
+                new Error(`Only ${Math.max(0, txAvailable).toFixed(1)} leave days are available.`),
+                { status: 409, code: "LEAVE_BALANCE_INSUFFICIENT" },
+              );
+            }
+          }
           const request = await tx.leaveRequest.create({
             data: {
               companyId: req.auth!.companyId,
@@ -1966,9 +2042,31 @@ export function createV1Router(prisma: PrismaClient) {
             "LEAVE_ALREADY_STARTED",
             "Approved leave cannot be self-cancelled after it starts.",
           );
-        await prisma.leaveRequest.update({
-          where: { id: request.id },
-          data: { status: "CANCELLED" },
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.leaveRequest.updateMany({
+            where: {
+              id: request.id,
+              companyId: req.auth!.companyId,
+              employeeId: req.auth!.employeeId,
+              status: { in: ["PENDING", "APPROVED"] },
+            },
+            data: { status: "CANCELLED" },
+          });
+          if (updated.count === 0) {
+            throw Object.assign(
+              new Error("Leave request was not found or cannot be cancelled."),
+              { status: 404, code: "LEAVE_NOT_CANCELLABLE" },
+            );
+          }
+          await tx.workflowInstance.updateMany({
+            where: {
+              companyId: req.auth!.companyId,
+              subjectType: "LeaveRequest",
+              subjectId: request.id,
+              status: "PENDING",
+            },
+            data: { status: "CANCELLED" },
+          });
         });
         await prisma.auditLog.create({
           data: {

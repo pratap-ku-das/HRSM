@@ -500,6 +500,16 @@ export function createPayrollRouter(
             "Only a draft payroll run can lock attendance.",
           );
         const result = await prisma.$transaction(async (tx) => {
+          const updatedRun = await tx.payrollRun.updateMany({
+            where: { id: run.id, companyId: run.companyId, status: "DRAFT" },
+            data: { status: "ATTENDANCE_LOCKED" },
+          });
+          if (!updatedRun.count) {
+            throw Object.assign(
+              new Error("Only a draft payroll run can lock attendance."),
+              { status: 409, code: "PAYROLL_STATE_INVALID" }
+            );
+          }
           const lock = await tx.attendancePeriodLock.create({
             data: {
               companyId: run.companyId,
@@ -511,7 +521,7 @@ export function createPayrollRouter(
           });
           return tx.payrollRun.update({
             where: { id: run.id },
-            data: { status: "ATTENDANCE_LOCKED", attendanceLockId: lock.id },
+            data: { attendanceLockId: lock.id },
           });
         });
         await audit(
@@ -1464,25 +1474,41 @@ export function createPayrollRouter(
                 orderBy: { startsOn: "asc" },
               });
               if (loan) {
-                const amount = Math.min(repayment, loan.outstanding);
-                await tx.loanRepayment.create({
-                  data: { loanId: loan.id, payrollRunId: run.id, amount },
+                const existingRepayment = await tx.loanRepayment.findFirst({
+                  where: { loanId: loan.id, payrollRunId: run.id },
                 });
-                await tx.employeeLoan.update({
-                  where: { id: loan.id },
-                  data: {
-                    outstanding: Math.max(0, loan.outstanding - amount),
-                    status:
-                      loan.outstanding - amount <= 0 ? "CLOSED" : "ACTIVE",
-                  },
-                });
+                if (!existingRepayment) {
+                  const amount = Math.min(repayment, loan.outstanding);
+                  await tx.loanRepayment.create({
+                    data: { loanId: loan.id, payrollRunId: run.id, amount },
+                  });
+                  await tx.employeeLoan.update({
+                    where: { id: loan.id },
+                    data: {
+                      outstanding: Math.max(0, loan.outstanding - amount),
+                      status:
+                        loan.outstanding - amount <= 0 ? "CLOSED" : "ACTIVE",
+                    },
+                  });
+                }
               }
             }
           }
-          await tx.payrollRun.update({
-            where: { id: run.id },
-            data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
-          });
+          const runUpdate = tx.payrollRun.updateMany
+            ? await tx.payrollRun.updateMany({
+                where: { id: run.id, status: { in: ["LOCKED", "PAYSLIP_GENERATED"] } },
+                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
+              })
+            : await tx.payrollRun.update({
+                where: { id: run.id },
+                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
+              }).then(() => ({ count: 1 }));
+          if (!runUpdate.count) {
+            throw Object.assign(new Error("Payroll has already been published."), {
+              status: 409,
+              code: "PAYROLL_ALREADY_PUBLISHED",
+            });
+          }
         });
         await audit(
           req,
