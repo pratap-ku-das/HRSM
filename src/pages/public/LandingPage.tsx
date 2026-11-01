@@ -117,8 +117,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="lp-orb lp-orb-one" />
           <div className="lp-orb lp-orb-two" />
           <div className="lp-hero-copy">
-            <div className="lp-eyebrow"><Sparkles size={15} /> BalajiOne HRMS Software — Best HRMS in Bhubaneswar &amp; India</div>
-            <h1>Best HRMS &amp; Statutory Payroll Software. <em>Work feels better when everything connects.</em></h1>
+            <div className="lp-eyebrow"><Sparkles size={15} /> The people platform for modern India</div>
+            <h1>Work feels better when <em>everything connects.</em></h1>
             <p>One beautifully simple workspace for people, payroll, time, talent, and every moment in between.</p>
             <div className="lp-hero-actions">
               <button className="lp-primary" onClick={onNavigateToRegister}>Build your workspace <ArrowRight size={18} /></button>
