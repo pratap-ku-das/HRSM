@@ -1339,10 +1339,12 @@ app.get('/robots.txt', (_req, res) => {
   const robotsDist = path.join(distPath, 'robots.txt');
   const robotsPublic = path.resolve('public', 'robots.txt');
   const target = existsSync(robotsDist) ? robotsDist : existsSync(robotsPublic) ? robotsPublic : null;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('X-Robots-Tag', 'all');
   if (target) {
-    res.type('text/plain').sendFile(target);
+    res.sendFile(target);
   } else {
-    res.type('text/plain').send("User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app/\nSitemap: https://hr.balajione.dev/sitemap.xml\n");
+    res.send("User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app/\nSitemap: https://hr.balajione.dev/sitemap.xml\n");
   }
 });
 
@@ -1350,10 +1352,12 @@ app.get('/sitemap.xml', (_req, res) => {
   const sitemapDist = path.join(distPath, 'sitemap.xml');
   const sitemapPublic = path.resolve('public', 'sitemap.xml');
   const target = existsSync(sitemapDist) ? sitemapDist : existsSync(sitemapPublic) ? sitemapPublic : null;
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('X-Robots-Tag', 'all');
   if (target) {
-    res.type('application/xml').sendFile(target);
+    res.sendFile(target);
   } else {
-    res.status(404).type('text/plain').send('Sitemap not found');
+    res.status(404).send('<?xml version="1.0" encoding="UTF-8"?><error>Sitemap not found</error>');
   }
 });
 
