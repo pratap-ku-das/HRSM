@@ -1333,6 +1333,30 @@ app.put('/api/settings/:companyId', async (req, res) => {
 });
 
 const distPath = path.resolve('dist');
+
+// Explicit SEO Endpoints for Search Engine Bots (Googlebot, Bingbot)
+app.get('/robots.txt', (_req, res) => {
+  const robotsDist = path.join(distPath, 'robots.txt');
+  const robotsPublic = path.resolve('public', 'robots.txt');
+  const target = existsSync(robotsDist) ? robotsDist : existsSync(robotsPublic) ? robotsPublic : null;
+  if (target) {
+    res.type('text/plain').sendFile(target);
+  } else {
+    res.type('text/plain').send("User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /app/\nSitemap: https://hr.balajione.dev/sitemap.xml\n");
+  }
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  const sitemapDist = path.join(distPath, 'sitemap.xml');
+  const sitemapPublic = path.resolve('public', 'sitemap.xml');
+  const target = existsSync(sitemapDist) ? sitemapDist : existsSync(sitemapPublic) ? sitemapPublic : null;
+  if (target) {
+    res.type('application/xml').sendFile(target);
+  } else {
+    res.status(404).type('text/plain').send('Sitemap not found');
+  }
+});
+
 if (existsSync(path.join(distPath, 'index.html'))) {
   app.use(express.static(distPath));
   app.get('*', (req, res, next) => {

@@ -1,0 +1,20 @@
+# OrbitHR Robots.txt — BalajiOne Enterprises
+# Fast Googlebot & Search Engine Crawling
+
+User-agent: *
+Allow: /
+Allow: /assets/
+Allow: /orbithr-logo.png
+Allow: /balajione-logo.png
+Allow: /favicon.svg
+Allow: /site.webmanifest
+
+# Disallow authenticated application and internal API paths
+Disallow: /api/
+Disallow: /app/
+Disallow: /superadmin/
+Disallow: /billing/
+
+# Sitemaps
+Sitemap: https://hr.balajione.dev/sitemap.xml
+

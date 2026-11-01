@@ -3,7 +3,7 @@ import {
   ArrowRight, BarChart3, CalendarCheck, Check, ChevronRight,
   CircleCheck, CreditCard, FileText, Fingerprint, Globe2, Menu, Play,
   Headphones, LockKeyhole, Mail, Receipt, ShieldCheck, Sparkles, Star,
-  Target, TrendingUp, Users, X, Zap, Phone,
+  Target, TrendingUp, Users, X, Zap, Phone, ChevronDown, HelpCircle,
 } from 'lucide-react';
 import { BrandCredit } from '../../components/BrandCredit';
 import { ProductLogo } from '../../components/ProductLogo';
@@ -13,6 +13,29 @@ interface LandingPageProps {
   onNavigateToRegister: () => void;
   onNavigateToApp: () => void;
 }
+
+const faqs = [
+  {
+    q: 'What is OrbitHR and how does it help my company?',
+    a: 'OrbitHR is an all-in-one cloud Human Resource Management System (HRMS) developed by BalajiOne Enterprises. It replaces scattered spreadsheets and disjointed software by unifying onboarding, attendance, Indian statutory payroll, performance, and employee self-service into one intuitive platform.',
+  },
+  {
+    q: 'Does OrbitHR support automated Indian statutory compliance (EPF, ESI, TDS, PT)?',
+    a: 'Yes! OrbitHR natively calculates Employee Provident Fund (EPF), Employee State Insurance (ESIC), Tax Deducted at Source (TDS under both old and new tax regimes), and State Professional Tax (PT) automatically during monthly payroll execution.',
+  },
+  {
+    q: 'How does the 14-day free trial and Razorpay autopay work?',
+    a: 'When you register your company and select any plan (Starter, Growth, or Business), you authorize an autopay mandate through Razorpay. You enjoy a 14-day free trial without immediate deduction. Your recurring subscription begins only after the 14-day trial period completes.',
+  },
+  {
+    q: 'Can employees clock in from their mobile phones with face authentication?',
+    a: 'Yes, OrbitHR offers a mobile experience with facial recognition and geofenced attendance tracking. Employees can securely clock in and clock out on their own devices without needing expensive biometric fingerprint scanners.',
+  },
+  {
+    q: 'How do I contact customer support?',
+    a: 'You can contact OrbitHR customer support directly by calling +91 9348532113 or emailing support@balajione.dev. Our support team is based in India and ready to help you set up your company workspace.',
+  },
+];
 
 const modules = [
   { icon: Users, title: 'People', copy: 'One living employee record from onboarding to exit.', tone: 'violet' },
@@ -43,6 +66,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly');
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   return (
     <div className="lp-root">
@@ -57,6 +81,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <a href="#solutions">Solutions</a>
           <a href="#experience">Experience</a>
           <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
         </div>
 
         <div className="lp-nav-actions">
@@ -74,6 +99,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <a href="#platform" onClick={() => setMobileOpen(false)}>Platform</a>
           <a href="#solutions" onClick={() => setMobileOpen(false)}>Solutions</a>
           <a href="#pricing" onClick={() => setMobileOpen(false)}>Pricing</a>
+          <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
           <a href="tel:+919348532113" className="flex items-center gap-2 text-purple-700 font-bold" onClick={() => setMobileOpen(false)}>
             <Phone size={14} /> Support: +91 9348532113
           </a>
@@ -87,8 +113,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="lp-orb lp-orb-one" />
           <div className="lp-orb lp-orb-two" />
           <div className="lp-hero-copy">
-            <div className="lp-eyebrow"><Sparkles size={15} /> The people platform for modern India</div>
-            <h1>Work feels better when <em>everything connects.</em></h1>
+            <div className="lp-eyebrow"><Sparkles size={15} /> OrbitHR by BalajiOne Enterprises — Modern Cloud HRMS India</div>
+            <h1>Modern HRMS &amp; Statutory Payroll. <em>Work feels better when everything connects.</em></h1>
             <p>One beautifully simple workspace for people, payroll, time, talent, and every moment in between.</p>
             <div className="lp-hero-actions">
               <button className="lp-primary" onClick={onNavigateToRegister}>Build your workspace <ArrowRight size={18} /></button>
@@ -268,6 +294,47 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </section>
 
+        <section className="lp-section" id="faq">
+          <div className="lp-section-head">
+            <div>
+              <span className="lp-kicker">Got questions?</span>
+              <h2>Frequently asked<br /><em>questions.</em></h2>
+            </div>
+            <p>Everything you need to know about OrbitHR, pricing, automated Indian statutory compliance, and rollout.</p>
+          </div>
+          <div className="w-full max-w-4xl mx-auto col-span-full space-y-4 mt-8">
+            {faqs.map((faq, index) => {
+              const isOpen = openFaq === index;
+              return (
+                <div
+                  key={index}
+                  className="rounded-2xl border border-slate-200/80 bg-white/90 backdrop-blur-md overflow-hidden transition-all shadow-sm hover:border-purple-200"
+                >
+                  <button
+                    onClick={() => setOpenFaq(isOpen ? null : index)}
+                    className="w-full text-left px-6 py-5 flex items-center justify-between gap-4 font-bold text-slate-800 text-base"
+                    aria-expanded={isOpen}
+                  >
+                    <span className="flex items-center gap-3">
+                      <HelpCircle size={18} className="text-purple-600 shrink-0" />
+                      {faq.q}
+                    </span>
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-purple-600' : ''}`}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="px-6 pb-6 pt-1 text-slate-600 text-sm leading-relaxed border-t border-slate-100">
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         <section className="lp-cta"><div className="lp-cta-orb" /><span><Sparkles size={16} /> Your next chapter starts here</span><h2>Make work feel<br /><em>remarkably human.</em></h2><p>See onboarding, attendance, payroll, and employee self-service working together in one live workspace.</p><div><button className="lp-primary lp-light" onClick={onNavigateToApp}><Play size={16} fill="currentColor" /> View live demo</button><button className="lp-ghost" onClick={onNavigateToRegister}>Start free today <ArrowRight size={18} /></button></div></section>
       </main>
 
@@ -290,6 +357,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <a href="#platform">Platform</a>
             <a href="#experience">Employee experience</a>
             <a href="#pricing">Pricing</a>
+            <a href="#faq">FAQ</a>
             <button onClick={onNavigateToApp}>Live demo</button>
           </div>
           <div>
