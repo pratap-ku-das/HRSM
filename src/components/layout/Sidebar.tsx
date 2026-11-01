@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Users, GitBranch, CalendarCheck, CalendarDays, CalendarClock,
   CreditCard, Briefcase, Target, Laptop, FileText, FileClock,
   Megaphone, Receipt, ShieldCheck, Settings, Sparkles, ChevronRight, Bell,
-  PanelLeftClose, PanelLeftOpen, X, Network, Inbox, GitPullRequestArrow, Activity
+  PanelLeftClose, PanelLeftOpen, X, Network, Inbox, GitPullRequestArrow, Activity, ShieldAlert
 } from 'lucide-react';
 import { BrandCredit } from '../BrandCredit';
 import { ProductLogo } from '../ProductLogo';
@@ -210,6 +210,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Workspace Settings',
       icon: Settings,
       badge: null,
+      section: 'SECURITY & SYSTEM'
+    },
+    {
+      id: 'billing',
+      label: 'Billing & Plans',
+      icon: CreditCard,
+      badge: 'Razorpay',
+      badgeColor: 'bg-brand-500/20 text-brand-300 border-brand-500/30',
+      section: 'SECURITY & SYSTEM'
+    },
+    {
+      id: 'super-admin-subscriptions',
+      label: 'Tenant Subscriptions',
+      icon: ShieldAlert,
+      badge: 'Super Admin',
+      badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
       section: 'SECURITY & SYSTEM'
     },
   ];

@@ -38,6 +38,8 @@ import { NotificationCenterPage } from './pages/settings/NotificationCenterPage'
 import { GovernanceCenterPage } from './pages/governance/GovernanceCenterPage';
 import { SecurityCenterPage } from './pages/security/SecurityCenterPage';
 import { EmployeeSelfServicePage } from './pages/self-service/EmployeeSelfServicePage';
+import { BillingSubscriptionPage } from './pages/billing/BillingSubscriptionPage';
+import { SuperAdminSubscriptionsPage } from './pages/superadmin/SuperAdminSubscriptionsPage';
 import { canAccessView } from './config/workspaceAccess';
 
 const MainApp: React.FC = () => {
@@ -70,6 +72,8 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     const handleSessionExpiry = () => setPageMode('public_login');
+    const handleSubscriptionRequired = () => setActiveView('billing');
+    window.addEventListener('orbithr:subscription-required', handleSubscriptionRequired);
     window.addEventListener('orbithr:session-expired', handleSessionExpiry);
     return () => window.removeEventListener('orbithr:session-expired', handleSessionExpiry);
   }, []);
@@ -175,6 +179,10 @@ const MainApp: React.FC = () => {
         return <AuditLogsPage />;
       case 'settings':
         return <SettingsPage />;
+      case 'billing':
+        return <BillingSubscriptionPage />;
+      case 'super-admin-subscriptions':
+        return <SuperAdminSubscriptionsPage />;
       case 'notifications':
         return <NotificationCenterPage />;
       case 'foundation':

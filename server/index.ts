@@ -8,6 +8,9 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { createV1Router } from './v1/api.js';
+import { createRazorpayWebhookRouter } from './v1/subscription/webhookRoute.js';
+import { razorpayService } from './v1/subscription/razorpayClient.js';
+import { ensureDefaultPlans, initializeSubscriptionCheckout } from './v1/subscription/subscriptionManager.js';
 import { ensureDefaultLeaveWorkflow } from './v1/workflows.js';
 import { createOpaqueToken, createTemporaryPassword, deliverOnboardingEmail } from './v1/email.js';
 import { normalizeDatabaseUrl } from './databaseUrl.js';
@@ -82,7 +85,14 @@ const employeeToClient = (employee: any) => ({
 });
 
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({
+  limit: '1mb',
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+// Secure Razorpay Webhook listener (receives POST /api/webhooks/razorpay)
+app.use('/api', createRazorpayWebhookRouter(prisma));
 app.use('/api/v1', createV1Router(prisma));
 app.get(['/downloads/OrbitHR.apk', '/downloads/orbithr-android.apk'], (_req, res) => {
   const apkPath = path.resolve('public/downloads/OrbitHR.apk');
@@ -156,7 +166,10 @@ app.post('/api/auth/register-company', async (req, res) => {
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-');
 
-    // Create Company
+    const rawPlan = String(plan || 'STARTER').toUpperCase();
+    const planCode = ['STARTER', 'GROWTH', 'BUSINESS'].includes(rawPlan) ? rawPlan : 'STARTER';
+
+    // Create Company with selected plan
     const company = await prisma.company.create({
       data: {
         name: companyData.name,
@@ -166,9 +179,55 @@ app.post('/api/auth/register-company', async (req, res) => {
         address: companyData.address || 'Bengaluru, Karnataka, India',
         industry: companyData.industry || 'Technology',
         size: companyData.size || '11-50',
-        plan: plan || 'GROWTH',
+        plan: planCode as any,
       },
     });
+
+    // Create CompanySubscription record immediately for selected plan
+    await ensureDefaultPlans(prisma);
+    const selectedDbPlan = await prisma.subscriptionPlan.findUnique({
+      where: { code: planCode },
+    });
+
+    const now = new Date();
+    const trialDays = 14;
+    const trialEndsAt = new Date(now.getTime() + trialDays * 86_400_000);
+
+    let companySubscription: any = null;
+    if (selectedDbPlan) {
+      companySubscription = await prisma.companySubscription.create({
+        data: {
+          companyId: company.id,
+          planId: selectedDbPlan.id,
+          status: 'TRIAL',
+          currentPeriodStart: now,
+          currentPeriodEnd: trialEndsAt,
+          trialEndsAt: trialEndsAt,
+        },
+      });
+
+      await prisma.subscriptionAuditLog.create({
+        data: {
+          companyId: company.id,
+          subscriptionId: companySubscription.id,
+          action: 'TRIAL_STARTED',
+          newStatus: 'TRIAL',
+          reason: `Registration 14-day trial initiated for ${selectedDbPlan.name} plan.`,
+        },
+      });
+    }
+
+    // Initialize Razorpay subscription checkout (with 14-day trial autopay or immediate payment)
+    let checkout: any = null;
+    try {
+      const isPayNow = req.body.paymentMode === 'PAY_NOW';
+      checkout = await initializeSubscriptionCheckout(prisma, company.id, planCode, {
+        withTrial: !isPayNow,
+        trialDays,
+      });
+    } catch (checkoutErr: any) {
+      console.warn('[REGISTRATION_CHECKOUT_INIT_WARNING]', checkoutErr?.message);
+    }
 
     // Create Admin User
     const adminUser = await prisma.user.create({
@@ -229,7 +288,7 @@ app.post('/api/auth/register-company', async (req, res) => {
       },
     });
 
-    res.json({ company, user: adminUser, settings });
+    res.json({ company, user: adminUser, settings, checkout, subscription: companySubscription });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -1285,6 +1344,14 @@ if (existsSync(path.join(distPath, 'index.html'))) {
 const startServer = async () => {
   try {
     await prisma.$connect();
+    await ensureDefaultPlans(prisma).catch((err) =>
+      console.warn('[SUBSCRIPTION_PLAN_INIT_WARN]', err?.message)
+    );
+    if (razorpayService.isConfigured()) {
+      console.log(`[RAZORPAY_INIT] Razorpay client active with Key ID: ${razorpayService.getKeyId()}`);
+    } else {
+      console.log('[RAZORPAY_INIT] Razorpay credentials not detected; subscriptions will operate in test mode.');
+    }
     const stopNotificationWorkers = startNotificationWorkers(prisma);
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`HRMS PostgreSQL backend running on port ${PORT}`);

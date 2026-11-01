@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
+import { openRazorpayCheckout } from '../../utils/razorpay';
 import { 
   Building2, User, Shield, CheckCircle2, ArrowRight, ArrowLeft, 
   Sparkles, Check, Globe, Phone, MapPin, Briefcase, Users as UsersIcon,
-  Lock, Mail, Award
+  Lock, Mail, Award, CreditCard, Calendar, AlertCircle
 } from 'lucide-react';
 import { BrandCredit } from '../../components/BrandCredit';
 import { ProductLogo } from '../../components/ProductLogo';
@@ -39,19 +41,35 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
   const [confirmPassword, setConfirmPassword] = useState<string>('');
 
   // Step 3: Plan & Workspace details
-  const [selectedPlan, setSelectedPlan] = useState<'STARTER' | 'GROWTH' | 'ENTERPRISE'>('GROWTH');
+  const [selectedPlan, setSelectedPlan] = useState<'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE'>('STARTER');
   const [workspaceSlug, setWorkspaceSlug] = useState<string>('');
+  const [paymentMode, setPaymentMode] = useState<'TRIAL_AUTOPAY' | 'PAY_NOW'>('TRIAL_AUTOPAY');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const planPrices: Record<string, number> = {
+    STARTER: 299,
+    GROWTH: 799,
+    BUSINESS: 1199,
+    ENTERPRISE: 1199,
+  };
+
+  const trialEndDateStr = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  })();
 
   const handleCompanyNameChange = (val: string) => {
     setCompanyName(val);
     setWorkspaceSlug(val.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-'));
   };
 
-  const handleCompleteRegistration = () => {
+  const handleCompleteRegistration = async () => {
     setIsSubmitting(true);
+    setCheckoutError(null);
 
-    setTimeout(() => {
-      registerCompany(
+    try {
+      const regResult = await registerCompany(
         {
           name: companyName || 'My Enterprise Corp',
           email: companyEmail || adminEmail,
@@ -65,12 +83,53 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
           email: adminEmail,
           password,
         },
-        selectedPlan
+        selectedPlan,
+        { paymentMode }
       );
+
+      // Open Razorpay Checkout modal for UPI Autopay mandate or instant payment
+      if (regResult?.checkout?.subscriptionId || regResult?.checkout?.orderId) {
+        try {
+          const checkoutOpts = regResult.checkout;
+          const isTrial = paymentMode === 'TRIAL_AUTOPAY';
+          const rzpResponse = await openRazorpayCheckout({
+            key: checkoutOpts.keyId,
+            subscription_id: checkoutOpts.subscriptionId,
+            order_id: checkoutOpts.orderId,
+            name: 'OrbitHR',
+            description: isTrial
+              ? `${checkoutOpts.planName} - 14-Day Free Trial (UPI Autopay)`
+              : `${checkoutOpts.planName} Monthly Subscription`,
+            prefill: {
+              name: adminName,
+              email: adminEmail,
+              contact: phone,
+            },
+            theme: { color: '#4f46e5' },
+          });
+
+          // Verify signature on backend
+          await api.verifySubscriptionPayment({
+            razorpay_payment_id: rzpResponse.razorpay_payment_id,
+            razorpay_subscription_id: rzpResponse.razorpay_subscription_id || checkoutOpts.subscriptionId,
+            razorpay_order_id: rzpResponse.razorpay_order_id || checkoutOpts.orderId,
+            razorpay_signature: rzpResponse.razorpay_signature,
+            planCode: selectedPlan as any,
+            isTrialAutopay: isTrial,
+            trialDays: 14,
+          });
+        } catch (checkoutErr: any) {
+          console.warn('[REGISTRATION_CHECKOUT_DISMISSED]', checkoutErr?.message);
+          // User closed checkout modal; workspace remains active under 14-day trial
+        }
+      }
 
       setIsSubmitting(false);
       onRegistrationComplete();
-    }, 1200);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setCheckoutError(err?.message || 'Failed to complete registration.');
+    }
   };
 
   return (
@@ -385,7 +444,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                     }`}
                   >
                     <div className="font-bold text-white">Starter</div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">₹1,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹299<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
                     <div className="text-[10px] text-slate-400 mt-1">Up to 25 staff</div>
                   </div>
 
@@ -401,24 +460,84 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                       <span>Growth</span>
                       <span className="text-[9px] bg-brand-500 text-white px-1 rounded font-bold">TOP</span>
                     </div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">₹4,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
-                    <div className="text-[10px] text-slate-400 mt-1">Up to 150 staff</div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹799<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="text-[10px] text-slate-400 mt-1">Up to 100 staff</div>
                   </div>
 
                   <div
-                    onClick={() => setSelectedPlan('ENTERPRISE')}
+                    onClick={() => setSelectedPlan('BUSINESS')}
                     className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                      selectedPlan === 'ENTERPRISE'
+                      selectedPlan === 'BUSINESS'
                         ? 'bg-brand-500/15 border-brand-500 ring-1 ring-brand-500/50'
                         : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="font-bold text-white">Enterprise</div>
-                    <div className="text-brand-300 font-mono font-bold mt-1">₹12,999<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
+                    <div className="font-bold text-white">Business</div>
+                    <div className="text-brand-300 font-mono font-bold mt-1">₹1,199<span className="text-[10px] text-slate-400 font-normal">/mo</span></div>
                     <div className="text-[10px] text-slate-400 mt-1">Unlimited staff</div>
                   </div>
                 </div>
               </div>
+
+              {/* Autopay & Billing Options */}
+              <div className="space-y-2">
+                <label className="block text-slate-300 font-medium mb-1">Billing & Mandate Setup</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Option 1: 14-Day Free Trial with UPI Autopay */}
+                  <div
+                    onClick={() => setPaymentMode('TRIAL_AUTOPAY')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      paymentMode === 'TRIAL_AUTOPAY'
+                        ? 'bg-brand-500/15 border-brand-500 ring-1 ring-brand-500/50'
+                        : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs flex items-center space-x-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>14-Day Free Trial</span>
+                      </span>
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-bold border border-emerald-500/30">
+                        RECOMMENDED
+                      </span>
+                    </div>
+                    <div className="text-emerald-400 font-semibold text-xs mt-1.5">₹0 Charged Today</div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                      Authorize UPI Autopay (GPay, PhonePe, Paytm) or Card. Automatic recurring deduction begins on {trialEndDateStr}. Cancel anytime.
+                    </p>
+                  </div>
+
+                  {/* Option 2: Pay & Activate Instantly */}
+                  <div
+                    onClick={() => setPaymentMode('PAY_NOW')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      paymentMode === 'PAY_NOW'
+                        ? 'bg-brand-500/15 border-brand-500 ring-1 ring-brand-500/50'
+                        : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs flex items-center space-x-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-brand-400" />
+                        <span>Pay & Activate Now</span>
+                      </span>
+                    </div>
+                    <div className="text-brand-300 font-semibold text-xs mt-1.5">
+                      ₹{planPrices[selectedPlan] || 299}<span className="text-[10px] text-slate-400 font-normal"> today</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-snug">
+                      Pay month 1 now. Automatically renews monthly via Razorpay.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {checkoutError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{checkoutError}</span>
+                </div>
+              )}
 
               <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
                 <div className="font-semibold text-slate-300 flex items-center space-x-1.5">
@@ -454,7 +573,7 @@ export const RegisterCompanyPage: React.FC<RegisterCompanyPageProps> = ({
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4" />
-                      <span>Provision & Launch Workspace</span>
+                      <span>{paymentMode === 'TRIAL_AUTOPAY' ? 'Start 14-Day Free Trial (Setup Autopay)' : `Pay ₹${planPrices[selectedPlan] || 299} & Activate Workspace`}</span>
                     </>
                   )}
                 </button>

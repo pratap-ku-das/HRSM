@@ -49,25 +49,72 @@ function channelFor(eventKey: string) {
 }
 
 export async function processPushDeliveries(prisma: PrismaClient, messaging: Messaging, limit = 50) {
-  const due = await prisma.notificationDelivery.findMany({
-    where: {
-      channel: "PUSH",
-      status: { in: ["PENDING", "FAILED"] },
-      attemptCount: { lt: 6 },
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
-    },
-    include: { notification: true },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-  });
+  let claimedDeliveries: any[] = [];
 
-  for (const delivery of due) {
-    const leaseUntil = new Date(Date.now() + 60_000);
-    const claimed = await prisma.notificationDelivery.updateMany({
-      where: { id: delivery.id, status: delivery.status, attemptCount: delivery.attemptCount },
-      data: { attemptCount: { increment: 1 }, nextAttemptAt: leaseUntil },
+  // 1. PostgreSQL transaction with FOR UPDATE SKIP LOCKED
+  if (typeof prisma.$transaction === "function" && typeof prisma.$queryRawUnsafe === "function") {
+    try {
+      claimedDeliveries = await prisma.$transaction(async (tx: any) => {
+        const candidates: Array<{ id: string }> = await tx.$queryRawUnsafe(
+          `SELECT id FROM "NotificationDelivery"
+           WHERE channel = 'PUSH'
+             AND status IN ('PENDING', 'FAILED')
+             AND "attemptCount" < 6
+             AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $1)
+           ORDER BY "nextAttemptAt" ASC NULLS FIRST, "createdAt" ASC
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED`,
+          new Date(),
+          limit,
+        );
+
+        if (!Array.isArray(candidates) || candidates.length === 0) return [];
+        const candidateIds = candidates.map((c) => c.id);
+        const leaseUntil = new Date(Date.now() + 60_000);
+
+        const updated: any[] = [];
+        for (const id of candidateIds) {
+          const item = await tx.notificationDelivery.update({
+            where: { id },
+            data: { attemptCount: { increment: 1 }, nextAttemptAt: leaseUntil },
+            include: { notification: true },
+          });
+          updated.push(item);
+        }
+        return updated;
+      });
+    } catch {
+      claimedDeliveries = [];
+    }
+  }
+
+  // 2. Fallback to atomic updateMany claim for database-agnostic/mock callers
+  if (claimedDeliveries.length === 0) {
+    const due = await prisma.notificationDelivery.findMany({
+      where: {
+        channel: "PUSH",
+        status: { in: ["PENDING", "FAILED"] },
+        attemptCount: { lt: 6 },
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+      },
+      include: { notification: true },
+      orderBy: { createdAt: "asc" },
+      take: limit,
     });
-    if (!claimed.count) continue;
+
+    for (const delivery of due) {
+      const leaseUntil = new Date(Date.now() + 60_000);
+      const claimed = await prisma.notificationDelivery.updateMany({
+        where: { id: delivery.id, status: delivery.status, attemptCount: delivery.attemptCount },
+        data: { attemptCount: { increment: 1 }, nextAttemptAt: leaseUntil },
+      });
+      if (claimed.count) {
+        claimedDeliveries.push(delivery);
+      }
+    }
+  }
+
+  for (const delivery of claimedDeliveries) {
     const devices = await prisma.pushDevice.findMany({
       where: { companyId: delivery.companyId, userId: delivery.notification.userId, active: true },
       select: { token: true, tokenHash: true },
@@ -110,7 +157,7 @@ export async function processPushDeliveries(prisma: PrismaClient, messaging: Mes
       await prisma.notificationDelivery.update({ where: { id: delivery.id }, data: { status: exhausted ? "SKIPPED" : "FAILED", lastError: (error instanceof Error ? error.message : String(error)).slice(0, 1000), nextAttemptAt: exhausted ? null : new Date(Date.now() + 2 ** Math.min(delivery.attemptCount + 1, 6) * 60_000) } });
     }
   }
-  return due.length;
+  return claimedDeliveries.length;
 }
 
 async function queueAndroidReleaseNotifications(prisma: PrismaClient) {

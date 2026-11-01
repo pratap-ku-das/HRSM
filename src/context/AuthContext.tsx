@@ -12,7 +12,12 @@ interface AuthContextType {
   isRestoringSession: boolean;
   login: (email: string, password: string, mfaCode?: string) => Promise<boolean>;
   loginAsDemoUser: (userId: string) => void;
-  registerCompany: (companyData: Partial<Company>, adminData: Partial<User> & { password?: string }, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') => Promise<void>;
+  registerCompany: (
+    companyData: Partial<Company>,
+    adminData: Partial<User> & { password?: string },
+    plan: 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE',
+    options?: { paymentMode?: 'TRIAL_AUTOPAY' | 'PAY_NOW' }
+  ) => Promise<{ company: Company; user: User; settings: CompanySettings; checkout?: any; subscription?: any }>;
   switchCompany: (companyId: string) => void;
   logout: () => void;
   refreshState: () => Promise<void>;
@@ -54,11 +59,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try { await api.loginV1(email, password, mfaCode); await establishSession(); return true; }
     catch (error) { clearSession(); throw error; }
   };
-  const registerCompany: AuthContextType['registerCompany'] = async (companyData, adminData, plan) => {
+  const registerCompany: AuthContextType['registerCompany'] = async (companyData, adminData, plan, options) => {
     if (!adminData.email || !adminData.password) throw new Error('Administrator email and password are required.');
-    await api.registerCompany(companyData, adminData, plan);
+    const result = await api.registerCompany(companyData, adminData, plan, options);
     await api.loginV1(adminData.email, adminData.password);
     await establishSession();
+    return result;
   };
   const rejectDemoSession = () => { throw new Error('Local demo sessions are disabled. Sign in with an authorized account.'); };
   const logout = () => clearSession();

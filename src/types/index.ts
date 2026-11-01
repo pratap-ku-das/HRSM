@@ -22,9 +22,62 @@ export interface Company {
   address: string;
   industry: string;
   size: string; // '1-10', '11-50', '51-200', '201-500', '500+'
-  plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE';
+  plan: 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE';
   logoUrl?: string;
   createdAt: string;
+}
+
+export type SubscriptionStatus =
+  | 'TRIAL'
+  | 'ACTIVE'
+  | 'PAST_DUE'
+  | 'HALTED'
+  | 'CANCELLED'
+  | 'EXPIRED'
+  | 'COMPLETED'
+  | 'PENDING';
+
+export interface SubscriptionPlan {
+  id: string;
+  code: 'STARTER' | 'GROWTH' | 'BUSINESS';
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  billingCycle: string;
+  features: string[];
+}
+
+export interface SubscriptionStatusOverview {
+  status: SubscriptionStatus;
+  plan: {
+    code: string;
+    name: string;
+    monthlyPrice: number;
+    description: string;
+    features: string[];
+  };
+  isActive: boolean;
+  isInGracePeriod: boolean;
+  daysRemaining?: number;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  trialEndsAt?: string | null;
+  cancelAtPeriodEnd: boolean;
+  cancelledAt?: string | null;
+  razorpaySubscriptionId?: string | null;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  amount: number;
+  currency: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
+  paymentMethod: string;
+  paidAt: string | null;
+  createdAt: string;
+  razorpayPaymentId?: string | null;
+  invoiceNumber: string;
 }
 
 export type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'INTERN' | 'CONSULTANT';

@@ -55,6 +55,8 @@ import { createMobileReleaseRouter } from "./mobileRelease.js";
 import { createOnboardingRouter } from "./onboarding.js";
 import { createPayrollWorkflowRouter } from "./payrollWorkflow.js";
 import { createComplianceRouter } from "./compliance/routes.js";
+import { createSubscriptionRouter } from "./subscription/routes.js";
+import { createSubscriptionEnforcementMiddleware } from "./subscription/subscriptionMiddleware.js";
 
 type AuthUser = {
   id: string;
@@ -577,6 +579,8 @@ export function createV1Router(prisma: PrismaClient) {
       req.auth?.permissions.some(permission => permissions.includes(permission))
         ? next()
         : fail(res, 403, "FORBIDDEN", "You do not have permission to view attendance routes.");
+
+  router.use(createSubscriptionRouter(prisma, authenticate));
 
   router.post("/auth/login", loginLimiter, async (req, res, next) => {
     try {
@@ -3156,6 +3160,7 @@ export function createV1Router(prisma: PrismaClient) {
   router.use(createSettingsRouter(prisma, authenticate));
   router.use(createGovernanceRouter(prisma, authenticate));
   router.use(createComplianceRouter(prisma, authenticate));
+  router.use(createSubscriptionEnforcementMiddleware(prisma));
 
   router.use(
     (error: unknown, _req: Request, res: Response, _next: NextFunction) => {

@@ -189,7 +189,12 @@ router.post('/payroll/compliance/settlements/:id/pay',permit('payroll.approve'),
   if(!settlement)return fail(res,409,'SETTLEMENT_STATE_INVALID','Approved settlement was not found.');
 
   await prisma.$transaction(async(tx)=>{
-    await tx.fullFinalSettlement.update({where:{id:settlement.id},data:{status:'PAID',paidAt:new Date()}});
+    const updated = tx.fullFinalSettlement.updateMany
+      ? await tx.fullFinalSettlement.updateMany({where:{id:settlement.id,companyId,status:'APPROVED'},data:{status:'PAID',paidAt:new Date()}})
+      : await tx.fullFinalSettlement.update({where:{id:settlement.id},data:{status:'PAID',paidAt:new Date()}}).then(()=>({count:1}));
+    if(!updated.count){
+      throw Object.assign(new Error('Settlement has already been paid.'),{status:409,code:'SETTLEMENT_ALREADY_PAID'});
+    }
     if(settlement.loanRecovery>0){
       const loans=await tx.employeeLoan.findMany({where:{companyId,employeeId:settlement.employeeId,status:'ACTIVE'},orderBy:{startsOn:'asc'}});
       let remainingToDeduct=settlement.loanRecovery;

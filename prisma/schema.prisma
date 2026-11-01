@@ -24,6 +24,25 @@ enum PlanTier {
   STARTER
   GROWTH
   ENTERPRISE
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  HALTED
+  CANCELLED
+  EXPIRED
+  COMPLETED
+  PENDING
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
 }
 
 enum EmploymentType {
@@ -450,6 +469,9 @@ model Company {
   epfChallans              EpfChallan[]
   esicChallans             EsicChallan[]
   complianceReminderJobs   ComplianceReminderJob[]
+  subscription             CompanySubscription?
+  paymentHistories         PaymentHistory[]
+  subscriptionAuditLogs    SubscriptionAuditLog[]
 }
 
 // --------------------------------------------------------
@@ -2590,6 +2612,111 @@ model ComplianceReminderJob {
   @@index([status, leaseExpiresAt])
   @@index([obligationId])
 }
+
+// --------------------------------------------------------
+// SUBSCRIPTION & RAZORPAY BILLING SYSTEM
+// --------------------------------------------------------
+
+model SubscriptionPlan {
+  id             String                @id @default(uuid())
+  code           String                @unique // STARTER, GROWTH, BUSINESS
+  name           String
+  description    String
+  price          Int                   // In INR (e.g. 299, 799, 1199)
+  currency       String                @default("INR")
+  billingCycle   String                @default("monthly")
+  razorpayPlanId String?
+  features       Json                  @default("[]")
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  subscriptions  CompanySubscription[]
+}
+
+model CompanySubscription {
+  id                     String                 @id @default(uuid())
+  companyId              String                 @unique
+  planId                 String
+  razorpaySubscriptionId String?                @unique
+  razorpayCustomerId     String?
+  status                 SubscriptionStatus     @default(TRIAL)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  trialEndsAt            DateTime?
+  cancelAtPeriodEnd      Boolean                @default(false)
+  cancelledAt            DateTime?
+  gracePeriodEndsAt      DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  company                Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan                   SubscriptionPlan       @relation(fields: [planId], references: [id])
+  payments               PaymentHistory[]
+  auditLogs              SubscriptionAuditLog[]
+
+  @@index([companyId])
+  @@index([status])
+  @@index([razorpaySubscriptionId])
+}
+
+model PaymentHistory {
+  id                String               @id @default(uuid())
+  companyId         String
+  subscriptionId    String?
+  razorpayPaymentId String?              @unique
+  razorpayOrderId   String?
+  razorpayInvoiceId String?
+  amount            Int                  // In INR
+  currency          String               @default("INR")
+  status            PaymentStatus        @default(PENDING)
+  paymentMethod     String?
+  errorMessage      String?
+  paidAt            DateTime?
+  createdAt         DateTime             @default(now())
+
+  company           Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscription      CompanySubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([razorpayPaymentId])
+}
+
+model RazorpayWebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  payload     Json
+  status      String   @default("PROCESSED") // PROCESSED, FAILED, IGNORED
+  error       String?
+  createdAt   DateTime @default(now())
+  processedAt DateTime @default(now())
+
+  @@index([eventId])
+  @@index([eventType])
+}
+
+model SubscriptionAuditLog {
+  id             String               @id @default(uuid())
+  companyId      String
+  subscriptionId String?
+  changedById    String?
+  action         String               // MANUAL_OVERRIDE, AUTO_RENEW, CANCEL, PAYMENT_FAILURE, etc.
+  previousStatus String?
+  newStatus      String
+  reason         String?
+  metadata       Json?
+  createdAt      DateTime             @default(now())
+
+  company        Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscription   CompanySubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
 
 
 

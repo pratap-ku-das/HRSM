@@ -9,7 +9,8 @@ import {
   Company, User, Employee, Department, Designation, AttendanceRecord, 
   LeaveType, LeaveRequest, PayrollRun, Payslip, JobPosting, JobApplicant, 
   PerformanceGoal, Asset, CompanyDocument, Holiday, Announcement, ExpenseClaim, 
-  AuditLog, CompanySettings, AttendanceStatus, OrganizationStructure, AccessConfiguration, PermissionScope, WorkflowDefinition, WorkflowInstance, ApprovalInboxItem, WorkflowModule, AttendanceConfiguration, AttendanceRequestItem, PayrollConfiguration, PayrollEngineRun, PayrollLineDetail, Employee360, CommandCenterData, OrbitNotification, NotificationPreference, PerformanceWorkspace
+  AuditLog, CompanySettings, AttendanceStatus, OrganizationStructure, AccessConfiguration, PermissionScope, WorkflowDefinition, WorkflowInstance, ApprovalInboxItem, WorkflowModule, AttendanceConfiguration, AttendanceRequestItem, PayrollConfiguration, PayrollEngineRun, PayrollLineDetail, Employee360, CommandCenterData, OrbitNotification, NotificationPreference, PerformanceWorkspace,
+  SubscriptionPlan, SubscriptionStatusOverview, InvoiceRecord
 } from '../types';
 
 const API_BASE = '/api';
@@ -68,6 +69,10 @@ async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true
     const headers = new Headers(options?.headers);
     headers.set('Authorization', `Bearer ${accessToken}`);
     return fetchJSON<T>(url, { ...options, headers }, false);
+  }
+
+  if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('orbithr:subscription-required'));
   }
 
   if (!res.ok) {
@@ -206,10 +211,26 @@ export const api = {
   },
   hasV1Session: () => Boolean(localStorage.getItem(ACCESS_TOKEN_KEY)),
 
-  registerCompany: (companyData: any, adminData: any, plan: string) =>
-    fetchJSON<{ company: Company; user: User; settings: CompanySettings }>(`${API_BASE}/auth/register-company`, {
+  registerCompany: (
+    companyData: any,
+    adminData: any,
+    plan: string,
+    options?: { paymentMode?: 'TRIAL_AUTOPAY' | 'PAY_NOW' }
+  ) =>
+    fetchJSON<{
+      company: Company;
+      user: User;
+      settings: CompanySettings;
+      checkout?: any;
+      subscription?: any;
+    }>(`${API_BASE}/auth/register-company`, {
       method: 'POST',
-      body: JSON.stringify({ companyData, adminData, plan }),
+      body: JSON.stringify({
+        companyData,
+        adminData,
+        plan,
+        paymentMode: options?.paymentMode || 'TRIAL_AUTOPAY',
+      }),
     }),
 
   // Companies
@@ -356,7 +377,11 @@ export const api = {
     const res = await fetch(`${API_BASE}/v1/payroll/bank-export/batch/${id}/download`, {
       headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
     });
-    if (!res.ok) {
+    if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('orbithr:subscription-required'));
+  }
+
+  if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err?.error?.message || `Download failed with status ${res.status}`);
     }
@@ -846,7 +871,11 @@ export const api = {
     const res = await fetch(`${API_BASE}/v1/compliance/filings/${id}/export`, {
       headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
     });
-    if (!res.ok) {
+    if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('orbithr:subscription-required'));
+  }
+
+  if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error?.message || 'Failed to download ECR text file');
     }
@@ -878,7 +907,11 @@ export const api = {
     const res = await fetch(`${API_BASE}/v1/compliance/filings/${id}/export`, {
       headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
     });
-    if (!res.ok) {
+    if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('orbithr:subscription-required'));
+  }
+
+  if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error?.message || 'Failed to download ESIC bulk return file');
     }
@@ -906,4 +939,81 @@ export const api = {
     (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/esic/challans`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
   updateEsicChallan: async (id: string, body: any) =>
     (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/compliance/esic/challans/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }, body: JSON.stringify(body) })).data,
+
+  // Subscription & Razorpay Billing
+  getSubscriptionPlans: async (): Promise<SubscriptionPlan[]> =>
+    (await fetchJSON<ApiEnvelope<SubscriptionPlan[]>>(`${API_BASE}/v1/subscription/plans`)).data,
+  
+  getSubscriptionStatus: async (): Promise<SubscriptionStatusOverview> =>
+    (await fetchJSON<ApiEnvelope<SubscriptionStatusOverview>>(`${API_BASE}/v1/subscription/status`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }
+    })).data,
+
+  initiateSubscriptionCheckout: async (
+    planCode: 'STARTER' | 'GROWTH' | 'BUSINESS',
+    options?: { withTrial?: boolean; trialDays?: number }
+  ): Promise<any> =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/subscription/checkout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: JSON.stringify({
+        planCode,
+        withTrial: options?.withTrial,
+        trialDays: options?.trialDays,
+      })
+    })).data,
+
+  verifySubscriptionPayment: async (verificationData: {
+    razorpay_payment_id: string;
+    razorpay_subscription_id?: string;
+    razorpay_order_id?: string;
+    razorpay_signature: string;
+    planCode: string;
+    isTrialAutopay?: boolean;
+    trialDays?: number;
+  }): Promise<any> =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/subscription/verify`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: JSON.stringify(verificationData)
+    })).data,
+
+  cancelSubscription: async (reason?: string): Promise<any> =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/subscription/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: JSON.stringify({ reason })
+    })).data,
+
+  resumeSubscription: async (): Promise<any> =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/subscription/resume`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: JSON.stringify({})
+    })).data,
+
+  getSubscriptionInvoices: async (): Promise<InvoiceRecord[]> =>
+    (await fetchJSON<ApiEnvelope<InvoiceRecord[]>>(`${API_BASE}/v1/subscription/invoices`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }
+    })).data,
+
+  getSuperAdminSubscriptions: async (params?: { search?: string; status?: string; plan?: string }): Promise<any> => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.status) q.set('status', params.status);
+    if (params?.plan) q.set('plan', params.plan);
+    return (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/super-admin/subscriptions?${q.toString()}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` }
+    })).data;
+  },
+
+  superAdminOverrideSubscription: async (
+    companyId: string,
+    body: { status: string; planCode: string; reason: string; extendDays?: number }
+  ): Promise<any> =>
+    (await fetchJSON<ApiEnvelope<any>>(`${API_BASE}/v1/super-admin/subscriptions/${companyId}/override`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(ACCESS_TOKEN_KEY) || ''}` },
+      body: JSON.stringify(body)
+    })).data,
 };

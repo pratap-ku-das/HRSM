@@ -724,10 +724,22 @@ export function createPayrollRouter(
               },
             });
 
-            await tx.expenseClaim.update({
-              where: { id: claim.id },
-              data: { status: "INGESTED" },
-            });
+            const claimUpdate = tx.expenseClaim.updateMany
+              ? await tx.expenseClaim.updateMany({
+                  where: { id: claim.id, companyId, status: "APPROVED" },
+                  data: { status: "INGESTED" },
+                })
+              : await tx.expenseClaim.update({
+                  where: { id: claim.id },
+                  data: { status: "INGESTED" },
+                }).then(() => ({ count: 1 }));
+
+            if (!claimUpdate.count) {
+              throw Object.assign(
+                new Error(`Expense claim ${claim.id} is no longer in APPROVED status. Ingestion aborted.`),
+                { status: 409, code: "EXPENSE_CLAIM_STATE_INVALID" },
+              );
+            }
 
             adjustments.push(adj);
           }
@@ -806,6 +818,18 @@ export function createPayrollRouter(
               400,
               "EXPENSE_CLAIM_NOT_ELIGIBLE",
               `One or more requested expense claims are not eligible for ingestion: ${error.message.split(":")[1]}`,
+            );
+          }
+          if (
+            (error as any).code === "EXPENSE_CLAIM_STATE_INVALID" ||
+            (error as any).code === "P2002" ||
+            error.message.includes("is no longer in APPROVED status")
+          ) {
+            return fail(
+              res,
+              409,
+              "EXPENSE_CLAIM_STATE_INVALID",
+              "Expense claim has already been ingested or is no longer in APPROVED status.",
             );
           }
         }
@@ -1309,49 +1333,66 @@ export function createPayrollRouter(
           })
           .parse(req.body);
 
-        const updated = await prisma.payrollRun.updateMany({
-          where: {
-            id: String(req.params.id),
-            companyId: req.auth!.companyId,
-            status: "LOCKED",
-          },
-          data: {
-            paymentDate: body.paymentDate,
-            paymentReference: body.paymentReference,
-            paymentRecordedById: req.auth!.id,
-            paymentRecordedAt: new Date(),
-          },
-        });
+        const performRecordPayment = async (tx: any) => {
+          const updated = tx.payrollRun.updateMany
+            ? await tx.payrollRun.updateMany({
+                where: {
+                  id: String(req.params.id),
+                  companyId: req.auth!.companyId,
+                  status: "LOCKED",
+                },
+                data: {
+                  paymentDate: body.paymentDate,
+                  paymentReference: body.paymentReference,
+                  paymentRecordedById: req.auth!.id,
+                  paymentRecordedAt: new Date(),
+                },
+              })
+            : await tx.payrollRun.update({
+                where: { id: String(req.params.id) },
+                data: {
+                  paymentDate: body.paymentDate,
+                  paymentReference: body.paymentReference,
+                  paymentRecordedById: req.auth!.id,
+                  paymentRecordedAt: new Date(),
+                },
+              }).then(() => ({ count: 1 }));
 
-        if (!updated.count)
-          return fail(
-            res,
-            409,
-            "PAYROLL_STATE_INVALID",
-            "Only a locked payroll can record payment.",
-          );
-
-        // Mark ingested claims as REIMBURSED
-        if (prisma.payrollAdjustment?.findMany && prisma.expenseClaim?.updateMany) {
-          const adjustments = await prisma.payrollAdjustment.findMany({
-            where: {
-              payrollRunId: String(req.params.id),
-              kind: "REIMBURSEMENT",
-              expenseClaimId: { not: null },
-            },
-            select: { expenseClaimId: true },
-          });
-
-          const claimIds = adjustments.map((a) => a.expenseClaimId!).filter(Boolean);
-          if (claimIds.length > 0) {
-            await prisma.expenseClaim.updateMany({
-              where: { id: { in: claimIds } },
-              data: {
-                status: "REIMBURSED",
-                reimbursedAt: body.paymentDate,
-              },
+          if (!updated.count) {
+            throw Object.assign(new Error("Only a locked payroll can record payment."), {
+              status: 409,
+              code: "PAYROLL_STATE_INVALID",
             });
           }
+
+          // Mark ingested claims as REIMBURSED
+          if (tx.payrollAdjustment?.findMany && tx.expenseClaim?.updateMany) {
+            const adjustments = await tx.payrollAdjustment.findMany({
+              where: {
+                payrollRunId: String(req.params.id),
+                kind: "REIMBURSEMENT",
+                expenseClaimId: { not: null },
+              },
+              select: { expenseClaimId: true },
+            });
+
+            const claimIds = adjustments.map((a: any) => a.expenseClaimId!).filter(Boolean);
+            if (claimIds.length > 0) {
+              await tx.expenseClaim.updateMany({
+                where: { id: { in: claimIds } },
+                data: {
+                  status: "REIMBURSED",
+                  reimbursedAt: body.paymentDate,
+                },
+              });
+            }
+          }
+        };
+
+        if (prisma.$transaction) {
+          await prisma.$transaction(performRecordPayment);
+        } else {
+          await performRecordPayment(prisma);
         }
 
         await audit(
@@ -1376,6 +1417,27 @@ export function createPayrollRouter(
     permit("payroll.approve"),
     async (req: PayrollRequest, res, next) => {
       try {
+        const idempotencyKey = (
+          req.header("idempotency-key") ||
+          (req.headers["x-idempotency-key"] as string | undefined)
+        )?.trim();
+
+        if (idempotencyKey && prisma.idempotencyRecord?.findUnique) {
+          const oldRecord = await prisma.idempotencyRecord.findUnique({
+            where: {
+              companyId_userId_key_operation: {
+                companyId: req.auth!.companyId,
+                userId: req.auth!.id,
+                key: idempotencyKey,
+                operation: `PUBLISH_PAYROLL_${req.params.id}`,
+              },
+            },
+          });
+          if (oldRecord) {
+            return ok(res, oldRecord.responseJson, oldRecord.statusCode);
+          }
+        }
+
         const run = await prisma.payrollRun.findFirst({
           where: {
             id: String(req.params.id),
@@ -1384,16 +1446,50 @@ export function createPayrollRouter(
           },
           include: { lines: true },
         });
-        if (!run)
+        if (!run) {
+          const existingRun = await prisma.payrollRun.findFirst({
+            where: {
+              id: String(req.params.id),
+              companyId: req.auth!.companyId,
+            },
+            select: { status: true },
+          });
+          if (existingRun?.status === "PAYSLIPS_PUBLISHED") {
+            return fail(
+              res,
+              409,
+              "PAYROLL_ALREADY_PUBLISHED",
+              "Payroll run has already been published.",
+            );
+          }
           return fail(
             res,
             409,
             "PAYROLL_STATE_INVALID",
             "Locked payroll was not found.",
           );
+        }
         if (run.status === "LOCKED" && (!run.paymentDate || !run.paymentReference))
           return fail(res, 409, "PAYMENT_NOT_RECORDED", "Record the payroll payment before publishing payslips.");
+
         await prisma.$transaction(async (tx) => {
+          // Lock parent run immediately with atomic conditional update
+          const runUpdate = tx.payrollRun.updateMany
+            ? await tx.payrollRun.updateMany({
+                where: { id: run.id, status: { in: ["LOCKED", "PAYSLIP_GENERATED"] } },
+                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
+              })
+            : await tx.payrollRun.update({
+                where: { id: run.id },
+                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
+              }).then(() => ({ count: 1 }));
+          if (!runUpdate.count) {
+            throw Object.assign(new Error("Payroll has already been published."), {
+              status: 409,
+              code: "PAYROLL_ALREADY_PUBLISHED",
+            });
+          }
+
           for (const [index, line] of run.lines.entries()) {
             const breakdown = line.breakdown as Record<string, number>;
             const payslipNumber = `PS-${run.month}-${String(index + 1).padStart(6, "0")}`;
@@ -1479,58 +1575,101 @@ export function createPayrollRouter(
                 });
                 if (!existingRepayment) {
                   const amount = Math.min(repayment, loan.outstanding);
-                  await tx.loanRepayment.create({
-                    data: { loanId: loan.id, payrollRunId: run.id, amount },
-                  });
-                  await tx.employeeLoan.update({
-                    where: { id: loan.id },
-                    data: {
-                      outstanding: Math.max(0, loan.outstanding - amount),
-                      status:
-                        loan.outstanding - amount <= 0 ? "CLOSED" : "ACTIVE",
-                    },
-                  });
+                  if (amount > 0) {
+                    await tx.loanRepayment.create({
+                      data: { loanId: loan.id, payrollRunId: run.id, amount },
+                    });
+                    await tx.employeeLoan.update({
+                      where: { id: loan.id },
+                      data: {
+                        outstanding: Math.max(0, loan.outstanding - amount),
+                        status:
+                          loan.outstanding - amount <= 0 ? "CLOSED" : "ACTIVE",
+                      },
+                    });
+                  }
                 }
               }
             }
           }
-          const runUpdate = tx.payrollRun.updateMany
-            ? await tx.payrollRun.updateMany({
-                where: { id: run.id, status: { in: ["LOCKED", "PAYSLIP_GENERATED"] } },
-                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
-              })
-            : await tx.payrollRun.update({
-                where: { id: run.id },
-                data: { status: "PAYSLIPS_PUBLISHED", processedDate: new Date(), publishedAt: new Date() },
-              }).then(() => ({ count: 1 }));
-          if (!runUpdate.count) {
-            throw Object.assign(new Error("Payroll has already been published."), {
-              status: 409,
-              code: "PAYROLL_ALREADY_PUBLISHED",
+
+          // Transactional Notification Outbox: create Notification & NotificationDelivery inside tx
+          if (tx.employee?.findMany) {
+            const recipients = await tx.employee.findMany({
+              where: {
+                companyId: run.companyId,
+                id: { in: run.lines.map((line) => line.employeeId) },
+                userId: { not: null },
+              },
+              select: { userId: true },
             });
+            for (const employee of recipients) {
+              if (employee.userId) {
+                await emitNotification(tx, {
+                  companyId: run.companyId,
+                  userId: employee.userId,
+                  eventKey: "PAYROLL_PUBLISHED",
+                  title: "Payroll published",
+                  body: `Your ${run.month} payslip is now available.`,
+                  entityType: "PayrollRun",
+                  entityId: run.id,
+                  actionUrl: "/self-service?tab=pay",
+                });
+              }
+            }
           }
         });
+
+        if (idempotencyKey && prisma.idempotencyRecord?.create) {
+          try {
+            await prisma.idempotencyRecord.create({
+              data: {
+                companyId: run.companyId,
+                userId: req.auth!.id,
+                key: idempotencyKey,
+                operation: `PUBLISH_PAYROLL_${run.id}`,
+                statusCode: 200,
+                responseJson: {
+                  status: "PAYSLIPS_PUBLISHED",
+                  count: run.lines.length,
+                },
+                expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+              },
+            });
+          } catch {
+            // Ignore duplicate key collision
+          }
+        }
+
         await audit(
           req,
           "PUBLISH_PAYSLIPS",
           `${run.month} payslips published.`,
         );
-        const recipients = await prisma.employee.findMany({
-          where: { companyId: run.companyId, id: { in: run.lines.map(line => line.employeeId) }, userId: { not: null } },
-          select: { userId: true },
-        });
-        await Promise.allSettled(recipients.flatMap(employee => employee.userId ? [
-          emitNotification(prisma, {
-            companyId: run.companyId,
-            userId: employee.userId,
-            eventKey: "PAYROLL_PUBLISHED",
-            title: "Payroll published",
-            body: `Your ${run.month} payslip is now available.`,
-            entityType: "PayrollRun",
-            entityId: run.id,
-            actionUrl: "/self-service?tab=pay",
-          }),
-        ] : []));
+
+        try {
+          const recipients = await prisma.employee.findMany({
+            where: { companyId: run.companyId, id: { in: run.lines.map(line => line.employeeId) }, userId: { not: null } },
+            select: { userId: true },
+          });
+          if (!prisma.$transaction) {
+            await Promise.allSettled(recipients.flatMap(employee => employee.userId ? [
+              emitNotification(prisma, {
+                companyId: run.companyId,
+                userId: employee.userId,
+                eventKey: "PAYROLL_PUBLISHED",
+                title: "Payroll published",
+                body: `Your ${run.month} payslip is now available.`,
+                entityType: "PayrollRun",
+                entityId: run.id,
+                actionUrl: "/self-service?tab=pay",
+              }),
+            ] : []));
+          }
+        } catch (notificationError) {
+          console.warn("[PAYROLL_PUBLISH] Post-commit notification error absorbed:", notificationError);
+        }
+
         return ok(res, {
           status: "PAYSLIPS_PUBLISHED",
           count: run.lines.length,
@@ -1628,56 +1767,70 @@ export function createPayrollRouter(
           }
         }
 
-        const updated = await prisma.payrollRun.updateMany({
-          where: {
-            id: runId,
-            companyId,
-            status: {
-              in: [
-                "LOCKED",
-                "PAYSLIPS_PUBLISHED",
-                "BANK_EXPORTED",
-                "PROCESSED",
-                "PAID",
-              ],
-            },
-          },
-          data: { status: "REVERSED" },
-        });
+        const performReverse = async (tx: any) => {
+          const updated = tx.payrollRun.updateMany
+            ? await tx.payrollRun.updateMany({
+                where: {
+                  id: runId,
+                  companyId,
+                  status: {
+                    in: [
+                      "LOCKED",
+                      "PAYSLIPS_PUBLISHED",
+                      "BANK_EXPORTED",
+                      "PROCESSED",
+                      "PAID",
+                    ],
+                  },
+                },
+                data: { status: "REVERSED" },
+              })
+            : await tx.payrollRun.update({
+                where: { id: runId },
+                data: { status: "REVERSED" },
+              }).then(() => ({ count: 1 }));
 
-        if (!updated.count)
-          return fail(
-            res,
-            409,
-            "PAYROLL_STATE_INVALID",
-            "A locked or published payroll run was not found.",
-          );
-
-        // Revert ingested claims back to APPROVED
-        if (prisma.payrollAdjustment?.findMany && prisma.expenseClaim?.updateMany) {
-          const adjustments = await prisma.payrollAdjustment.findMany({
-            where: {
-              payrollRunId: String(req.params.id),
-              kind: "REIMBURSEMENT",
-              expenseClaimId: { not: null },
-            },
-            select: { expenseClaimId: true },
-          });
-
-          const claimIds = adjustments.map((a) => a.expenseClaimId!).filter(Boolean);
-          if (claimIds.length > 0) {
-            await prisma.expenseClaim.updateMany({
-              where: { id: { in: claimIds } },
-              data: { status: "APPROVED", reimbursedAt: null },
+          if (!updated.count) {
+            throw Object.assign(new Error("A locked or published payroll run was not found."), {
+              status: 409,
+              code: "PAYROLL_STATE_INVALID",
             });
           }
 
-          await prisma.payrollAdjustment.deleteMany({
-            where: {
-              payrollRunId: String(req.params.id),
-              kind: "REIMBURSEMENT",
-            },
-          });
+          // Revert ingested claims back to APPROVED
+          if (tx.payrollAdjustment?.findMany && tx.expenseClaim?.updateMany) {
+            const adjustments = await tx.payrollAdjustment.findMany({
+              where: {
+                payrollRunId: String(req.params.id),
+                kind: "REIMBURSEMENT",
+                expenseClaimId: { not: null },
+              },
+              select: { expenseClaimId: true },
+            });
+
+            const claimIds = adjustments.map((a: any) => a.expenseClaimId!).filter(Boolean);
+            if (claimIds.length > 0) {
+              await tx.expenseClaim.updateMany({
+                where: { id: { in: claimIds } },
+                data: { status: "APPROVED", reimbursedAt: null },
+              });
+            }
+
+            if (tx.payrollAdjustment?.deleteMany) {
+              await tx.payrollAdjustment.deleteMany({
+                where: {
+                  payrollRunId: String(req.params.id),
+                  kind: "REIMBURSEMENT",
+                },
+              });
+            }
+          }
+        };
+
+        if (prisma.$transaction) {
+          await prisma.$transaction(performReverse);
+        } else {
+          await performReverse(prisma);
         }
 
         await audit(

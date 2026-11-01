@@ -29,6 +29,8 @@ const rules: Record<string, string[]> = {
   audit: ['audit.read'],
   governance: ['audit.read'],
   settings: ['company.manage'],
+  billing: ['company.manage'],
+  'super-admin-subscriptions': [],
 };
 
 export const hasPermission = (user: User | null | undefined, permission: string) =>
@@ -36,6 +38,8 @@ export const hasPermission = (user: User | null | undefined, permission: string)
 
 export const canAccessView = (user: User | null | undefined, view: string) => {
   if (!user) return false;
+  if (view === 'super-admin-subscriptions') return user.role === 'SUPER_ADMIN';
+  if (view === 'billing') return ['SUPER_ADMIN', 'COMPANY_ADMIN'].includes(user.role) || hasPermission(user, 'company.manage');
   const required = rules[view];
   return required ? required.length === 0 || required.some(permission => hasPermission(user, permission)) : false;
 };

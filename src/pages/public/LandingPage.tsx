@@ -3,7 +3,7 @@ import {
   ArrowRight, BarChart3, CalendarCheck, Check, ChevronRight,
   CircleCheck, CreditCard, FileText, Fingerprint, Globe2, Menu, Play,
   Headphones, LockKeyhole, Mail, Receipt, ShieldCheck, Sparkles, Star,
-  Target, TrendingUp, Users, X, Zap,
+  Target, TrendingUp, Users, X, Zap, Phone,
 } from 'lucide-react';
 import { BrandCredit } from '../../components/BrandCredit';
 import { ProductLogo } from '../../components/ProductLogo';
@@ -42,7 +42,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onNavigateToApp,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [billing, setBilling] = useState<'monthly' | 'annual'>('annual');
+  const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly');
 
   return (
     <div className="lp-root">
@@ -74,6 +74,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <a href="#platform" onClick={() => setMobileOpen(false)}>Platform</a>
           <a href="#solutions" onClick={() => setMobileOpen(false)}>Solutions</a>
           <a href="#pricing" onClick={() => setMobileOpen(false)}>Pricing</a>
+          <a href="tel:+919348532113" className="flex items-center gap-2 text-purple-700 font-bold" onClick={() => setMobileOpen(false)}>
+            <Phone size={14} /> Support: +91 9348532113
+          </a>
           <button onClick={onNavigateToLogin}>Sign in</button>
           <button className="lp-primary" onClick={onNavigateToRegister}>Start free</button>
         </div>
@@ -136,7 +139,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         <section className="lp-trust">
           <div className="lp-trust-companies"><span>BUILT FOR AMBITIOUS TEAMS ACROSS INDIA</span><div><b>finbox</b><b>PIXELCRAFT</b><b>northstar</b><b>WAVEFORM</b><b>kernl.</b></div></div>
-          <div className="lp-trust-metrics"><div><TrendingUp /><strong>99.9%</strong><small>uptime target</small></div><div><LockKeyhole /><strong>Encrypted</strong><small>in transit & at rest</small></div><div><Headphones /><strong>India-based</strong><small>customer support</small></div></div>
+          <div className="lp-trust-metrics"><div><TrendingUp /><strong>99.9%</strong><small>uptime target</small></div><div><LockKeyhole /><strong>Encrypted</strong><small>in transit & at rest</small></div><a href="tel:+919348532113" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <div><Headphones /><strong>+91 9348532113</strong><small>India-based support</small></div>
+          </a></div>
         </section>
 
         <section className="lp-section" id="platform">
@@ -190,14 +195,129 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         <section className="lp-pricing" id="pricing">
-          <div className="lp-pricing-copy"><span className="lp-kicker">Simple pricing</span><h2>Start small.<br /><em>Scale without friction.</em></h2><p>Every plan includes the core people platform, employee self-service, mobile access, and support.</p><div className="lp-toggle"><button className={billing === 'monthly' ? 'active' : ''} onClick={() => setBilling('monthly')}>Monthly</button><button className={billing === 'annual' ? 'active' : ''} onClick={() => setBilling('annual')}>Annual <span>Save 20%</span></button></div></div>
-          <div className="lp-price-card"><div className="lp-popular">MOST POPULAR</div><small>OrbitHR Growth</small><div className="lp-price"><sup>₹</sup><strong>{billing === 'annual' ? '149' : '189'}</strong><span>/employee<br />/month</span></div><p>For growing teams ready to bring their people operations together.</p><ul><li><Check /> Complete employee lifecycle</li><li><Check /> Attendance and leave</li><li><Check /> Indian payroll and compliance</li><li><Check /> Recruitment and performance</li><li><Check /> Priority support</li></ul><button className="lp-primary" onClick={onNavigateToRegister}>Start your 14-day trial <ArrowRight size={17} /></button></div>
+          <div className="lp-pricing-copy col-span-full text-center max-w-2xl mx-auto mb-10"><span className="lp-kicker">Simple, Transparent Pricing</span><h2>Choose the right plan<br /><em>for your growing team.</em></h2><p>Every plan includes the core people platform, employee self-service, mobile access, and bank-grade security. Billed monthly in INR via Razorpay.</p></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl mx-auto col-span-full">
+            {/* Starter Plan */}
+            <div className="lp-price-card flex flex-col justify-between">
+              <div>
+                <small className="text-slate-500 font-bold uppercase tracking-wider text-xs">OrbitHR Starter</small>
+                <div className="lp-price mt-4">
+                  <sup>₹</sup><strong>299</strong><span>/month<br />billed monthly</span>
+                </div>
+                <p className="text-slate-600 text-sm mt-2">Essential workforce management for startups and small teams.</p>
+                <ul className="mt-6 space-y-3">
+                  <li><Check /> Up to 25 employees</li>
+                  <li><Check /> Employee lifecycle & directory</li>
+                  <li><Check /> Attendance & leave management</li>
+                  <li><Check /> Indian statutory payroll (EPF, ESI, TDS)</li>
+                  <li><Check /> Mobile & Web self-service</li>
+                  <li><Check /> Standard email support</li>
+                </ul>
+              </div>
+              <button className="lp-primary mt-8 w-full" onClick={() => onNavigateToRegister()}>
+                Select Starter <ArrowRight size={17} />
+              </button>
+            </div>
+
+            {/* Growth Plan */}
+            <div className="lp-price-card flex flex-col justify-between border-brand-500 ring-2 ring-brand-500/20 relative">
+              <div className="lp-popular">MOST POPULAR</div>
+              <div>
+                <small className="text-brand-600 font-bold uppercase tracking-wider text-xs">OrbitHR Growth</small>
+                <div className="lp-price mt-4">
+                  <sup>₹</sup><strong>799</strong><span>/month<br />billed monthly</span>
+                </div>
+                <p className="text-slate-600 text-sm mt-2">Automated operations and compliance for expanding teams.</p>
+                <ul className="mt-6 space-y-3">
+                  <li><Check /> Up to 100 employees</li>
+                  <li><Check /> Everything in Starter</li>
+                  <li><Check /> Face-Auth attendance & geofencing</li>
+                  <li><Check /> Multi-stage approval workflows</li>
+                  <li><Check /> Expense reimbursements & claims</li>
+                  <li><Check /> Recruitment & ATS candidate portal</li>
+                  <li><Check /> Priority email & chat support</li>
+                </ul>
+              </div>
+              <button className="lp-primary mt-8 w-full bg-brand-600 hover:bg-brand-700" onClick={() => onNavigateToRegister()}>
+                Select Growth <ArrowRight size={17} />
+              </button>
+            </div>
+
+            {/* Business Plan */}
+            <div className="lp-price-card flex flex-col justify-between">
+              <div>
+                <small className="text-slate-500 font-bold uppercase tracking-wider text-xs">OrbitHR Business</small>
+                <div className="lp-price mt-4">
+                  <sup>₹</sup><strong>1,199</strong><span>/month<br />billed monthly</span>
+                </div>
+                <p className="text-slate-600 text-sm mt-2">Enterprise-grade governance, audits, and multi-entity scale.</p>
+                <ul className="mt-6 space-y-3">
+                  <li><Check /> Unlimited employees</li>
+                  <li><Check /> Everything in Growth</li>
+                  <li><Check /> SOC-2 audit trails & compliance calendar</li>
+                  <li><Check /> Multi-branch & cost center allocation</li>
+                  <li><Check /> Performance review & OKR engine</li>
+                  <li><Check /> Statutory reminder background daemons</li>
+                  <li><Check /> Dedicated account manager & 24/7 SLA</li>
+                </ul>
+              </div>
+              <button className="lp-primary mt-8 w-full" onClick={() => onNavigateToRegister()}>
+                Select Business <ArrowRight size={17} />
+              </button>
+            </div>
+          </div>
         </section>
 
         <section className="lp-cta"><div className="lp-cta-orb" /><span><Sparkles size={16} /> Your next chapter starts here</span><h2>Make work feel<br /><em>remarkably human.</em></h2><p>See onboarding, attendance, payroll, and employee self-service working together in one live workspace.</p><div><button className="lp-primary lp-light" onClick={onNavigateToApp}><Play size={16} fill="currentColor" /> View live demo</button><button className="lp-ghost" onClick={onNavigateToRegister}>Start free today <ArrowRight size={18} /></button></div></section>
       </main>
 
-      <footer className="lp-footer"><div className="lp-footer-brand"><div className="lp-brand"><ProductLogo className="h-12 w-44" /></div><p>People operations, beautifully connected for modern Indian teams.</p><a href="mailto:support@balajione.dev"><Mail size={15} /> support@balajione.dev</a></div><div className="lp-footer-links"><div><strong>Product</strong><a href="#platform">Platform</a><a href="#experience">Employee experience</a><a href="#pricing">Pricing</a><button onClick={onNavigateToApp}>Live demo</button></div><div><strong>Company</strong><a href="mailto:contact@balajione.dev">Contact</a><a href="/privacy">Privacy policy</a><a href="/terms">Terms & conditions</a><a href="mailto:support@balajione.dev">Support</a></div><div><strong>Follow</strong><a href="https://www.linkedin.com" target="_blank" rel="noreferrer"><span>in</span> LinkedIn</a><a href="https://www.instagram.com" target="_blank" rel="noreferrer"><span>ig</span> Instagram</a><a href="https://www.youtube.com" target="_blank" rel="noreferrer"><span>▶</span> YouTube</a></div></div><div className="lp-footer-bottom"><BrandCredit compact light /><small>© 2026 BalajiOne Enterprises · Bengaluru, India</small></div></footer>
+      <footer className="lp-footer">
+        <div className="lp-footer-brand">
+          <div className="lp-brand"><ProductLogo className="h-12 w-44" /></div>
+          <p>People operations, beautifully connected for modern Indian teams.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+            <a href="tel:+919348532113" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#6d3df5', fontWeight: 700, textDecoration: 'none', fontSize: '12px' }}>
+              <Phone size={14} /> +91 9348532113 (Support)
+            </a>
+            <a href="mailto:support@balajione.dev" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#655f75', textDecoration: 'none', fontSize: '12px' }}>
+              <Mail size={14} /> support@balajione.dev
+            </a>
+          </div>
+        </div>
+        <div className="lp-footer-links">
+          <div>
+            <strong>Product</strong>
+            <a href="#platform">Platform</a>
+            <a href="#experience">Employee experience</a>
+            <a href="#pricing">Pricing</a>
+            <button onClick={onNavigateToApp}>Live demo</button>
+          </div>
+          <div>
+            <strong>Company</strong>
+            <a href="tel:+919348532113">Support: +91 9348532113</a>
+            <a href="mailto:support@balajione.dev">Email Support</a>
+            <a href="mailto:contact@balajione.dev">Contact</a>
+            <a href="/privacy">Privacy policy</a>
+            <a href="/terms">Terms & conditions</a>
+          </div>
+          <div>
+            <strong>Follow</strong>
+            <a href="https://www.linkedin.com/company/balajione-enterprises/home/" target="_blank" rel="noreferrer">
+              <span>in</span> LinkedIn
+            </a>
+            <a href="https://www.instagram.com/balajione_enterprises?utm_source=ig_web_button_share_sheet&xtok=ZDNlZDc0MzIxNw==" target="_blank" rel="noreferrer">
+              <span>ig</span> Instagram
+            </a>
+            <a href="https://www.youtube.com/@BalajiOneEnterprises" target="_blank" rel="noreferrer">
+              <span>▶</span> YouTube
+            </a>
+          </div>
+        </div>
+        <div className="lp-footer-bottom">
+          <BrandCredit compact light />
+          <small>© 2026 BalajiOne Enterprises · Bengaluru, India</small>
+        </div>
+      </footer>
     </div>
   );
 };
