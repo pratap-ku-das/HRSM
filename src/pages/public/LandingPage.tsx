@@ -32,6 +32,10 @@ const faqs = [
     a: 'Yes, OrbitHR offers a mobile experience with facial recognition and geofenced attendance tracking. Employees can securely clock in and clock out on their own devices without needing expensive biometric fingerprint scanners.',
   },
   {
+    q: 'Is OrbitHR available for companies in Bhubaneswar, Odisha and across India?',
+    a: 'Yes! OrbitHR is the leading BalajiOne HRMS software developed in Bhubaneswar, Odisha. It is tailored for growing Indian enterprises with automated Indian statutory payroll (EPF, ESI, TDS, PT), facial recognition attendance, and dedicated local customer support in Bhubaneswar and nationwide.',
+  },
+  {
     q: 'How do I contact customer support?',
     a: 'You can contact OrbitHR customer support directly by calling +91 9348532113 or emailing support@balajione.dev. Our support team is based in India and ready to help you set up your company workspace.',
   },
@@ -113,8 +117,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="lp-orb lp-orb-one" />
           <div className="lp-orb lp-orb-two" />
           <div className="lp-hero-copy">
-            <div className="lp-eyebrow"><Sparkles size={15} /> OrbitHR by BalajiOne Enterprises — Modern Cloud HRMS India</div>
-            <h1>Modern HRMS &amp; Statutory Payroll. <em>Work feels better when everything connects.</em></h1>
+            <div className="lp-eyebrow"><Sparkles size={15} /> BalajiOne HRMS Software — Best HRMS in Bhubaneswar &amp; India</div>
+            <h1>Best HRMS &amp; Statutory Payroll Software. <em>Work feels better when everything connects.</em></h1>
             <p>One beautifully simple workspace for people, payroll, time, talent, and every moment in between.</p>
             <div className="lp-hero-actions">
               <button className="lp-primary" onClick={onNavigateToRegister}>Build your workspace <ArrowRight size={18} /></button>
@@ -164,7 +168,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         <section className="lp-trust">
-          <div className="lp-trust-companies"><span>BUILT FOR AMBITIOUS TEAMS ACROSS INDIA</span><div><b>finbox</b><b>PIXELCRAFT</b><b>northstar</b><b>WAVEFORM</b><b>kernl.</b></div></div>
+          <div className="lp-trust-companies"><span>BUILT FOR AMBITIOUS TEAMS IN BHUBANESWAR &amp; ACROSS INDIA</span><div><b>finbox</b><b>PIXELCRAFT</b><b>northstar</b><b>WAVEFORM</b><b>kernl.</b></div></div>
           <div className="lp-trust-metrics"><div><TrendingUp /><strong>99.9%</strong><small>uptime target</small></div><div><LockKeyhole /><strong>Encrypted</strong><small>in transit & at rest</small></div><a href="tel:+919348532113" style={{ textDecoration: 'none', color: 'inherit' }}>
             <div><Headphones /><strong>+91 9348532113</strong><small>India-based support</small></div>
           </a></div>
@@ -383,7 +387,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
         <div className="lp-footer-bottom">
           <BrandCredit compact light />
-          <small>© 2026 BalajiOne Enterprises · Bengaluru, India</small>
+          <small>© 2026 BalajiOne Enterprises · Bhubaneswar, Odisha &amp; Bengaluru, India</small>
         </div>
       </footer>
     </div>
