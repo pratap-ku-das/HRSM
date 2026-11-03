@@ -1,5 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
@@ -84,7 +85,89 @@ const employeeToClient = (employee: any) => ({
   createdAt: employee.createdAt.toISOString(),
 });
 
-app.use(cors());
+// --------------------------------------------------------
+// SECURITY MIDDLEWARE
+// --------------------------------------------------------
+
+// SEC-FIX: Restrict CORS to known origins. Set WEB_APP_URL (comma-separated) in Railway.
+// Android native clients do not send an Origin header and are unaffected by CORS.
+const allowedOriginsRaw = process.env.WEB_APP_URL || process.env.APP_BASE_URL || 'http://localhost:5173';
+const allowedOrigins = allowedOriginsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests without Origin header (mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: Origin not allowed — ${origin}`));
+    },
+    credentials: true,
+  })
+);
+
+// SEC-FIX: Add security headers via helmet.
+// contentSecurityPolicy is disabled because the SPA uses inline styles from Vite/Tailwind;
+// configure it with a nonce in a future hardening phase.
+// crossOriginEmbedderPolicy is disabled because Razorpay checkout loads in an iframe.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+// --------------------------------------------------------
+// LEGACY AUTHENTICATION MIDDLEWARE
+// --------------------------------------------------------
+
+// SEC-FIX: All legacy /api/* routes (not /api/v1/*) must now require a valid JWT.
+// This middleware validates the Bearer token and enforces companyId isolation so
+// a user from Company A cannot read data from Company B by passing companyId=B.
+type LegacyAuthRequest = Request & { legacyAuth?: { id: string; companyId: string; role: string } };
+
+const legacyJwtAuth = async (req: LegacyAuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const raw = req.header('authorization');
+    if (!raw?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required. Please sign in via the application.' });
+    }
+    const jwtSecret = process.env.JWT_ACCESS_SECRET;
+    if (!jwtSecret || jwtSecret.length < 32) {
+      return res.status(500).json({ error: 'Server configuration error.' });
+    }
+    const payload = jwt.verify(raw.slice(7), jwtSecret, {
+      issuer: process.env.JWT_ISSUER || 'orbithr-api',
+      audience: 'orbithr-clients',
+    }) as jwt.JwtPayload;
+
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.tokenVersion !== payload.tokenVersion) {
+      return res.status(401).json({ error: 'Session is no longer valid. Please sign in again.' });
+    }
+
+    // Enforce companyId isolation — callers may pass companyId via query, body, or params.
+    const reqCompanyId = String(
+      req.query.companyId ?? (req.body as Record<string, unknown>)?.companyId ?? req.params?.companyId ?? ''
+    );
+    if (reqCompanyId && reqCompanyId !== user.companyId && user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Cross-company access is not permitted.' });
+    }
+
+    req.legacyAuth = { id: user.id, companyId: user.companyId, role: user.role };
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Access token is invalid or expired.' });
+  }
+};
+
+// Restrict an endpoint to SUPER_ADMIN only (used for GET /api/companies).
+const requireSuperAdmin = (req: LegacyAuthRequest, res: Response, next: NextFunction) => {
+  const auth = req.legacyAuth;
+  if (!auth || auth.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ error: 'Super administrator access required.' });
+  }
+  next();
+};
 app.use(express.json({
   limit: '1mb',
   verify: (req: any, _res, buf) => {
@@ -117,43 +200,14 @@ app.get('/api/health', async (_req, res) => {
 // --------------------------------------------------------
 // AUTHENTICATION & COMPANY REGISTRATION
 // --------------------------------------------------------
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
 
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      include: { company: true, employee: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: 'User account not found' });
-    }
-
-    const settings = await prisma.companySettings.update({
-      where: { companyId: user.companyId },
-      data: { currency: 'INR', currencySymbol: '₹', timezone: 'Asia/Kolkata' },
-    });
-
-    // Log login audit
-    await prisma.auditLog.create({
-      data: {
-        companyId: user.companyId,
-        userId: user.id,
-        userName: user.fullName,
-        userRole: user.role,
-        action: 'USER_LOGIN',
-        category: 'AUTH',
-        details: `User ${user.fullName} logged into workspace.`,
-        ipAddress: req.ip || '127.0.0.1',
-      },
-    });
-
-    res.json({ user: { ...user, employeeId: user.employee?.id }, company: user.company, settings });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+// SEC-FIX: The legacy passwordless login endpoint is retired.
+// It returned a full user+company object for any valid email without verifying a password.
+// All clients must use POST /api/v1/auth/login which requires email + password.
+app.post('/api/auth/login', (_req, res) => {
+  res.status(410).json({
+    error: 'This endpoint has been retired. Use POST /api/v1/auth/login with your email and password.',
+  });
 });
 
 app.post('/api/auth/register-company', async (req, res) => {
@@ -290,14 +344,17 @@ app.post('/api/auth/register-company', async (req, res) => {
 
     res.json({ company, user: adminUser, settings, checkout, subscription: companySubscription });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[REGISTER_COMPANY_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'Company registration failed. Please try again or contact support.' });
   }
 });
 
 // --------------------------------------------------------
 // COMPANIES & WORKSPACES
 // --------------------------------------------------------
-app.get('/api/companies', async (_req, res) => {
+// SEC-FIX: GET /api/companies returned ALL tenants with ALL users to any unauthenticated caller.
+// Now requires a valid JWT AND SUPER_ADMIN role.
+app.get('/api/companies', legacyJwtAuth, requireSuperAdmin, async (_req, res) => {
   try {
     const companies = await prisma.company.findMany({
       orderBy: { createdAt: 'desc' },
@@ -305,14 +362,16 @@ app.get('/api/companies', async (_req, res) => {
     });
     res.json(companies);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_COMPANIES_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // EMPLOYEES
 // --------------------------------------------------------
-app.get('/api/employees', async (req, res) => {
+// SEC-FIX: Both GET and POST were fully unauthenticated.
+app.get('/api/employees', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     if (!companyId) return res.status(400).json({ error: 'companyId query required' });
@@ -324,11 +383,13 @@ app.get('/api/employees', async (req, res) => {
     });
     res.json(employees.map(employeeToClient));
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_EMPLOYEES_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/employees', async (req, res) => {
+// SEC-FIX: POST /api/employees was unauthenticated — anyone could create employees in any company.
+app.post('/api/employees', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const { id, companyId, salary = {}, bankDetails = {}, emergencyContact = {}, departmentCode, designationTitle } = data;
@@ -460,7 +521,8 @@ app.post('/api/employees', async (req, res) => {
 
     res.json(employeeToClient(employee));
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_EMPLOYEE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -486,14 +548,16 @@ app.delete('/api/employees/:id', requireAttendanceAdmin, async (req: AttendanceA
     }
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[DELETE_EMPLOYEE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // DEPARTMENTS & DESIGNATIONS
 // --------------------------------------------------------
-app.get('/api/departments', async (req, res) => {
+// SEC-FIX: All department/designation reads and writes were unauthenticated.
+app.get('/api/departments', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     if (!companyId) return res.status(400).json({ error: 'companyId query required' });
@@ -504,32 +568,34 @@ app.get('/api/departments', async (req, res) => {
     });
     res.json(departments);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_DEPARTMENTS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/departments', async (req, res) => {
+app.post('/api/departments', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const data = req.body;
+    const data = req.body || {};
     const { id, companyId, ...rest } = data;
 
     const dept = id && !id.startsWith('dept-')
       ? await prisma.department.upsert({
           where: { id },
-          update: rest,
-          create: { id, companyId, ...rest },
+          update: rest as any,
+          create: { id, companyId, ...rest } as any,
         })
       : await prisma.department.create({
-          data: { companyId, ...rest },
+          data: { companyId, ...rest } as any,
         });
 
     res.json(dept);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_DEPARTMENT_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/designations', async (req, res) => {
+app.get('/api/designations', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     if (!companyId) return res.status(400).json({ error: 'companyId query required' });
@@ -540,35 +606,38 @@ app.get('/api/designations', async (req, res) => {
     });
     res.json(designations);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_DESIGNATIONS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/designations', async (req, res) => {
+app.post('/api/designations', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const data = req.body;
+    const data = req.body || {};
     const { id, companyId, ...rest } = data;
 
     const desig = id && !id.startsWith('desig-')
       ? await prisma.designation.upsert({
           where: { id },
-          update: rest,
-          create: { id, companyId, ...rest },
+          update: rest as any,
+          create: { id, companyId, ...rest } as any,
         })
       : await prisma.designation.create({
-          data: { companyId, ...rest },
+          data: { companyId, ...rest } as any,
         });
 
     res.json(desig);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_DESIGNATION_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // ATTENDANCE MATRIX & ADJUSTMENTS
 // --------------------------------------------------------
-app.get('/api/attendance', async (req, res) => {
+// SEC-FIX: GET /api/attendance was unauthenticated; anyone with a companyId could read all attendance.
+app.get('/api/attendance', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     if (!companyId) return res.status(400).json({ error: 'companyId query required' });
@@ -579,7 +648,8 @@ app.get('/api/attendance', async (req, res) => {
     });
     res.json(records);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_ATTENDANCE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -632,7 +702,8 @@ app.post('/api/attendance', requireAttendanceAdmin, async (req: AttendanceAdminR
 
     res.json(record);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_ATTENDANCE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -697,7 +768,8 @@ app.post('/api/attendance/bulk', requireAttendanceAdmin, async (req: AttendanceA
 
     res.json({ count: results.length });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[BULK_ATTENDANCE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -710,7 +782,10 @@ app.post('/api/attendance/mobile-verify', (_req, res) => {
 // --------------------------------------------------------
 // LEAVES
 // --------------------------------------------------------
-app.get('/api/leaves/types', async (req, res) => {
+// SEC-FIX: GET leave types, requests, and all write operations were unauthenticated.
+// POST /api/leaves/types and DELETE /api/leaves/types/:id used body-param authorization (SEC-16)
+// — a caller could send any userId in the body. Now enforced via JWT + legacyJwtAuth.
+app.get('/api/leaves/types', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const normalizedCompanyId = String(companyId);
@@ -720,15 +795,18 @@ app.get('/api/leaves/types', async (req, res) => {
 
     res.json(types);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_LEAVE_TYPES_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/leaves/types', async (req, res) => {
+app.post('/api/leaves/types', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const { id, companyId, name, code, daysAllowedPerYear, isPaid, color, adminUserId } = req.body;
-    const admin = await prisma.user.findFirst({ where: { id: adminUserId, companyId } });
-    if (!admin || (admin.role !== 'COMPANY_ADMIN' && admin.role !== 'SUPER_ADMIN')) {
+    const { id, companyId, name, code, daysAllowedPerYear, isPaid, color } = req.body;
+    // SEC-FIX: Authorization is now enforced by legacyJwtAuth JWT + role check,
+    // not by a user-supplied adminUserId body parameter.
+    const callerRole = req.legacyAuth!.role;
+    if (callerRole !== 'COMPANY_ADMIN' && callerRole !== 'SUPER_ADMIN' && callerRole !== 'HR_MANAGER') {
       return res.status(403).json({ error: 'Only Company Admin can manage leave categories' });
     }
     if (!name?.trim() || !code?.trim()) return res.status(400).json({ error: 'Name and code are required' });
@@ -747,17 +825,19 @@ app.post('/api/leaves/types', async (req, res) => {
     res.json(leaveType);
   } catch (error: any) {
     if (error.code === 'P2002') return res.status(409).json({ error: 'This leave code already exists' });
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_LEAVE_TYPE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.delete('/api/leaves/types/:id', async (req, res) => {
+app.delete('/api/leaves/types/:id', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const leaveType = await prisma.leaveType.findUnique({ where: { id } });
     if (!leaveType) return res.status(404).json({ error: 'Leave category not found' });
-    const admin = await prisma.user.findFirst({ where: { id: req.body.adminUserId, companyId: leaveType.companyId } });
-    if (!admin || (admin.role !== 'COMPANY_ADMIN' && admin.role !== 'SUPER_ADMIN')) {
+    // SEC-FIX: Authorization enforced via JWT role, not body-param adminUserId.
+    const callerRole = req.legacyAuth!.role;
+    if (callerRole !== 'COMPANY_ADMIN' && callerRole !== 'SUPER_ADMIN') {
       return res.status(403).json({ error: 'Only Company Admin can manage leave categories' });
     }
     const usageCount = await prisma.leaveRequest.count({ where: { leaveTypeId: id } });
@@ -765,11 +845,12 @@ app.delete('/api/leaves/types/:id', async (req, res) => {
     await prisma.leaveType.delete({ where: { id } });
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[DELETE_LEAVE_TYPE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/leaves/requests', async (req, res) => {
+app.get('/api/leaves/requests', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const requests = await prisma.leaveRequest.findMany({
@@ -779,11 +860,12 @@ app.get('/api/leaves/requests', async (req, res) => {
     });
     res.json(requests);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_LEAVE_REQUESTS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/leaves/apply', async (req, res) => {
+app.post('/api/leaves/apply', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const employee = await prisma.employee.findFirst({ where: { id: data.employeeId, companyId: data.companyId } });
@@ -802,11 +884,12 @@ app.post('/api/leaves/apply', async (req, res) => {
     });
     res.json(request);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[APPLY_LEAVE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/leaves/review', async (req, res) => {
+app.post('/api/leaves/review', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { id, status, approvedBy, reviewerComment, reviewerUserId } = req.body;
     const pendingRequest = await prisma.leaveRequest.findUnique({
@@ -842,14 +925,16 @@ app.post('/api/leaves/review', async (req, res) => {
     });
     res.json(request);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[REVIEW_LEAVE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // PAYROLL & PAYSLIPS
 // --------------------------------------------------------
-app.get('/api/payroll/runs', async (req, res) => {
+// SEC-FIX: GET payroll runs and payslips were unauthenticated — exposes salary data.
+app.get('/api/payroll/runs', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const runs = await prisma.payrollRun.findMany({
@@ -858,11 +943,12 @@ app.get('/api/payroll/runs', async (req, res) => {
     });
     res.json(runs);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_PAYROLL_RUNS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/payroll/payslips', async (req, res) => {
+app.get('/api/payroll/payslips', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const payslips = await prisma.payslip.findMany({
@@ -872,7 +958,8 @@ app.get('/api/payroll/payslips', async (req, res) => {
     });
     res.json(payslips);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_PAYSLIPS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -968,14 +1055,16 @@ app.post('/api/payroll/generate', requireAttendanceAdmin, async (req: Attendance
 
     res.json({ run, count: payslipsData.length });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GENERATE_PAYROLL_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // RECRUITMENT ATS
 // --------------------------------------------------------
-app.get('/api/recruitment/jobs', async (req, res) => {
+// SEC-FIX: All recruitment endpoints were unauthenticated.
+app.get('/api/recruitment/jobs', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const jobs = await prisma.jobPosting.findMany({
@@ -984,11 +1073,12 @@ app.get('/api/recruitment/jobs', async (req, res) => {
     });
     res.json(jobs);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_JOBS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/recruitment/jobs', async (req, res) => {
+app.post('/api/recruitment/jobs', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const job = await prisma.jobPosting.create({
@@ -1006,11 +1096,12 @@ app.post('/api/recruitment/jobs', async (req, res) => {
     });
     res.json(job);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_JOB_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/recruitment/applicants', async (req, res) => {
+app.get('/api/recruitment/applicants', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const applicants = await prisma.jobApplicant.findMany({
@@ -1019,11 +1110,12 @@ app.get('/api/recruitment/applicants', async (req, res) => {
     });
     res.json(applicants);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_APPLICANTS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/recruitment/applicants/advance', async (req, res) => {
+app.post('/api/recruitment/applicants/advance', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { id, stage } = req.body;
     const updated = await prisma.jobApplicant.update({
@@ -1032,14 +1124,16 @@ app.post('/api/recruitment/applicants/advance', async (req, res) => {
     });
     res.json(updated);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[ADVANCE_APPLICANT_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // PERFORMANCE GOALS
 // --------------------------------------------------------
-app.get('/api/performance/goals', async (req, res) => {
+// SEC-FIX: All performance endpoints were unauthenticated.
+app.get('/api/performance/goals', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const goals = await prisma.performanceGoal.findMany({
@@ -1049,11 +1143,12 @@ app.get('/api/performance/goals', async (req, res) => {
     });
     res.json(goals);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_GOALS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/performance/goals', async (req, res) => {
+app.post('/api/performance/goals', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const goal = data.id && !data.id.startsWith('goal-')
@@ -1082,14 +1177,16 @@ app.post('/api/performance/goals', async (req, res) => {
         });
     res.json(goal);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_GOAL_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // ASSETS, DOCUMENTS, HOLIDAYS, ANNOUNCEMENTS, EXPENSES
 // --------------------------------------------------------
-app.get('/api/assets', async (req, res) => {
+// SEC-FIX: All these endpoints were unauthenticated.
+app.get('/api/assets', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const assets = await prisma.asset.findMany({
@@ -1098,11 +1195,12 @@ app.get('/api/assets', async (req, res) => {
     });
     res.json(assets);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_ASSETS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/assets', async (req, res) => {
+app.post('/api/assets', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const asset = await prisma.asset.create({
@@ -1121,11 +1219,12 @@ app.post('/api/assets', async (req, res) => {
     });
     res.json(asset);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_ASSET_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/documents', async (req, res) => {
+app.get('/api/documents', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const docs = await prisma.companyDocument.findMany({
@@ -1134,11 +1233,12 @@ app.get('/api/documents', async (req, res) => {
     });
     res.json(docs);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_DOCUMENTS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/documents', async (req, res) => {
+app.post('/api/documents', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const doc = await prisma.companyDocument.create({
@@ -1153,11 +1253,12 @@ app.post('/api/documents', async (req, res) => {
     });
     res.json(doc);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_DOCUMENT_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/holidays', async (req, res) => {
+app.get('/api/holidays', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const holidays = await prisma.holiday.findMany({
@@ -1166,11 +1267,12 @@ app.get('/api/holidays', async (req, res) => {
     });
     res.json(holidays);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_HOLIDAYS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/holidays', async (req, res) => {
+app.post('/api/holidays', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const hol = await prisma.holiday.create({
@@ -1183,11 +1285,12 @@ app.post('/api/holidays', async (req, res) => {
     });
     res.json(hol);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_HOLIDAY_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/announcements', async (req, res) => {
+app.get('/api/announcements', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const announcements = await prisma.announcement.findMany({
@@ -1196,11 +1299,12 @@ app.get('/api/announcements', async (req, res) => {
     });
     res.json(announcements);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_ANNOUNCEMENTS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/announcements', async (req, res) => {
+app.post('/api/announcements', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const anc = await prisma.announcement.create({
@@ -1215,11 +1319,12 @@ app.post('/api/announcements', async (req, res) => {
     });
     res.json(anc);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_ANNOUNCEMENT_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/expenses', async (req, res) => {
+app.get('/api/expenses', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const expenses = await prisma.expenseClaim.findMany({
@@ -1229,11 +1334,12 @@ app.get('/api/expenses', async (req, res) => {
     });
     res.json(expenses);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_EXPENSES_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/expenses', async (req, res) => {
+app.post('/api/expenses', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const exp = await prisma.expenseClaim.create({
@@ -1251,11 +1357,12 @@ app.post('/api/expenses', async (req, res) => {
     });
     res.json(exp);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[SAVE_EXPENSE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/expenses/review', async (req, res) => {
+app.post('/api/expenses/review', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { id, status } = req.body;
     const exp = await prisma.expenseClaim.update({
@@ -1264,14 +1371,17 @@ app.post('/api/expenses/review', async (req, res) => {
     });
     res.json(exp);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[REVIEW_EXPENSE_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
 // --------------------------------------------------------
 // AUDIT LOGS & SETTINGS
 // --------------------------------------------------------
-app.get('/api/audit-logs', async (req, res) => {
+// SEC-FIX: GET and POST audit-logs were unauthenticated (anyone could read/write audit trail).
+// GET and PUT settings were unauthenticated (anyone could overwrite company configuration).
+app.get('/api/audit-logs', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const { companyId } = req.query;
     const logs = await prisma.auditLog.findMany({
@@ -1281,11 +1391,12 @@ app.get('/api/audit-logs', async (req, res) => {
     });
     res.json(logs);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_AUDIT_LOGS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.post('/api/audit-logs', async (req, res) => {
+app.post('/api/audit-logs', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
     const data = req.body;
     const log = await prisma.auditLog.create({
@@ -1302,24 +1413,26 @@ app.post('/api/audit-logs', async (req, res) => {
     });
     res.json(log);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[POST_AUDIT_LOG_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.get('/api/settings/:companyId', async (req, res) => {
+app.get('/api/settings/:companyId', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const { companyId } = req.params;
+    const companyId = String(req.params.companyId);
     const settings = await prisma.companySettings.findUnique({ where: { companyId } });
     if (!settings) return res.status(404).json({ error: 'Company settings not found' });
     res.json(settings);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[GET_SETTINGS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
-app.put('/api/settings/:companyId', async (req, res) => {
+app.put('/api/settings/:companyId', legacyJwtAuth, async (req: LegacyAuthRequest, res) => {
   try {
-    const { companyId } = req.params;
+    const companyId = String(req.params.companyId);
     const data = req.body;
     const settings = await prisma.companySettings.upsert({
       where: { companyId },
@@ -1328,7 +1441,8 @@ app.put('/api/settings/:companyId', async (req, res) => {
     });
     res.json(settings);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('[PUT_SETTINGS_ERROR]', error?.message || error);
+    res.status(500).json({ error: 'An internal server error occurred. Please try again.' });
   }
 });
 
@@ -1407,4 +1521,8 @@ const startServer = async () => {
   }
 };
 
-void startServer();
+export { app, prisma };
+
+if (process.env.NODE_ENV !== 'test') {
+  void startServer();
+}

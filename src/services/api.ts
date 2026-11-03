@@ -59,6 +59,11 @@ async function renewAccessToken(): Promise<string> {
 async function fetchJSON<T>(url: string, options?: RequestInit, retryAuth = true): Promise<T> {
   const requestHeaders = new Headers(options?.headers);
   if (!requestHeaders.has('Content-Type') && !(options?.body instanceof FormData)) requestHeaders.set('Content-Type', 'application/json');
+  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+  const isAuthOrPublic = url.endsWith('/auth/login') || url.endsWith('/auth/refresh') || url.endsWith('/auth/register-company') || url.endsWith('/health');
+  if (token && !requestHeaders.has('Authorization') && !isAuthOrPublic) {
+    requestHeaders.set('Authorization', `Bearer ${token}`);
+  }
   const res = await fetch(url, {
     ...options,
     headers: requestHeaders,
@@ -104,11 +109,10 @@ export const api = {
   checkHealth: () => fetchJSON<{ status: string; database: string }>(`${API_BASE}/health`),
 
   // Auth
-  login: (email: string) => 
-    fetchJSON<{ user: User; company: Company; settings: CompanySettings }>(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    }),
+  // DEPRECATED: Passwordless legacy login endpoint (/api/auth/login) has been retired.
+  // Use loginV1 with email, password, and optional mfaCode.
+  login: (_email: string) => 
+    Promise.reject(new Error('Passwordless login has been retired. Please sign in with email and password.')),
   loginV1: async (email: string, password: string, mfaCode?: string) => {
     const result = await fetchJSON<ApiEnvelope<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>>(`${API_BASE}/v1/auth/login`, {
       method: 'POST', body: JSON.stringify({ email, password, deviceName: 'OrbitHR Web', mfaCode: mfaCode || undefined }),

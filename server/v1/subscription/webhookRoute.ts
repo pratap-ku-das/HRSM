@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { processRazorpayWebhook } from './subscriptionManager.js';
+import { razorpayService } from './razorpayClient.js';
 
 export function createRazorpayWebhookRouter(prisma: PrismaClient) {
   const router = Router();
@@ -15,7 +16,15 @@ export function createRazorpayWebhookRouter(prisma: PrismaClient) {
     // Extract raw body
     const rawBody = (req as any).rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
-    if (!signature && process.env.RAZORPAY_WEBHOOK_SECRET) {
+    const webhookSecret = razorpayService.getWebhookSecret() || process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    // SEC-FIX: Fail CLOSED — require both a configured secret AND a signature.
+    // In production, reject unconfigured webhooks with 503.
+    if (!webhookSecret && process.env.NODE_ENV === 'production') {
+      console.error('[RAZORPAY_WEBHOOK_ERROR] RAZORPAY_WEBHOOK_SECRET is not configured — rejecting webhook.');
+      return res.status(503).json({ error: 'Webhook endpoint is not configured on this server.' });
+    }
+    if (!signature) {
       return res.status(400).json({ error: 'Missing x-razorpay-signature header' });
     }
 
